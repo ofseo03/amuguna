@@ -103,6 +103,8 @@ def _report_to_json(report) -> dict:
             "field_hits": dict(parse.field_hits),
             "methods": dict(parse.methods),
             "needs_review": parse.needs_review,
+            "review_reasons": dict(parse.review_reasons),
+            "status_needs_review": parse.blocked,
             "with_extra_conditions": parse.with_extra_conditions,
             "mean_confidence": round(parse.mean_confidence, 4),
         },

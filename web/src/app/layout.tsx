@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
+import { FONT_SIZE_BOOTSTRAP } from "@/lib/font-size-store";
 
 export const metadata: Metadata = {
   title: {
@@ -24,6 +25,10 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="ko">
+      <head>
+        {/* 저장된 글자 크기를 페인트 전에 적용해 깜빡임을 없앤다 (§8 접근성) */}
+        <script dangerouslySetInnerHTML={{ __html: FONT_SIZE_BOOTSTRAP }} />
+      </head>
       <body className="flex min-h-screen flex-col bg-bg">
         <a href="#main" className="skip-link">
           본문 바로가기

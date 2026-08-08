@@ -97,11 +97,25 @@ class EligibilityRules:
     parse_method: str = "regex"  # regex | llm | mixed
     parse_evidence: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.0
-    needs_review: bool = False  # programs.status 로 승격됨 (§6.2)
+
+    # -- 이하 두 필드는 eligibility_rules 컬럼이 아니다 (파이프라인 내부 신호) --
+    needs_review: bool = False
+    review_reason: str | None = None
+
+    #: 이 사유들만 programs.status = 'needs_review' 로 승격한다.
+    #: LLM이 아예 설정되지 않은 상태(llm_unavailable)는 '이 공고의 문제'가 아니라
+    #: 배치 구성의 문제다. 이걸로 전 건을 비활성화하면 'NULL = 통과'(SPEC §7.3)
+    #: 원칙이 무너지고 서비스가 통째로 빈 결과를 낸다.
+    BLOCKING_REVIEW_REASONS = ("llm_failed", "llm_validation_rejected")
+
+    @property
+    def blocks_activation(self) -> bool:
+        return self.review_reason in self.BLOCKING_REVIEW_REASONS
 
     def to_row(self) -> dict[str, Any]:
         row = asdict(self)
         row.pop("needs_review")
+        row.pop("review_reason")
         return row
 
     def filled_fields(self) -> list[str]:

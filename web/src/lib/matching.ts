@@ -22,6 +22,7 @@ import {
 import { getSql, isDbConfigured } from "./db";
 import { demoEmbeddingIndex, demoPrograms } from "./demo-store";
 import { scoreProgram } from "./scoring";
+import { FORMS } from "./forms";
 import type {
   MatchCard,
   MatchResponse,
@@ -51,16 +52,6 @@ const TOPK_EXPANDED = 500;
  */
 const DEMO_B_RELATIVE = 0.45;
 const DEMO_B_ABS_FLOOR = 0.1;
-
-export const FORMS: ProgramForm[] = ["subsidy", "loan", "tax", "product", "law"];
-
-export const FORM_LABEL: Record<ProgramForm, string> = {
-  subsidy: "지원금",
-  loan: "대출",
-  tax: "세금",
-  product: "금융상품",
-  law: "법령",
-};
 
 export interface MatchInput {
   profile: Profile;

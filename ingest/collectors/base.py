@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 from ..config import FIXTURES_DIR, Settings
 from ..models import CollectedProgram
@@ -193,14 +193,3 @@ def parse_amount(text: str) -> tuple[int | None, int | None]:
             return values[0], None
         return values[0], values[0]
     return min(values), max(values)
-
-
-def dedupe(programs: Iterable[CollectedProgram]) -> list[CollectedProgram]:
-    seen: set[str] = set()
-    out: list[CollectedProgram] = []
-    for program in programs:
-        if program.external_id in seen:
-            continue
-        seen.add(program.external_id)
-        out.append(program)
-    return out

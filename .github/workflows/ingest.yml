@@ -1,0 +1,140 @@
+# amuguna 수집 배치 (SPEC §3.2)
+#
+# * 1일 1회 심야 배치. 사용자 요청 경로는 DB만 조회하므로 이 워크플로가 유일한 외부 호출 지점이다.
+# * 주 1회(일요일) 전량 대조로 원본에서 조용히 내려간 상시 공고를 expired 처리한다.
+#
+# 시간대: GitHub cron 은 **UTC**다. KST = UTC+9 이므로 심야 KST 는 전날 18:xx UTC.
+#   '20 18 * * *'  → 매일 KST 03:20   (일일 증분)
+#   '40 19 * * 6'  → 토요일 19:40 UTC = **일요일 KST 04:40** (전량 대조)
+# 스케줄러가 정시에 뜨지 않고 밀리는 경우가 흔하므로 두 잡을 80분 벌려 두었다.
+
+name: ingest
+
+on:
+  schedule:
+    - cron: "20 18 * * *"
+    - cron: "40 19 * * 6"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "실행 모드"
+        type: choice
+        default: incremental
+        options: [incremental, reconcile, fixtures-dry-run]
+      source:
+        description: "특정 소스만 (social_security | bizinfo | finlife). 비우면 전체"
+        type: string
+        default: ""
+
+# 배치가 겹쳐 돌면 같은 external_id 에 raw_documents 가 중복으로 쌓인다.
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------- 일일 증분
+  daily:
+    name: 일일 증분 수집 (KST 03:20)
+    if: >-
+      github.event.schedule == '20 18 * * *' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode != 'reconcile')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ingest/requirements*.txt
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ingest/requirements.txt
+
+      - name: 파서 회귀 테스트 (SPEC §10)
+        # 실패하면 적재를 시도하지 않는다 — 잘못 파싱된 자격요건이 DB에 들어가는 것보다
+        # 하루치 수집을 거르는 편이 싸다. 직전 성공 스냅샷은 그대로 서비스된다.
+        run: |
+          pip install pytest
+          python -m pytest ingest/tests -q
+
+      - name: 어제 날짜 계산 (증분 기준일)
+        id: since
+        run: echo "date=$(date -u -d 'yesterday' +%F)" >> "$GITHUB_OUTPUT"
+
+      - name: 픽스처 드라이런
+        if: github.event.inputs.mode == 'fixtures-dry-run'
+        run: python -m ingest --fixtures --dry-run --json-report ingest-report.json
+
+      - name: 증분 수집 실행
+        if: github.event.inputs.mode != 'fixtures-dry-run'
+        run: |
+          python -m ingest \
+            --since "${{ steps.since.outputs.date }}" \
+            ${{ github.event.inputs.source && format('--source {0}', github.event.inputs.source) || '' }} \
+            --json-report ingest-report.json
+
+      - name: 수집 상태 리포트 보관 (SPEC §10)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingest-report-daily-${{ github.run_id }}
+          path: ingest-report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ------------------------------------------------------------ 주간 전량 대조
+  weekly-reconcile:
+    name: 주간 전량 대조 (일요일 KST 04:40)
+    if: >-
+      github.event.schedule == '40 19 * * 6' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'reconcile')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
+      EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: ingest/requirements*.txt
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ingest/requirements.txt
+
+      - name: 전량 대조 실행
+        # --since 를 주지 않아 전량을 받는다. 대조 자체는 ID 목록만 쓰므로
+        # 상세 조회 호출이 추가로 들지 않는다 (SPEC §3.2).
+        run: python -m ingest --weekly-reconcile --json-report ingest-report.json
+
+      - name: 수집 상태 리포트 보관
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ingest-report-weekly-${{ github.run_id }}
+          path: ingest-report.json
+          if-no-files-found: warn
+          retention-days: 90

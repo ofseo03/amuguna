@@ -66,7 +66,9 @@ SYSTEM_PROMPT = f"""너는 한국 공공 지원사업 공고를 카드 한 장 �
 @dataclass
 class CardCopy:
     summary: str
-    apply_steps: list[dict[str, Any]]  # jsonb: [{"step": 1, "text": "..."}, ...]
+    #: jsonb 배열 — **문자열 3개**. db/migrations/0001_init.sql 의 apply_steps 주석과
+    #: web/src/lib/types.ts (`apply_steps: string[]`) 가 정한 교차팀 계약이다.
+    apply_steps: list[str]
     method: str  # 'llm' | 'mock'
 
 
@@ -91,11 +93,8 @@ def truncate(text: str, limit: int = SUMMARY_MAX_CHARS) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
-def _as_steps(texts: list[str]) -> list[dict[str, Any]]:
-    return [
-        {"step": i + 1, "text": truncate(t, STEP_MAX_CHARS)}
-        for i, t in enumerate(texts[:STEP_COUNT])
-    ]
+def _as_steps(texts: list[str]) -> list[str]:
+    return [truncate(t, STEP_MAX_CHARS) for t in texts[:STEP_COUNT]]
 
 
 def mock_card_copy(program: Any) -> CardCopy:

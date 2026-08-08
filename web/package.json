@@ -1,12 +1,16 @@
 {
-  "name": "web",
+  "name": "amuguna-web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/copy-shared.mjs",
     "dev": "next dev",
+    "prebuild": "node scripts/copy-shared.mjs",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "sync:shared": "node scripts/copy-shared.mjs"
   },
   "dependencies": {
     "next": "16.3.0",

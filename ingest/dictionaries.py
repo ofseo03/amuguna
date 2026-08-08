@@ -227,11 +227,26 @@ OCCUPATION_BLOCKERS = (
     "농업기술센터",
     "무직자대출",  # 상품명
     "학생증",
+    "중소기업",  # '중소기업' 안의 '소기업'이 self_employed 로 잡히는 것 방지
+    "여성기업",  # 기업 속성이지 신청자 직업이 아니다
+    "상시근로자",  # '상시근로자 5인 미만' = 규모 조건이지 직업 조건이 아니다
 )
 
 #: 뒤따르면 '제3자(부양가족)의 속성'임을 뜻하는 표현 — 신청자 조건이 아니다 (§6.3 함정).
-DEPENDENT_VERBS = ("모시", "부양", "양육", "돌보", "를 둔", "을 둔", "둔 가구", "동거하는")
+DEPENDENT_VERBS = ("모시", "부양", "양육", "돌보", "를 둔", "을 둔", "둔 가구", "동거하는", "포함된")
 DEPENDENT_NOUNS = ("자녀", "아동", "손자녀", "가구원", "세대원", "피부양")
+
+#: 같은 문장 안에서 뒤따르면 '제외 대상'이라는 뜻 — 조건으로 삼으면 부호가 뒤집힌다.
+EXCLUSION_MARKERS = ("제외", "불가", "해당하지 않", "신청할 수 없", "지원하지 않")
+
+#: 나이를 가리키는 말이지 직업이 아니다. shared 사전은 이들을 retired 동의어로 두지만,
+#: 같은 문장이 이미 나이 조건을 준 경우 직업 조건까지 걸면 '67세 무직' 사용자가
+#: 기초연금에서 잘못 탈락한다 (SPEC §7.3 '누락이 오탐보다 비싸다'의 반대 방향 사고).
+AGE_DESCRIPTOR_SYNONYMS = ("어르신", "노인", "청소년")
+
+#: 이 표현이 있으면 사실상 '누구나'라 직업 조건을 걸지 않는다.
+#: 예) '실명의 개인 및 개인사업자' 에 self_employed 를 걸면 사무직 사용자가 잘못 탈락한다.
+OPEN_TO_ALL_MARKERS = ("실명의 개인", "누구나", "제한 없음", "제한없음", "가입 제한 없")
 
 
 def _blocked(text: str, start: int, end: int, blockers: Iterable[str]) -> bool:
@@ -256,20 +271,50 @@ def has_dependent_context(text: str, start: int, end: int) -> str | None:
     return None
 
 
-def lookup_occupations(text: str) -> tuple[list[str], list[str]]:
-    """텍스트 → (직업코드 리스트, 근거 문자열 리스트)."""
+def has_exclusion_context(text: str, end: int, *, window: int = 40) -> str | None:
+    """**같은 문장 안에서** 뒤따르는 제외 표현을 찾는다.
+
+    문장을 넘어가면 안 된다 — "…어르신을 우선 선정합니다. 장기요양 등급판정자는 제외합니다."
+    에서 앞 문장의 '어르신'까지 제외 처리하면 조건이 통째로 사라진다.
+    """
+    tail = text[end : end + window]
+    for terminator in ("\n", ".", "。"):
+        cut = tail.find(terminator)
+        if cut != -1:
+            tail = tail[:cut]
+    for marker in EXCLUSION_MARKERS:
+        if marker in tail:
+            return marker
+    return None
+
+
+def lookup_occupations(
+    text: str, *, drop_age_descriptors: bool = False
+) -> tuple[list[str], list[str]]:
+    """텍스트 → (직업코드 리스트, 근거 문자열 리스트).
+
+    `drop_age_descriptors` 는 같은 문장에서 이미 나이 조건을 뽑았을 때 켠다.
+    '만 65세 이상 어르신'의 '어르신'까지 retired 로 걸면 조건이 이중으로 좁아진다.
+    """
     codes: list[str] = []
     evidence: list[str] = []
+    if any(marker in text for marker in OPEN_TO_ALL_MARKERS):
+        return codes, evidence
     idx = occupation_index()
     for m in _occupation_pattern().finditer(text):
+        word = m.group(0)
+        if drop_age_descriptors and word in AGE_DESCRIPTOR_SYNONYMS:
+            continue
         if _blocked(text, m.start(), m.end(), OCCUPATION_BLOCKERS):
             continue
         if has_dependent_context(text, m.start(), m.end()):
             continue
-        code = idx[m.group(0)]
+        if has_exclusion_context(text, m.end()):
+            continue
+        code = idx[word]
         if code not in codes:
             codes.append(code)
-            evidence.append(m.group(0))
+            evidence.append(word)
     return codes, evidence
 
 

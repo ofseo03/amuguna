@@ -155,6 +155,10 @@ class InMemoryDatabase:
         return self._by_external.get(external_id)
 
     def upsert_program(self, values: dict[str, Any]) -> int:
+        # 파이프라인이 넘기는 키가 SPEC §5 programs 컬럼과 어긋나면 여기서 즉시 터진다.
+        assert set(values) == set(PROGRAM_COLUMNS), (
+            f"programs 컬럼 불일치: {sorted(set(values) ^ set(PROGRAM_COLUMNS))}"
+        )
         external_id = values["external_id"]
         program_id = self._by_external.get(external_id)
         now = values.get("fetched_at") or utcnow()
@@ -181,6 +185,9 @@ class InMemoryDatabase:
     # -- eligibility_rules -----------------------------------------------
 
     def replace_rules(self, program_id: int, values: dict[str, Any]) -> None:
+        assert set(values) == set(RULE_COLUMNS), (
+            f"eligibility_rules 컬럼 불일치: {sorted(set(values) ^ set(RULE_COLUMNS))}"
+        )
         row = {"program_id": program_id}
         row.update(values)
         self.rules[program_id] = row
@@ -294,8 +301,12 @@ ON CONFLICT (program_id) DO UPDATE SET
 
 
 def to_pgvector(vector: Sequence[float]) -> str:
-    """pgvector 리터럴. psycopg 어댑터를 따로 등록하지 않아도 캐스팅으로 들어간다."""
-    return "[" + ",".join(f"{v:.8g}" for v in vector) + "]"
+    """pgvector 리터럴. psycopg 어댑터를 따로 등록하지 않아도 캐스팅으로 들어간다.
+
+    소수점 8자리 고정 — web/src/lib/embedding.ts 의 `toPgVectorLiteral`(toFixed(8))과
+    같은 표기를 쓴다.
+    """
+    return "[" + ",".join(f"{v:.8f}" for v in vector) + "]"
 
 
 class PostgresDatabase:

@@ -1,0 +1,350 @@
+"use client";
+
+/**
+ * 결과 화면 (SPEC §9 화면 3).
+ * 매칭 요약 배너 + form 탭 + 카드 리스트 + 근접탈락 + 완화 안내 + 페이지네이션(20건).
+ *
+ * 자유입력은 sessionStorage 에서만 읽어 /api/match 로 보낸다 — URL 이나 서버에 남기지 않는다 (§8).
+ * (form, page) 조합별로 응답을 캐시해 탭 전환 때마다 rate limit 을 소모하지 않게 한다.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import Link from "next/link";
+import { NearMissItem, ProgramCard } from "@/components/ProgramCard";
+import { Disclaimer } from "@/components/SiteChrome";
+import Term from "@/components/Term";
+import { FORMS, FORM_LABEL } from "@/lib/forms";
+import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
+import type { MatchResponse, ProgramForm } from "@/lib/types";
+
+type Tab = ProgramForm | "all";
+type Payload = MatchResponse & { ok: true };
+
+export default function ResultsPage() {
+  const [tab, setTab] = useState<Tab>("all");
+  const [page, setPage] = useState(1);
+  const [data, setData] = useState<Payload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<{ message: string; noProfile?: boolean } | null>(null);
+  const [query, setQuery] = useState<string | null>(null);
+
+  const cache = useRef(new Map<string, Payload>());
+
+  type Outcome =
+    | { kind: "ok"; payload: Payload }
+    | { kind: "error"; message: string; noProfile: boolean };
+
+  /**
+   * 순수 fetch — 상태를 건드리지 않고 결과만 돌려준다.
+   * 상태 갱신은 전부 호출부의 .then 안에서 일어나므로 effect 본문에서 동기 setState 가 없다.
+   */
+  const fetchMatch = useCallback(
+    (nextTab: Tab, nextPage: number, q: string | null): Promise<Outcome> => {
+      const key = `${nextTab}|${nextPage}`;
+      const hit = cache.current.get(key);
+      if (hit) return Promise.resolve({ kind: "ok", payload: hit });
+
+      return fetch("/api/match", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ query: q, form: nextTab, page: nextPage }),
+      })
+        .then(async (res) => {
+          const body = await res.json();
+          if (!res.ok || !body.ok) {
+            return {
+              kind: "error" as const,
+              message: body?.message ?? "결과를 불러오지 못했습니다.",
+              noProfile: body?.code === "no_profile",
+            };
+          }
+          cache.current.set(key, body as Payload);
+          return { kind: "ok" as const, payload: body as Payload };
+        })
+        .catch(() => ({
+          kind: "error" as const,
+          message: "네트워크 오류가 발생했습니다.",
+          noProfile: false,
+        }));
+    },
+    [],
+  );
+
+  const apply = useCallback((outcome: Outcome, q: string | null) => {
+    setQuery(q);
+    if (outcome.kind === "ok") {
+      setData(outcome.payload);
+      setError(null);
+    } else {
+      setError({ message: outcome.message, noProfile: outcome.noProfile });
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
+    const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
+    void fetchMatch("all", 1, q).then((o) => {
+      if (!cancelled) apply(o, q);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchMatch, apply]);
+
+  function navigate(nextTab: Tab, nextPage: number) {
+    setTab(nextTab);
+    setPage(nextPage);
+    setLoading(true);
+    void fetchMatch(nextTab, nextPage, query).then((o) => apply(o, query));
+  }
+
+  function changeTab(t: Tab) {
+    navigate(t, 1);
+  }
+
+  function changePage(p: number) {
+    navigate(tab, p);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  /* ----------------------------- 에러/로딩 ----------------------------- */
+
+  if (error?.noProfile) {
+    return (
+      <Shell>
+        <div className="rounded-xl border border-line bg-bg-soft p-8 text-center">
+          <h1 className="text-xl font-bold text-ink">먼저 기본 정보가 필요합니다</h1>
+          <p className="mt-2 text-ink-2">
+            나이·지역·소득 등 6단계를 입력하시면 결과를 보여드립니다.
+          </p>
+          <Link
+            href="/onboarding"
+            className="mt-6 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"
+          >
+            정보 입력하러 가기
+          </Link>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (error) {
+    return (
+      <Shell>
+        <div role="alert" className="rounded-xl border border-danger bg-danger-soft p-6">
+          <h1 className="font-bold text-danger">{error.message}</h1>
+          <button
+            type="button"
+            onClick={() => navigate(tab, page)}
+            className="mt-4 rounded-lg border-2 border-danger bg-white px-5 py-2 font-semibold text-danger"
+          >
+            다시 시도
+          </button>
+        </div>
+      </Shell>
+    );
+  }
+
+  if (loading && !data) {
+    return (
+      <Shell>
+        <p aria-live="polite" className="py-16 text-center text-lg text-ink-2">
+          내게 맞는 지원을 찾고 있습니다…
+        </p>
+      </Shell>
+    );
+  }
+
+  if (!data) return null;
+
+  const { summary, cards, nearMisses, relaxationNotice, totalPages, demoMode, degraded } = data;
+
+  return (
+    <Shell>
+      {/* ---------------- 매칭 요약 배너 ---------------- */}
+      <div className="rounded-xl border border-line bg-brand-soft px-5 py-4">
+        <h1 className="text-xl font-bold text-ink sm:text-2xl">
+          {summary.profileLabel}{" "}
+          <span className="text-brand-dark">{summary.total}건</span>
+        </h1>
+        {query && (
+          <p className="mt-1 text-ink-2">
+            찾으시는 것: <strong>&ldquo;{query}&rdquo;</strong>
+          </p>
+        )}
+        {!query && (
+          <p className="mt-1 text-ink-2">
+            찾으시는 것을 입력하지 않으셔서, 대상이 되는 지원을 모두 보여드립니다.
+          </p>
+        )}
+        <p className="mt-2 text-sm text-ink-3">
+          응답 {data.tookMs}ms · 자유입력은 저장되지 않습니다.
+        </p>
+      </div>
+
+      {demoMode && (
+        <p className="mt-3 rounded-lg border border-warn bg-warn-soft px-4 py-2 text-sm text-ink-2">
+          <strong className="text-warn">데모 모드</strong> — 번들 예시 데이터로
+          동작 중입니다.
+        </p>
+      )}
+
+      {degraded && (
+        <p className="mt-3 rounded-lg border border-warn bg-warn-soft px-4 py-2 text-sm text-ink-2">
+          검색 엔진 일부에 문제가 있어 자격 조건만으로 결과를 구성했습니다.
+        </p>
+      )}
+
+      {/* ---------------- §7.7 완화 안내 ---------------- */}
+      {relaxationNotice && (
+        <p
+          role="status"
+          className="mt-3 rounded-lg border border-brand bg-white px-4 py-3 text-ink-2"
+        >
+          <strong className="text-brand-dark">안내</strong> · {relaxationNotice}
+        </p>
+      )}
+
+      {/* ---------------- form 탭 ---------------- */}
+      <nav aria-label="분류별 좁혀보기" className="mt-6">
+        <p className="mb-2 text-sm text-ink-3">
+          결과를 분류별로 좁혀볼 수 있습니다.
+        </p>
+        <ul className="flex flex-wrap gap-2">
+          <TabButton
+            active={tab === "all"}
+            onClick={() => changeTab("all")}
+            label="전체"
+            count={FORMS.reduce((a, f) => a + summary.byForm[f], 0)}
+          />
+          {FORMS.map((f) => (
+            <TabButton
+              key={f}
+              active={tab === f}
+              onClick={() => changeTab(f)}
+              label={FORM_LABEL[f]}
+              count={summary.byForm[f]}
+              disabled={summary.byForm[f] === 0}
+            />
+          ))}
+        </ul>
+      </nav>
+
+      {/* ---------------- 카드 리스트 ---------------- */}
+      <section aria-label="매칭 결과" className="mt-6">
+        {cards.length === 0 ? (
+          <p className="rounded-xl border border-line bg-bg-soft p-8 text-center text-ink-2">
+            이 분류에는 해당하는 지원이 없습니다. 다른 탭을 확인해 보세요.
+          </p>
+        ) : (
+          <ul className="grid gap-4">
+            {cards.map((c) => (
+              <ProgramCard key={c.program.id} card={c} />
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* ---------------- 페이지네이션 ---------------- */}
+      {totalPages > 1 && (
+        <nav aria-label="결과 페이지" className="mt-8 flex items-center justify-center gap-2">
+          <button
+            type="button"
+            disabled={page <= 1}
+            onClick={() => changePage(page - 1)}
+            className="rounded-lg border-2 border-line bg-white px-4 py-2 font-semibold text-ink-2 disabled:text-ink-3 disabled:opacity-50"
+          >
+            ← 이전
+          </button>
+          <span aria-current="page" className="px-3 font-semibold text-ink">
+            {page} / {totalPages}
+          </span>
+          <button
+            type="button"
+            disabled={page >= totalPages}
+            onClick={() => changePage(page + 1)}
+            className="rounded-lg border-2 border-line bg-white px-4 py-2 font-semibold text-ink-2 disabled:text-ink-3 disabled:opacity-50"
+          >
+            다음 →
+          </button>
+        </nav>
+      )}
+
+      {/* ---------------- 근접 탈락 (§7.6) ---------------- */}
+      {nearMisses.length > 0 && (
+        <section aria-labelledby="nearmiss-heading" className="mt-12">
+          <h2 id="nearmiss-heading" className="text-xl font-bold text-ink">
+            조건이 하나만 어긋난 지원{" "}
+            <span className="text-ink-3">({nearMisses.length}건)</span>
+          </h2>
+          <p className="mt-1 text-ink-2">
+            지금은 대상이 아니지만, 아래 조건 하나만 달라지면 신청할 수 있습니다.{" "}
+            <Term name="근접탈락">근접탈락</Term>이라고 부릅니다.
+          </p>
+          <ul className="mt-4 grid gap-3">
+            {nearMisses.map((n) => (
+              <NearMissItem key={n.program.id} card={n} />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      <div className="mt-12 flex flex-wrap gap-3">
+        <Link
+          href="/onboarding"
+          className="rounded-lg border-2 border-line bg-white px-5 py-3 font-semibold text-ink-2 no-underline hover:bg-bg-sunken"
+        >
+          조건 다시 입력하기
+        </Link>
+        <Link
+          href="/subscribe"
+          className="rounded-lg bg-brand px-5 py-3 font-bold text-white no-underline hover:bg-brand-dark"
+        >
+          새 지원 나오면 알림 받기
+        </Link>
+      </div>
+
+      <div className="mt-8">
+        <Disclaimer />
+      </div>
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  return <div className="mx-auto max-w-4xl px-4 py-8">{children}</div>;
+}
+
+function TabButton({
+  active,
+  onClick,
+  label,
+  count,
+  disabled,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+  disabled?: boolean;
+}) {
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={disabled}
+        aria-current={active ? "true" : undefined}
+        className={`rounded-lg border-2 px-4 py-2 font-semibold transition-colors ${
+          active
+            ? "border-brand bg-brand text-white"
+            : "border-line bg-white text-ink-2 hover:border-ink-3"
+        } disabled:cursor-not-allowed disabled:border-line-soft disabled:bg-bg-soft disabled:text-ink-3`}
+      >
+        {label}{" "}
+        <span className={active ? "text-white/80" : "text-ink-3"}>{count}</span>
+      </button>
+    </li>
+  );
+}

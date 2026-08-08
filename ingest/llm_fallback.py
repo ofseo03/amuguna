@@ -242,15 +242,19 @@ def apply_fallback(
         return rules
 
     if llm is None or not llm.available:
-        # 키·패키지 없음 → 조용히 건너뛴다. 미추출 필드는 NULL(통과)로 남고
-        # 사람이 볼 수 있도록 needs_review 만 세운다.
+        # 키·패키지 없음 → 조용히 건너뛴다. 미추출 필드는 NULL(= 조건 없음 = 통과)로
+        # 남고 needs_review 로 표시만 한다. 이 사유는 status 를 막지 않는다
+        # (EligibilityRules.BLOCKING_REVIEW_REASONS 주석 참고).
         rules.needs_review = True
+        rules.review_reason = "llm_unavailable"
         rules.confidence = compute_confidence(rules)
         return rules
 
     payload = llm.extract(text, missing)
     if payload is None:
+        # 호출은 했는데 실패 — 이건 해당 건을 격리한다 (SPEC §8 신뢰성).
         rules.needs_review = True
+        rules.review_reason = "llm_failed"
         rules.confidence = compute_confidence(rules)
         return rules
 
@@ -269,8 +273,15 @@ def apply_fallback(
         }
         filled_any = True
 
-    if rejected or not filled_any:
+    if rejected:
+        # 스키마는 통과했지만 서버 재검증에서 걸렀다 → 해당 필드 NULL + 격리 (SPEC §6.2)
         rules.needs_review = True
+        rules.review_reason = "llm_validation_rejected"
+        rules.parse_evidence["_rejected_fields"] = rejected
+    elif not filled_any:
+        # LLM도 근거를 못 찾음. 조건이 정말 없을 수도 있으므로 격리하지 않는다.
+        rules.needs_review = True
+        rules.review_reason = "llm_no_fields"
 
     rules.parse_method = resolve_parse_method(rules.parse_evidence)
     rules.confidence = compute_confidence(rules)

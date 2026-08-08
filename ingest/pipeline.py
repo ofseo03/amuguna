@@ -58,6 +58,8 @@ class ParseStats:
     field_hits: Counter = field(default_factory=Counter)
     methods: Counter = field(default_factory=Counter)
     needs_review: int = 0
+    review_reasons: Counter = field(default_factory=Counter)
+    blocked: int = 0
     with_extra_conditions: int = 0
     confidence_sum: float = 0.0
 
@@ -69,6 +71,9 @@ class ParseStats:
         self.methods[rules.parse_method] += 1
         if rules.needs_review:
             self.needs_review += 1
+            self.review_reasons[rules.review_reason or "unknown"] += 1
+        if rules.blocks_activation:
+            self.blocked += 1
         if rules.extra_conditions:
             self.with_extra_conditions += 1
         self.confidence_sum += rules.confidence
@@ -164,16 +169,22 @@ class Pipeline:
             self.report.llm_parse_calls += self.llm.calls - before
         self.report.parse.record(rules)
 
+        # DB 계약: programs.body_text 는 '임베딩 입력 원본(자격요건 문단 포함)'이다.
+        # 저장한 것과 색인한 것이 어긋나면 나중에 재임베딩 결과가 달라진다.
+        body_text = program.embedding_source()
+
         card = self.summarizer.generate(program)
         self.report.llm_summary_calls = self.summarizer.calls
 
-        status = "needs_review" if rules.needs_review else "active"
+        # LLM 미설정만으로 status 를 내리지 않는다 — 그러면 키 없는 환경에서
+        # 전 건이 비활성이 되어 서비스가 빈 결과를 낸다 (SPEC §7.3 'NULL = 통과').
+        status = "needs_review" if rules.blocks_activation else "active"
         program_id = self.db.upsert_program(
             {
                 "external_id": program.external_id,
                 "raw_document_id": raw_id,
                 "title": program.title,
-                "body_text": program.body_text,
+                "body_text": body_text,
                 "summary": card.summary,
                 "apply_steps": card.apply_steps,
                 "form": program.form,
@@ -196,7 +207,7 @@ class Pipeline:
 
         # 재임베딩은 항상 '전체 삭제 후 재삽입' (청크 수가 줄어도 잔여 행 없게)
         result = self.embedder.embed_program(
-            title=program.title, summary=card.summary, body=program.embedding_source()
+            title=program.title, summary=card.summary, body=body_text
         )
         self.db.replace_embeddings(program_id, result.vectors)
         self.report.embeddings_written += 1
@@ -311,7 +322,9 @@ def render_report(report: RunReport) -> str:
         methods = ", ".join(f"{k}={v}" for k, v in sorted(parse.methods.items()))
         lines.append(f"  parse_method         {methods}")
         lines.append(f"  extra_conditions 보유 {parse.with_extra_conditions:>3}/{parse.parsed}")
-        lines.append(f"  needs_review         {parse.needs_review:>3}/{parse.parsed}")
+        reasons = ", ".join(f"{k}={v}" for k, v in sorted(parse.review_reasons.items())) or "-"
+        lines.append(f"  needs_review         {parse.needs_review:>3}/{parse.parsed}  ({reasons})")
+        lines.append(f"  status=needs_review  {parse.blocked:>3}/{parse.parsed}  (나머지는 active)")
         lines.append(f"  평균 confidence       {parse.mean_confidence:.3f}")
     else:
         lines.append("  (신규·수정 없음 — 파싱 호출 0회)")
@@ -341,9 +354,3 @@ def check_volume_drop(report: RunReport, previous: dict[str, int] | None) -> lis
         if before and stats.fetched < before * 0.5:
             warnings.append(f"{key}: 전일 {before}건 → 금일 {stats.fetched}건 (50% 이상 감소)")
     return warnings
-
-
-def iter_active_programs(db: Any) -> Iterable[dict[str, Any]]:
-    """InMemoryDatabase 점검용 헬퍼 (CLI 요약 출력에 쓴다)."""
-    programs = getattr(db, "programs", {})
-    return [row for row in programs.values() if row.get("status") != "expired"]

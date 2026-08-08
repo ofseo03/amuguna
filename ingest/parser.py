@@ -70,9 +70,18 @@ INCOME: Sequence[tuple[str, Handler]] = (
 )
 
 # --------------------------------------------------------------------- 성별
+# '여성' + 사람 명사만 성별 조건으로 본다. '여성기업'·'여성가족부'처럼
+# 기관·법인 속성에 붙은 '여성'을 신청자 성별로 읽으면 남성 신청자가 잘못 탈락한다.
+_PERSON_NOUNS = r"(?:청년|어르신|노인|농업인|어업인|소상공인|자영업자|장애인|가장|한부모|근로자|구직자|가구주)"
 GENDER: Sequence[tuple[str, Handler]] = (
-    (r"여성만|여성에\s*한(?:함|정)|여성으로\s*한정|여성\s*한정|여성\s*가구주", lambda m: {"gender": "F"}),
-    (r"남성만|남성에\s*한(?:함|정)|남성으로\s*한정|남성\s*한정", lambda m: {"gender": "M"}),
+    (
+        rf"여성만|여성에\s*한(?:함|정)|여성으로\s*한정|여성\s*한정|여성\s*{_PERSON_NOUNS}",
+        lambda m: {"gender": "F"},
+    ),
+    (
+        rf"남성만|남성에\s*한(?:함|정)|남성으로\s*한정|남성\s*한정|남성\s*{_PERSON_NOUNS}",
+        lambda m: {"gender": "M"},
+    ),
 )
 
 # ------------------------------------------------------- extra_conditions (§6.3)
@@ -227,7 +236,12 @@ def compute_confidence(rules: EligibilityRules) -> float:
 
 
 def resolve_parse_method(evidence: dict[str, Any]) -> str:
-    methods = {(v or {}).get("method", "regex") for v in evidence.values()} - {None}
+    # 진단용 비필드 키(_rejected_fields 등)는 무시한다.
+    methods = {
+        v.get("method", "regex")
+        for key, v in evidence.items()
+        if isinstance(v, dict) and not key.startswith("_")
+    } - {None}
     if not methods:
         return "regex"
     if methods == {"llm"}:
@@ -262,8 +276,11 @@ def parse_eligibility(raw_text: str) -> EligibilityRules:
             evidence.pop("age_min", None)
             evidence.pop("age_max", None)
 
+    has_age = out.get("age_min") is not None or out.get("age_max") is not None
     regions, region_ev = lookup_regions(text) if text else ([], [])
-    occupations, occupation_ev = lookup_occupations(text) if text else ([], [])
+    occupations, occupation_ev = (
+        lookup_occupations(text, drop_age_descriptors=has_age) if text else ([], [])
+    )
     if regions:
         evidence["regions"] = {"text": ", ".join(region_ev), "method": "regex"}
     if occupations:

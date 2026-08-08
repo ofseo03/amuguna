@@ -5,7 +5,7 @@
  */
 import { isValidOccupation, isValidSido, isValidSigungu } from "./shared-data";
 import type { Gender, Profile, ProgramForm } from "./types";
-import { FORMS } from "./matching";
+import { FORMS } from "./forms";
 
 export const MAX_QUERY_LEN = 200;
 
