@@ -108,12 +108,14 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 
 매 건마다 `external_id` 조회 후 `content_hash`를 비교해 분기한다.
 
+`content_hash`는 응답 원문 전체가 아니라 **정규화한 비교 대상 필드만**(제목·본문·기간·금액 등)으로 계산한다. API 응답에는 조회수·응답 생성 시각처럼 매 호출 바뀌는 필드가 섞여 있는 경우가 많은데, 이를 해시에 포함하면 전 건이 매일 "수정"으로 판정돼 재파싱·재임베딩이 전량 발생한다 — 증분 수집의 비용 이점이 통째로 사라지는 조용한 실패 모드다.
+
 | 상황 | 판정 | 처리 |
 |---|---|---|
 | `external_id` 없음 | **신규** | `raw_documents` insert → 파싱 → 임베딩 → `programs` insert |
 | 있음 + hash 동일 | **무변경** | `fetched_at`만 갱신. 파싱·임베딩 호출 없음 |
 | 있음 + hash 상이 | **수정** | `raw_documents` **insert**(덮어쓰지 않음 → 버전 이력) → 재파싱 → 재임베딩 → `programs` **UPDATE** |
-| 전량 대조에서 원본에 없음 | **삭제** | `status = 'expired'`. 행은 지우지 않는다 |
+| 전량 대조에서 원본에 없음 | **삭제** | `status = 'expired'`. 행은 지우지 않는다. 단 `program_embeddings`의 해당 행은 삭제 — 만료 건이 벡터 top-k 슬롯을 차지하면 유효 결과가 밀려난다 (§7.3) |
 
 수정 시 `programs.id`를 **유지한다.** 새로 만들면 상세 페이지 URL이 깨지고, 알림 기능이 "이미 알려준 건"을 판별하지 못해 같은 공고를 반복 발송하게 된다.
 
@@ -149,14 +151,14 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
         ↓
   raw_documents  (원문 보관, 덮어쓰지 않음)
         ↓
-    ┌───┴──────────────────────┐
-    ↓                          ↓
- ① 자격요건 파싱             ② 임베딩
-   Regex → LLM 보완            공고문 본문 → 벡터
-    ↓                          ↓
- eligibility_rules         program_embeddings
-                            (pgvector)
-    └────────────┬─────────────┘
+    ┌───┴──────────────┬───────────────────┐
+    ↓                  ↓                   ↓
+ ① 자격요건 파싱     ② 임베딩            ③ 요약·절차 생성
+   Regex → LLM 보완    본문 청크 → 벡터     LLM, 신규·수정 시 1회
+    ↓                  ↓                   ↓
+ eligibility_rules  program_embeddings  programs.summary
+                     (pgvector)          programs.apply_steps
+    └──────────────────┴───────────────────┘
                  ↓
            Postgres (단일 DB)
 
@@ -170,7 +172,8 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
                  ↓
            스코어링 정렬
                  ↓
-           상위 N건만 LLM 설명 생성
+           카드 렌더 — 요약·절차는 배치 사전 생성분,
+           매칭 근거는 템플릿 (요청 경로에 LLM 없음 — §7.5)
                  ↓
               결과 화면
 ```
@@ -183,7 +186,7 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 | SQL DB + 벡터 DB | **Supabase Postgres + `pgvector`** | 별도 벡터 DB 불필요. 교집합을 한 쿼리로 처리 |
 | 수집·파싱 | Python + `httpx` / `re` / `selectolax` | GitHub Actions cron 실행 |
 | 임베딩 | 다국어 임베딩 API (후보: Voyage / OpenAI) — **W1에 한국어 성능 실측 후 확정** | 한국어 공고문 도메인 특성상 사전 검증 필수 |
-| LLM | Claude (`claude-sonnet-5`) | 파싱 보완 + 설명 생성 |
+| LLM | Claude (`claude-sonnet-5`) | 파싱 보완 + 요약·절차 생성 — **배치 전용, 요청 경로 미사용** (§7.5) |
 | 인증 | 없음 (익명 세션), 알림 시 이메일만 | 개인정보 최소화 (§8) |
 
 **벡터 DB를 따로 두지 않는 이유:** 교집합 연산이 이 설계의 핵심인데, DB가 둘로 나뉘면 A와 B를 애플리케이션 메모리로 끌어와 맞춰야 한다. pgvector면 한 쿼리로 끝난다. 데이터 규모(수천~수만 건)도 pgvector 범위 안이다.
@@ -209,7 +212,8 @@ programs (
   raw_document_id,                 -- 현재 반영된 원문 버전
   first_seen_at, last_changed_at,
   title, body_text,                -- 임베딩 입력 원본
-  summary,
+  summary,                         -- 배치에서 LLM 생성 (§7.5)
+  apply_steps jsonb,               -- 신청 절차 3단계, 배치에서 LLM 생성 (§7.5)
   form,                            -- subsidy | loan | tax | product | law
   issuer, issuer_level,            -- central | metro | local
   benefit_amount_text, benefit_amount_min, benefit_amount_max,
@@ -221,10 +225,12 @@ programs (
 
 -- ① 정형 자격요건
 eligibility_rules (
-  program_id,
+  program_id PRIMARY KEY,          -- 프로그램당 정확히 1행 — §7.3 eligible의 JOIN이 중복 행을 만들지 않는 전제
   age_min, age_max,                -- NULL = 무관
   gender,                          -- NULL | 'M' | 'F'
-  regions text[],                  -- 행정구역 코드 prefix. NULL = 전국
+  regions text[],                  -- 행정구역 코드. NULL = 전국. 시도 2자리 / 시군구 5자리로 통일 저장
+                                   -- 질의 시 :region_prefixes = [시도 2자리, 시군구 5자리] 두 값.
+                                   -- `&&`는 원소 '동등' 비교이므로 양쪽이 같은 자리수 체계를 써야만 매칭된다
   occupations text[],              -- NULL = 무관
   income_decile_max,               -- 소득분위 상한. NULL = 무관
   extra_conditions jsonb,          -- 무주택 등 정형화 실패분 (표시 전용)
@@ -233,13 +239,17 @@ eligibility_rules (
   confidence real
 )
 
--- ② 벡터 인덱스
+-- ② 벡터 인덱스 (긴 본문은 청크별 행. 질의 시 프로그램 단위 MAX(sim) 집계 — §7.1)
 program_embeddings (
   program_id,
+  chunk_idx int,                   -- 짧은 문서는 0 하나
   embedding vector(1024),          -- 차원은 모델 확정 후
-  embedded_at
+  embedded_at,
+  PRIMARY KEY (program_id, chunk_idx)
 )
 CREATE INDEX ON program_embeddings USING hnsw (embedding vector_cosine_ops);
+-- 재임베딩 시 해당 program_id 청크 전체 삭제 후 재삽입 (청크 수가 줄어도 잔여 행이 안 남게)
+-- status='expired' 전환 시 임베딩 행 삭제 — 만료 건이 벡터 top-k 슬롯을 차지하지 않게 한다
 
 -- 사용자 프로필 (익명)
 profiles (
@@ -302,7 +312,8 @@ profiles (
 ```python
 AGE = [
   (r'만\s*(\d{1,3})\s*세\s*(?:이상|부터)',            lambda m: {'age_min': int(m[1])}),
-  (r'만\s*(\d{1,3})\s*세\s*(?:이하|까지|미만)',        lambda m: {'age_max': int(m[1])}),
+  (r'만\s*(\d{1,3})\s*세\s*(?:이하|까지)',            lambda m: {'age_max': int(m[1])}),
+  (r'만\s*(\d{1,3})\s*세\s*미만',                     lambda m: {'age_max': int(m[1]) - 1}),   # 미만은 경계 미포함
   (r'만?\s*(\d{1,3})\s*[~-]\s*(\d{1,3})\s*세',        lambda m: {'age_min': int(m[1]), 'age_max': int(m[2])}),
 ]
 
@@ -342,7 +353,7 @@ if not rules.age_min and not rules.age_max:
 
 ### 7.1 색인
 
-프로그램의 `title + summary + body_text`(자격요건 문단 포함)를 임베딩해 저장한다. 본문이 길면 문단 단위로 청킹 후 프로그램 단위 max-pooling.
+프로그램의 `title + summary + body_text`(자격요건 문단 포함)를 임베딩해 저장한다. 본문이 길면 문단 단위로 청킹해 **청크별 행으로 저장**하고, 질의 시 프로그램 단위 **최대 유사도(MAX)로 집계**한다. 벡터 자체를 max/mean-pooling으로 합치지 않는다 — 임베딩 공간에서 좌표를 섞으면 코사인 유사도가 왜곡되고, "본문 중 한 문단이 강하게 일치"하는 신호(우리가 원하는 것)가 나머지 문단에 희석된다.
 
 ### 7.2 질의
 
@@ -364,19 +375,26 @@ WITH eligible AS (          -- 집합 A: 자격
     AND (p.ends_at IS NULL OR p.ends_at >= now())
     AND (e.age_min   IS NULL OR :age >= e.age_min)
     AND (e.age_max   IS NULL OR :age <= e.age_max)
-    AND (e.gender    IS NULL OR e.gender = :gender)
+    AND (e.gender    IS NULL OR :gender IS NULL OR e.gender = :gender)
+                             -- :gender NULL = '선택 안 함'. 성별 조건 프로그램도 포함한다 (§5 입력 필드 정의)
     AND (e.regions   IS NULL OR e.regions && :region_prefixes)
     AND (e.occupations IS NULL OR :occupation = ANY(e.occupations))
     AND (e.income_decile_max IS NULL OR :income_decile <= e.income_decile_max)
 ),
-similar AS (                -- 집합 B: 벡터 top-k
-  SELECT program_id, 1 - (embedding <=> :qvec) AS sim
+similar AS (                -- 집합 B: 벡터 top-k (청크 단위 검색)
+  SELECT program_id, embedding <=> :qvec AS dist
   FROM program_embeddings ORDER BY embedding <=> :qvec LIMIT 200
+),
+similar_by_program AS (     -- 프로그램 단위 최대 유사도로 집계 (§7.1)
+  SELECT program_id, 1 - MIN(dist) AS sim
+  FROM similar GROUP BY program_id
 )
 SELECT e.id, s.sim
 FROM eligible e
-JOIN similar s ON s.program_id = e.id;     -- 입력을 건너뛰면 이 JOIN을 생략
+JOIN similar_by_program s ON s.program_id = e.id;   -- 입력을 건너뛰면 이 JOIN을 생략
 ```
+
+> **top-k 선절단 주의**: HNSW top-k는 자격 필터 **이전에** 잘린다 (사후 필터 구조). 자격 통과분이 top-k 안에 적으면 교집합이 실제보다 작게 나온다 — §7.7의 1단계(k 확대)가 이 케이스의 대응이고, 그래도 부족하면 pgvector 0.8+의 `hnsw.iterative_scan` 옵션을 검토한다. 만료 건의 임베딩을 삭제하는 것(§5)도 같은 이유다.
 
 `NULL = 조건 없음 = 통과`. 자격 조건이 명시되지 않은 프로그램은 배제하지 않는다. **누락이 오탐보다 비싸다** — 이 서비스가 푸는 문제가 "받을 수 있는데 몰라서 못 받는 것"이기 때문이다.
 
@@ -401,19 +419,26 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 
 가중치 초기값. 페르소나 3종 골든셋으로 튜닝한다 (§10). 입력을 건너뛴 경로에서는 **마감 임박과 금액이 사실상 정렬을 주도**하므로 이 두 가중치는 별도 확인이 필요하다.
 
-### 7.5 LLM 설명 생성
+### 7.5 카드 설명 — LLM은 배치에서만, 요청 경로에는 없다
 
-상위 20건에 대해서만 호출. 입력은 **DB 필드 값만** 전달한다 (사용자 자유입력 원문은 넘기지 않는다 — §8 보안):
-- 한 줄 요약 (40자 이내)
-- 매칭 근거 문장 ("만 28세 · 서울 거주 · 3분위 조건에 해당합니다")
-- 신청 절차 3단계 요약
+카드에 필요한 설명 3종 중 **프로필과 무관한 것은 수집 배치에서 미리 생성**해 저장하고, 프로필에 의존하는 것은 LLM 없이 템플릿으로 조립한다.
 
-원문에 없는 금액·기한·조건을 생성하지 않도록 프롬프트에 명시하고, 숫자 필드는 LLM 출력 대신 DB 값을 그대로 렌더한다.
+| 항목 | 생성 시점 | 방식 |
+|---|---|---|
+| 한 줄 요약 (40자 이내) | 배치 — 신규·수정 시 1회 | LLM → `programs.summary` |
+| 신청 절차 3단계 | 배치 — 신규·수정 시 1회 | LLM → `programs.apply_steps` |
+| 매칭 근거 문장 | 요청 시 | **템플릿.** `eligibility_rules`의 매칭된 필드로 조립 ("만 28세 · 서울 거주 · 3분위 조건에 해당합니다") — 규칙 매칭 결과가 이미 구조화돼 있어 LLM이 필요 없다 |
+
+요청 경로에서 LLM을 빼면 세 가지가 한 번에 해결된다: 응답 3초 목표에서 LLM 지연이 사라지고, 검색 1회당 LLM 비용이 0이 되고(요약 생성비는 공고 수에 비례하지 사용자 수에 비례하지 않는다), 사용자 입력이 LLM에 닿는 경로 자체가 없어진다 (§8 프롬프트 인젝션).
+
+배치 프롬프트에는 원문에 없는 금액·기한·조건을 생성하지 않도록 명시하고, 숫자 필드는 LLM 출력 대신 DB 값을 그대로 렌더한다.
 
 ### 7.6 근접 탈락 (Near-miss)
 
 자격 조건 1개만 어긋난 프로그램을 최대 5건 별도 노출:
 > "소득 2분위 이하면 대상입니다 (현재 3분위)"
+
+구현: §7.3의 6개 조건을 각각 `CASE WHEN ... THEN 0 ELSE 1 END`로 위반 수를 합산해 **합계 = 1**인 행을 뽑는다. A 계산과 같은 스캔에서 나오므로 별도 인덱스나 추가 질의가 필요 없다.
 
 ### 7.7 빈 결과 처리
 
@@ -432,7 +457,7 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 - **수집 최소화**: 이름·연락처·주민번호 수집하지 않음
 - 익명 세션(쿠키 uuid) 기반, 회원가입 없음
 - 이메일은 알림 신청 시에만 별도 동의 후 수집. 1클릭 해지
-- 프로필 데이터 **90일 후 자동 삭제** (cron)
+- 프로필 데이터 **90일 후 자동 삭제** (cron). 단 이메일이 등록된 프로필은 알림 유지를 위해 자동 삭제 대상에서 제외하고, 알림 해지 시 프로필까지 즉시 삭제한다 — 이 예외를 두지 않으면 90일 뒤 알림이 조용히 죽는다
 - **자유입력 주의**: 사용자가 여기에 개인사(질병명, 채무 상황 등)를 적을 수 있다. 입력란에 "개인정보는 입력하지 마세요" 안내를 두고, **입력 원문은 저장하지 않는다** (검색 시점에만 사용, 영속화 없음)
 - 개인정보처리방침 페이지 필수
 
@@ -442,14 +467,17 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 - API 키(공공데이터포털, 임베딩, Anthropic)는 서버 환경변수. 클라이언트 노출 금지
 - 입력값 서버 측 검증 (나이 0~120, 지역코드 화이트리스트, 분위 1~10, 자유입력 200자)
 - 크롤러 외부 요청 URL 화이트리스트 고정 (SSRF 방지)
-- **프롬프트 인젝션 차단**: 자유입력은 임베딩 API에만 전달하고 LLM 프롬프트에는 넣지 않는다. §7.5의 설명 생성 입력은 DB 필드 값으로 한정
+- **Rate limit**: 익명 세션 + IP 기준 검색 횟수 제한 (예: 10회/분). 검색 1회 = 임베딩 API 과금 1회이므로 abuse가 곧 비용이고, 인증이 없는 서비스라 이것이 유일한 방어선이다
+- **프롬프트 인젝션 차단**: 자유입력은 임베딩 API에만 전달한다. LLM 호출은 배치(공고문 파싱·요약)에만 존재하고 요청 경로에는 없다 (§7.5) — 사용자 입력이 LLM에 닿는 경로 자체가 없다
+- 배치 LLM의 입력(수집한 공고문)도 외부 텍스트다 — 공고문에 심긴 지시문이 출력을 오염시킬 수 있으므로, 출력 JSON 스키마 강제 + 서버 재검증(§6.2)을 요약·절차 생성에도 동일 적용한다
 
 ### 신뢰성 (심사 구간 결격 방지)
 
 - **9/7 11:00 ~ 9/11 23:59 무중단 필수.** 이 기간 배포 동결
+- **인프라 무료 티어 점검 (W4, 결격 방지 항목)**: Supabase 무료 프로젝트는 비활성 시 일시정지될 수 있고, Vercel·GitHub Actions에도 무료 한도가 있다. 심야 배치가 매일 돌아 비활성 정지 가능성은 낮지만, 심사 구간을 무료 티어의 재량에 맡기지 않는다 — 심사 구간 전에 유료 플랜 전환 또는 한도·정지 정책 확인을 완료한다
 - 외부 API 장애 시에도 서비스 동작 (DB만 조회하므로 구조적으로 격리)
 - 임베딩 API 실패 시 → 집합 A만으로 렌더 (건너뛴 경로와 동일. degraded)
-- LLM 실패 시 → 설명문 없이 원문 요약으로 렌더 (degraded)
+- 배치 LLM 실패 시 → 해당 건 `needs_review` 격리, 서비스는 직전 성공 데이터로 동작. 요청 경로에는 LLM이 없으므로(§7.5) LLM 장애가 응답 실패로 전이되지 않는다
 - 업타임 모니터 1개, 심사 기간 알림
 
 ### 정확성 고지
@@ -467,7 +495,8 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 
 ### 성능
 
-- 결과 페이지 응답 3초 이내 (LLM 요약은 스트리밍 또는 카드 단위 지연 로드)
+- 결과 페이지 응답 3초 이내 — 요청 경로는 임베딩 API 1회 + SQL 1회가 전부다 (요약은 배치 사전 생성, §7.5)
+- 입력을 건너뛴 경로(집합 A 전체)는 결과가 수백~수천 건일 수 있다 — **페이지네이션(20건 단위) 필수.** 스코어 정렬 후 커서 기반
 - 동시 사용자 50명 기준
 
 ---
@@ -483,6 +512,18 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 | 5 | 알림 신청 | 이메일 + 동의 체크 (선택) |
 | 6 | 개인정보처리방침 / 출처 | 수집 소스 목록 및 갱신 주기 |
 
+### API 초안 (기능명세서 제출물 대비)
+
+| 메서드 | 경로 | 입력 | 출력 |
+|---|---|---|---|
+| POST | `/api/profile` | 인적사항 5필드 | 익명 프로필 생성, 세션 쿠키 발급 |
+| POST | `/api/match` | 원하는 것 한 줄 (선택, 200자) | 카드 리스트(스코어순) + 근접탈락 + 적용된 완화 단계(§7.7) + 페이지 커서 |
+| GET | `/api/programs/:id` | 세션 쿠키 | 상세 — 세션 프로필 대조 자격 체크리스트(✅/❌), `extra_conditions`, 출처·수집시각 |
+| POST | `/api/subscribe` | email + 동의 | 알림 등록 |
+| GET | `/api/unsubscribe/:token` | — | 1클릭 해지 (이메일 링크용) |
+
+자유입력은 `/api/match` 요청 시점에만 사용하고 저장하지 않는다 (§8). 모든 입력은 서버 측 검증(§8 보안)을 거친다.
+
 ---
 
 ## 10. 검증
@@ -494,6 +535,7 @@ MVP에 테스트 프레임워크를 붙이지 않되, **파싱과 매칭은 검�
 - **추출 정확도**: 무작위 30건 공고문 손 라벨링 → regex / LLM 결과 대조. 필드 정확도 목표 90%+, 미달 필드는 `needs_review` 격리 후 미노출
 - **교집합 재현율**: 골든셋 기대 프로그램 중 `A ∩ B`에 들어온 비율. 낮으면 top-k 확대 또는 §12-2 대응
 - **수집 상태**: 배치 종료 시 소스별 건수 로그. 전일 대비 50% 이상 감소 시 알림
+- **A-only 경로 분포**: 자격조건이 아예 없는 소스(금감원 금융상품 등)는 `NULL = 통과` 규칙상 항상 A에 들어온다. P3 골든셋에서 범용 예·적금 상품이 상위를 도배하지 않는지 확인 — 도배되면 조건_구체성 가중치를 올린다 (§7.4)
 
 ---
 
@@ -504,7 +546,7 @@ MVP에 테스트 프레임워크를 붙이지 않되, **파싱과 매칭은 검�
 - 소스 T1 3종 (사회보장급여 / 기업마당 / 금감원 금융상품)
 - Regex 파싱 + LLM 보완 → `eligibility_rules`
 - pgvector 임베딩 색인
-- 6필드 입력 → 자격 ∩ 의도 교차 검증 + 스코어링 + LLM 설명
+- 6필드 입력 → 자격 ∩ 의도 교차 검증 + 스코어링 + 카드 설명(배치 생성 + 템플릿, §7.5)
 - 결과/상세 화면, `form` 탭, 근접탈락, 빈 결과 완화
 - 접근성 기본, 개인정보처리방침
 
