@@ -208,12 +208,13 @@ export function nearMissMessage(
     case "income":
       return `소득 ${r.income_decile_max}분위 이하면 대상입니다 (현재 ${p.incomeDecile}분위)`;
     case "age": {
+      // "이상" 뒤에는 조사 '이'가 붙어야 자연스럽다 ("만 65세 이상이면")
       let range: string;
       if (r.age_min !== null && r.age_max !== null)
-        range = `만 ${r.age_min}~${r.age_max}세`;
-      else if (r.age_min !== null) range = `만 ${r.age_min}세 이상`;
-      else range = `만 ${r.age_max}세 이하`;
-      return `${range}면 대상입니다 (현재 만 ${p.age}세)`;
+        range = `만 ${r.age_min}~${r.age_max}세면`;
+      else if (r.age_min !== null) range = `만 ${r.age_min}세 이상이면`;
+      else range = `만 ${r.age_max}세 이하면`;
+      return `${range} 대상입니다 (현재 만 ${p.age}세)`;
     }
     case "region": {
       const names = (r.regions ?? []).slice(0, 3).map(regionCodeName).join(", ");

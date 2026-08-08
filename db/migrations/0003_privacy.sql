@@ -27,13 +27,21 @@ CREATE TABLE profiles (
   income_decile smallint    CHECK (income_decile BETWEEN 1 AND 10),
 
   created_at    timestamptz NOT NULL DEFAULT now(),
-  email         text        CHECK (email IS NULL OR email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$')
+  email         text        CHECK (email IS NULL OR email ~ '^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$'),
+
+  -- 이메일 1클릭 해지 링크용 무작위 토큰. 세션 식별자(id)와 분리해 두는 이유:
+  -- 메일로 나가는 값이라 전달·유출 가능성이 있는데, id 를 그대로 쓰면 프로필
+  -- 기본키가 노출되고 재발급도 불가능하다. 토큰은 재구독 시 회전된다.
+  -- 웹은 randomBytes(24).toString('base64url') = 32자 [A-Za-z0-9_-] 를 넣는다.
+  unsubscribe_token text     UNIQUE CHECK (unsubscribe_token IS NULL OR unsubscribe_token ~ '^[A-Za-z0-9_-]{20,}$')
 );
 
 COMMENT ON TABLE  profiles IS
   '익명 프로필. 회원가입 없음, 세션 쿠키의 uuid 가 곧 id. 자유입력("원하는 것")은 저장하지 않는다. SPEC §5 / §8';
 COMMENT ON COLUMN profiles.id IS
-  '세션 쿠키에 담는 익명 식별자이자, 이메일 1클릭 해지 링크의 토큰으로도 쓴다 (gen_random_uuid = 추측 불가). SPEC §9 /api/unsubscribe/:token';
+  '세션 쿠키에 담는 익명 식별자. 해지 링크에는 쓰지 않는다 — unsubscribe_token 참고. SPEC §9';
+COMMENT ON COLUMN profiles.unsubscribe_token IS
+  '이메일 해지 링크 토큰 (id 와 분리, 재구독 시 회전). /api/unsubscribe/:token 이 이 값으로 행을 DELETE 한다. SPEC §9';
 COMMENT ON COLUMN profiles.gender IS
   'NULL = ''선택 안 함''. match_programs 에 그대로 넘기면 성별 조건 프로그램도 포함된다. SPEC §5';
 COMMENT ON COLUMN profiles.occupation IS

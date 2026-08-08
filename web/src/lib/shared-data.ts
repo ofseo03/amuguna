@@ -78,13 +78,30 @@ export function regionCodeName(code: string): string {
   return `${shortSido(sg.sido)} ${sg.name}`;
 }
 
-/** "서울특별시" → "서울" — 배지·배너용 축약 */
+/**
+ * "서울특별시" → "서울" — 배지·배너용 축약.
+ *
+ * 접미사만 잘라내면 "전라남도" → "전라남" 처럼 실제로 쓰지 않는 말이 나온다.
+ * 도 단위는 관용 약칭이 따로 있으므로 코드로 직접 매핑한다.
+ */
+const SIDO_SHORT: Record<string, string> = {
+  "41": "경기",
+  "43": "충북",
+  "44": "충남",
+  "46": "전남",
+  "47": "경북",
+  "48": "경남",
+  "50": "제주",
+  "51": "강원",
+  "52": "전북",
+};
+
 export function shortSido(code: string): string {
-  const n = sidoName(code);
-  return n
+  const mapped = SIDO_SHORT[code];
+  if (mapped) return mapped;
+  return sidoName(code)
     .replace("특별자치시", "")
     .replace("특별자치도", "")
     .replace("특별시", "")
-    .replace("광역시", "")
-    .replace(/도$/, "");
+    .replace("광역시", "");
 }
