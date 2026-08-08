@@ -1,0 +1,13 @@
+{
+  "_note": "기준 중위소득 % → 소득분위 상한 환산표 (SPEC §6.1 midrate_to_decile). '중위소득 X% 이하' 문구에서 X 이하인 첫 행의 decile을 쓴다. 데모용 근사치 — W1에 고시 기준 검증 (연 1회 갱신).",
+  "mapping": [
+    { "max_percent": 50, "decile": 2 },
+    { "max_percent": 75, "decile": 3 },
+    { "max_percent": 100, "decile": 5 },
+    { "max_percent": 120, "decile": 6 },
+    { "max_percent": 150, "decile": 7 },
+    { "max_percent": 180, "decile": 8 },
+    { "max_percent": 200, "decile": 9 },
+    { "max_percent": null, "decile": 10 }
+  ]
+}
