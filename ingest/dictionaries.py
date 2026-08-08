@@ -132,20 +132,30 @@ def lookup_regions(text: str) -> tuple[list[str], list[str]]:
     codes: list[str] = []
     evidence: list[str] = []
 
-    # 1) 시도 먼저 훑어 문맥(동명 시군구 해소용)을 만든다.
+    # 0) 시군구 이름이 차지한 구간부터 잡아둔다.
+    #    '부산광역시 해운대구' 의 '해운**대구**' 가 시도 '대구'로 잡히는 것을 막는다 —
+    #    짧은 시도 축약(대구/광주/서울)은 다른 지명 안에 그대로 들어 있는 경우가 흔하다.
+    sigungu_matches = [
+        m
+        for m in _sigungu_pattern().finditer(text)
+        if not _blocked(text, m.start(), m.end(), REGION_BLOCKERS)
+    ]
+    sigungu_spans = [(m.start(), m.end()) for m in sigungu_matches]
+
+    # 1) 시도를 훑어 문맥(동명 시군구 해소용)을 만든다.
     sido_hits: list[tuple[int, RegionEntry]] = []
     for m in _sido_pattern().finditer(text):
         if _blocked(text, m.start(), m.end(), REGION_BLOCKERS):
             continue
+        if any(m.start() < end and start < m.end() for start, end in sigungu_spans):
+            continue  # 시군구 이름 안에 파묻힌 매칭
         entries = sido_idx[m.group(0)]
         if len(entries) == 1:
             sido_hits.append((m.start(), entries[0]))
 
     # 2) 시군구. 동명이 여럿이면 가장 가까운 앞쪽 시도로 해소하고, 못 하면 버린다.
     consumed_sido: set[str] = set()
-    for m in _sigungu_pattern().finditer(text):
-        if _blocked(text, m.start(), m.end(), REGION_BLOCKERS):
-            continue
+    for m in sigungu_matches:
         candidates = sigungu_idx[m.group(0)]
         # 앞쪽에 나온 가장 가까운 시도를 문맥으로 삼는다.
         #  - 동명 시군구('중구')를 해소하고,
@@ -181,10 +191,14 @@ def lookup_regions(text: str) -> tuple[list[str], list[str]]:
 
 @lru_cache(maxsize=1)
 def occupation_index() -> dict[str, str]:
-    """동의어 → code (SPEC §6.1: 소상공인/자영업자 → self_employed)."""
+    """동의어 → code (SPEC §6.1: 소상공인/자영업자 → self_employed).
+
+    **표시용 대분류 이름(`name`)은 색인하지 않는다.** '교육', '주부' 같은 일반 명사가
+    섞여 있어 '창업 교육 이수자' → education 처럼 엉뚱한 매칭을 만든다.
+    동의어 사전만 신뢰한다.
+    """
     idx: dict[str, str] = {}
     for row in _load("occupations.json")["categories"]:
-        idx[row["name"]] = row["code"]
         for syn in row["synonyms"]:
             idx[syn] = row["code"]
     return idx
