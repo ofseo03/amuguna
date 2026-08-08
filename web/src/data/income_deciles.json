@@ -1,0 +1,15 @@
+{
+  "_note": "소득분위 자가 입력용 라벨 (SPEC §5). 월 소득 구간은 데모용 추정치 — W1에 최신 고시 기준으로 갱신 (연 1회 갱신 정책).",
+  "deciles": [
+    { "decile": 1, "label": "1분위", "monthly_income_hint": "월 소득 약 ~95만원" },
+    { "decile": 2, "label": "2분위", "monthly_income_hint": "월 소득 약 95~160만원" },
+    { "decile": 3, "label": "3분위", "monthly_income_hint": "월 소득 약 160~230만원" },
+    { "decile": 4, "label": "4분위", "monthly_income_hint": "월 소득 약 230~300만원" },
+    { "decile": 5, "label": "5분위", "monthly_income_hint": "월 소득 약 300~370만원" },
+    { "decile": 6, "label": "6분위", "monthly_income_hint": "월 소득 약 370~450만원" },
+    { "decile": 7, "label": "7분위", "monthly_income_hint": "월 소득 약 450~540만원" },
+    { "decile": 8, "label": "8분위", "monthly_income_hint": "월 소득 약 540~660만원" },
+    { "decile": 9, "label": "9분위", "monthly_income_hint": "월 소득 약 660~850만원" },
+    { "decile": 10, "label": "10분위", "monthly_income_hint": "월 소득 약 850만원~" }
+  ]
+}
