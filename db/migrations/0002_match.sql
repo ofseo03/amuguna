@@ -16,6 +16,19 @@
 -- 근접 탈락은 상위 5건만 노출한다 (SQL 은 자르지 않는다).
 --
 -- 호출 규약: 서버 전용. service_role 로만 EXECUTE 가능하다 (하단 GRANT 참고).
+--
+-- 알아둘 것 두 가지
+--   1) HNSW ef_search — pgvector 기본값 40 이라 LIMIT 200 을 걸어도 인덱스 스캔은
+--      40행만 돌려주고 멈춘다. §7.3 의 top-200 이 조용히 top-40 이 되는 실패 모드라
+--      아래 벡터 경로에서 set_config('hnsw.ef_search', k) 로 요청한 k 에 맞춰 올린다.
+--      그래도 자격 통과분이 top-k 안에 부족하면 §7.7 1단계(p_topk 500)를 쓰고,
+--      다음 수단이 pgvector 0.8+ 의 hnsw.iterative_scan 이다 (SPEC §7.3 주석).
+--   2) ends_at 비교 — SPEC 은 `ends_at >= now()` 로 적혀 있으나 ends_at 은 date 이고
+--      DB 타임존은 UTC 다. date 를 now() 와 직접 비교하면 자정 기준으로 캐스팅돼
+--      '오늘 마감'인 공고가 마감일 당일 내내 결과에서 빠진다. "누락이 오탐보다
+--      비싸다"(§7.3)는 원칙에 정면으로 어긋나므로 KST 기준 날짜와 비교한다:
+--        p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
+--      웹/배치에서 직접 쿼리를 쓸 때도 같은 식을 쓸 것. (db/README.md 참고)
 -- =============================================================================
 
 BEGIN;
@@ -132,6 +145,14 @@ BEGIN
     -- 보여줄 이유가 없다).
     -- B − A(자격 미달)는 어느 경우에도 노출하지 않는다 — JOIN 이 그것을 보장한다.
     ---------------------------------------------------------------------------
+
+    -- HNSW 의 탐색 폭(ef_search)을 요청한 k 이상으로 올린다. 기본값은 40 이라
+    -- LIMIT 200 을 걸어도 인덱스 스캔은 40행만 돌려주고 멈춘다 — §7.3 이 전제하는
+    -- top-200 이 조용히 top-40 으로 줄어드는 실패 모드다 (로컬 pgvector 0.6 실측:
+    -- ef_search=40 → 40행, 200 → 200행, 500 → 500행).
+    -- is_local = true 이므로 이 트랜잭션(=PostgREST 요청 1건) 안에서만 유효하다.
+    PERFORM set_config('hnsw.ef_search', GREATEST(v_topk, 40)::text, true);
+
     RETURN QUERY
     WITH flags AS (
       SELECT

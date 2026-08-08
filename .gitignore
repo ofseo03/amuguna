@@ -9,3 +9,13 @@ Thumbs.db
 # Local tooling
 .claude/
 .mcp.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Env
+.env
+.env.local
