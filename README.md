@@ -20,8 +20,8 @@
 | 디렉터리 | 내용 |
 |---|---|
 | `db/` | Postgres 마이그레이션 — 스키마(§5), `match_programs` 교차검증·근접탈락 RPC(§7.3/7.6), 프로필 90일 삭제(§8). [db/README.md](db/README.md) |
-| `ingest/` | Python 수집 파이프라인 — T1 수집기 3종, §6 파서, §3.2 upsert 상태기계, 임베더, 배치 요약. GitHub Actions cron |
-| `web/` | Next.js 웹서비스 — 온보딩/결과/상세 등 화면 6종 + API 5종, §7.4 스코어링, 접근성(§8). [web/README.md](web/README.md) |
+| `ingest/` | T1 API 응답 봉투를 보존한 픽스처 JSON 3종 |
+| `web/` | Next.js + TypeScript 웹서비스와 독립 Node 배치(`web/ingest`) — 수집·파싱·임베딩·요약, 화면/API, 스코어링. [web/README.md](web/README.md) |
 | `shared/` | 공통 계약 데이터 — 지역코드, 직업분류(+파서 동의어), 소득분위 라벨, 중위소득% 환산표 |
 
 ## 빠른 시작 (API 키 없이)
@@ -30,21 +30,20 @@
 
 ```bash
 # 웹 — DB 없이 내장 데모 데이터로 전체 흐름 동작
-cd web && npm install && npm run dev
+(cd web && npm install && npm run dev)
 
-# 수집 파이프라인 — 픽스처 27건 end-to-end
-pip install -r ingest/requirements-dev.txt
-python -m pytest ingest/tests -q          # 파서 40케이스 포함 97 tests
-python -m ingest --fixtures --dry-run
+# 테스트 + 수집 파이프라인 픽스처 27건 end-to-end
+(cd web && npm test)
+(cd web && npm run ingest -- --fixtures --dry-run)
 ```
 
 ## 실 연동 (키 준비 후)
 
-`.env`에 채우면 mock → 실 API로 전환된다. 자세한 값은 `web/.env.example` 참고.
+Next.js는 `web/.env.local`, 독립 배치는 실행 셸 환경변수, GitHub Actions는 Secrets에 값을 넣으면 실 API로 전환된다.
 
 | 변수 | 용도 |
 |---|---|
 | `DATABASE_URL` | Supabase Postgres (`db/migrations/` 순서대로 적용) |
 | `DATA_GO_KR_API_KEY` | 공공데이터포털 (수집기 엔드포인트는 W1 실물 검증 필요) |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | voyage \| openai \| mock (차원 1024 고정) |
-| `ANTHROPIC_API_KEY` | 배치 전용 — 파싱 보완 + 요약 생성 (`claude-sonnet-5`) |
+| `ANTHROPIC_API_KEY` | 배치 전용 — 공식 Anthropic TypeScript SDK로 파싱 보완 + 요약 생성 (`claude-sonnet-5`) |

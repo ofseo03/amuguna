@@ -1,8 +1,0 @@
-# 개발·테스트 의존성.
-#
-# **일부러 psycopg / anthropic 을 넣지 않는다.** 두 패키지가 없는 환경에서
-# `pytest ingest/tests` 가 통과해야 import-guard 가 실제로 동작하는 것이다.
-# (requirements.txt 를 -r 로 끌어오지 않는 이유)
-httpx>=0.27,<1.0
-selectolax>=0.3.21
-pytest>=8.0

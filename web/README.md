@@ -23,6 +23,8 @@ npm run build        # 프로덕션 빌드 (검증 게이트)
 npm run start        # 빌드 결과 실행
 npm run lint         # ESLint
 npm run typecheck    # tsc --noEmit
+npm test             # 웹 회귀 테스트 + TypeScript 배치 테스트
+npm run ingest -- --fixtures --dry-run  # 루트 ingest/ 픽스처 27건 드라이런
 npm run sync:shared  # ../shared/*.json → src/data/ 재복사
 ```
 
@@ -117,7 +119,7 @@ curl -s -b jar localhost:3000/api/programs/1
 
 ### mock 임베딩은 손대지 말 것
 
-`src/lib/embedding.ts` 의 `mockEmbed()` 는 **수집 팀(Python)이 문서를 색인할 때 쓰는
+`src/lib/embedding.ts` 의 `mockEmbed()` 는 **`ingest/embedder.ts`가 문서를 색인할 때 쓰는
 알고리즘과 완전히 동일해야 한다.** 한 글자라도 어긋나면 유사도가 전부 무의미해진다.
 
 ```
@@ -132,7 +134,8 @@ L2 정규화
 
 SPEC §7.5 그대로다. 한 줄 요약과 신청 절차 3단계는 수집 배치가 미리 만들어 DB에 넣고,
 매칭 근거 문장은 `eligibility_rules` 의 매칭된 필드로 **템플릿 조립**한다.
-그래서 이 프로젝트에 Anthropic API 키가 없다 — 사용자 입력이 LLM에 닿는 경로 자체가 없다.
+따라서 웹 요청 경로에는 Anthropic API 키를 쓰지 않는다. `ANTHROPIC_API_KEY`는 공식
+Anthropic TypeScript SDK를 사용하는 독립 Node 배치(`ingest/`)에서만 읽는다.
 
 ---
 
@@ -149,7 +152,8 @@ SPEC §7.5 그대로다. 한 줄 요약과 신청 절차 3단계는 수집 배�
 
 ## 환경변수
 
-`.env.example` 을 `.env.local` 로 복사해서 채운다. 자세한 설명은 그 파일에 있다.
+Next.js 로컬 실연동 값은 `web/.env.local`에 둔다. 독립 배치는 같은 변수를 실행 셸에
+`export`하며, GitHub Actions에서는 Secrets/Variables로 주입한다.
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
@@ -157,6 +161,8 @@ SPEC §7.5 그대로다. 한 줄 요약과 신청 절차 3단계는 수집 배�
 | `EMBEDDING_PROVIDER` | `mock` | `voyage` \| `openai` \| `mock` |
 | `EMBEDDING_API_KEY` | (없음) | 실 provider 사용 시 |
 | `MOCK_EMBEDDINGS` | — | `1` 이면 provider 무시하고 항상 mock |
+| `DATA_GO_KR_API_KEY` | (없음) | `ingest/` 실 API 수집 시 |
+| `ANTHROPIC_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |
 | `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 서명 키 |
 
 ---
@@ -180,38 +186,14 @@ SPEC §7.5 그대로다. 한 줄 요약과 신청 절차 3단계는 수집 배�
 
 ---
 
-## DB 연동 시 남는 작업
+## 실연동 전 확인할 항목
 
-DB 모드 코드 경로는 이미 있고, 아래만 채우면 전환된다.
+구현은 끝났고 아래 외부 환경만 아직 실물 검증이 필요하다.
 
-1. **RPC 계약 확인** — `src/lib/matching.ts` 의 `dbCandidates()`.
-   ```
-   match_programs(p_age int, p_gender text, p_region_codes text[],
-                  p_occupation text, p_income_decile int,
-                  p_qvec vector(1024) DEFAULT NULL, p_topk int DEFAULT 200)
-   RETURNS TABLE (program_id bigint, sim real, violations int, violated_field text)
-   ```
-   벡터는 `'[0.1,...]'::vector` 리터럴로 바인딩한다 (`toPgVectorLiteral`).
-
-2. **프로그램 행 조회 SQL** — 같은 파일 `dbCandidates()` 하단과 `getProgram()`.
-   `programs LEFT JOIN eligibility_rules` 로 카드/상세에 필요한 컬럼을 가져온다.
-   컬럼명이 SPEC §5 와 다르면 `rowToProgram()` 매핑만 고치면 된다.
-
-3. **`profiles` 스키마 보강** — `src/app/api/subscribe/route.ts`.
-   SPEC §5 의 `profiles` 에는 `email` 만 있다. 1클릭 해지를 하려면
-   `unsubscribe_token text UNIQUE` 컬럼이 추가로 필요하다. 현재 코드는 이 컬럼을 전제로 쓴다.
-
-4. **90일 자동 삭제 cron** — 아직 없다 (§8).
-   `email IS NULL AND created_at < now() - interval '90 days'` 인 프로필을 지우는 배치가 필요하다.
-   이메일이 있는 프로필은 제외해야 알림이 조용히 죽지 않는다.
-
-5. **실 임베딩 provider 연결** — `src/lib/embedding.ts` 의 `embedQuery()`.
-   현재는 mock 으로 폴백하는 자리만 있다. W1 한국어 성능 실측 후 확정한다.
-   수집 파이프라인과 **같은 provider·같은 모델**이어야 한다.
-
-6. **Rate limit 공유 저장소** — `src/lib/rate-limit.ts`.
-   지금은 인메모리라 Vercel 다중 인스턴스에서 인스턴스당 한도가 된다.
-   트래픽이 늘면 Upstash Redis 등으로 교체한다 (교체 지점은 이 파일 하나).
+1. T1 세 소스의 실제 응답으로 엔드포인트·파라미터·봉투 필드명을 확인한다.
+2. Supabase에 마이그레이션을 적용한 뒤 `match_programs` RPC와 구독·해지를 왕복 검증한다.
+3. Voyage/OpenAI 중 한국어 성능을 실측해 웹 질의와 배치 색인에 같은 provider·모델을 확정한다.
+4. Vercel 배포와 GitHub Actions 실 배치를 실행해 Secrets, 90일 삭제, 심사 구간 가용성을 확인한다.
 
 ---
 

@@ -7,16 +7,17 @@ Postgres (Supabase) + `pgvector`. SPEC.md §5(데이터 모델) / §7.3(교차 �
 | `migrations/0001_init.sql` | `vector` 확장, `raw_documents` / `programs` / `eligibility_rules` / `program_embeddings`, 인덱스, 불변식 트리거, RLS |
 | `migrations/0002_match.sql` | `match_programs()` 교차 검증 RPC + `region_prefixes()` 헬퍼 |
 | `migrations/0003_privacy.sql` | `profiles` + `purge_stale_profiles()` (90일 정리) + 스케줄링 안내 |
+| `migrations/0004_embedding_provider.sql` | 벡터 공간 혼합을 막는 provider 식별자 |
 
 ---
 
 ## 1. 적용
 
-번호 순서대로 **한 번씩** 적용한다. 재실행을 가정한 멱등 스크립트가 아니다(`CREATE TABLE` 에 `IF NOT EXISTS` 를 두지 않았다 — 이미 만들어진 스키마를 조용히 건너뛰는 것보다 에러가 낫다). 스키마를 바꿔야 하면 `0004_*.sql` 을 새로 만든다.
+번호 순서대로 **한 번씩** 적용한다. 재실행을 가정한 멱등 스크립트가 아니다(`CREATE TABLE` 에 `IF NOT EXISTS` 를 두지 않았다 — 이미 만들어진 스키마를 조용히 건너뛰는 것보다 에러가 낫다). 스키마를 바꿔야 하면 `0005_*.sql` 을 새로 만든다.
 
 ```bash
 # psql 직접 적용
-for f in db/migrations/0001_init.sql db/migrations/0002_match.sql db/migrations/0003_privacy.sql; do
+for f in db/migrations/0001_init.sql db/migrations/0002_match.sql db/migrations/0003_privacy.sql db/migrations/0004_embedding_provider.sql; do
   psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f"
 done
 
@@ -28,13 +29,15 @@ supabase db push
 
 `0001` / `0003` 의 마지막 `DO $$ ... $$` 블록은 `anon` / `authenticated` / `service_role` 롤이 **있을 때만** 권한을 조정한다. Supabase 가 아닌 순정 Postgres(로컬 검증용)에서도 그대로 돈다.
 
+`0004` 적용 직후와 `EMBEDDING_PROVIDER` 변경 시에는 `npm run ingest -- --weekly-reconcile`로 전량 재색인한다. 증분 실행은 기존 provider가 다르거나 unknown이면 실패해 서로 다른 벡터 공간이 섞이는 것을 막는다.
+
 ### 로컬 검증
 
 ```bash
 sudo apt-get install -y postgresql-16 postgresql-16-pgvector
 initdb -D /tmp/pg && pg_ctl -D /tmp/pg -o "-p 55432" start
 createdb -p 55432 amuguna
-psql -p 55432 -d amuguna -f db/migrations/0001_init.sql   # 0002, 0003 도 동일
+psql -p 55432 -d amuguna -f db/migrations/0001_init.sql   # 0002~0004도 동일
 ```
 
 ---
@@ -43,12 +46,9 @@ psql -p 55432 -d amuguna -f db/migrations/0001_init.sql   # 0002, 0003 도 동�
 
 | 변수 | 값 | 두는 곳 |
 |---|---|---|
-| `DATABASE_URL` | `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres` | 마이그레이션·수집 배치(GitHub Actions Secret) |
-| `SUPABASE_URL` | `https://<ref>.supabase.co` | 서버·클라이언트 공용 |
-| `SUPABASE_SERVICE_ROLE_KEY` | service-role JWT | **서버 전용.** Next.js Route Handler / Server Action / 배치에서만 |
-| `SUPABASE_ANON_KEY` | anon JWT | 브라우저에 내려가도 되지만, 이 프로젝트에선 **DB 를 읽을 수 없다** (§4 참고) |
+| `DATABASE_URL` | `postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres` | Next.js 서버·Node 배치·GitHub Actions Secret |
 
-- service-role 키는 RLS 를 우회한다. `NEXT_PUBLIC_` 접두사를 붙이지 말 것 — 붙는 순간 번들에 실려 나간다.
+- `DATABASE_URL`은 서버 전용이다. `NEXT_PUBLIC_` 접두사를 붙이지 말 것 — 붙는 순간 번들에 실려 나간다.
 - 커넥션 풀러(포트 `6543`, PgBouncer transaction mode)를 쓸 경우 `PREPARE` / 세션 GUC 가 요청 간에 유지되지 않는다. `match_programs()` 는 트랜잭션 로컬 설정만 쓰므로 영향이 없지만, 마이그레이션은 반드시 직결 포트 `5432` 로 적용한다.
 - SPEC §8: 수집 API 키·임베딩 키·Anthropic 키도 전부 서버 환경변수. 클라이언트 노출 금지.
 
@@ -115,27 +115,15 @@ SELECT * FROM match_programs(28,'F',region_prefixes('11620'),'employee_office',3
 `vector` 는 **텍스트 리터럴 `'[a,b,c]'` 로 직렬화**한다. JSON 배열이 아니라 문자열이다.
 
 ```ts
-// Next.js Route Handler — 반드시 service-role 클라이언트로
-const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!);
+import postgres from "postgres";
 
-const qvec: number[] = await embed(userText);          // 길이 1024
-const { data, error } = await sb.rpc('match_programs', {
-  p_age:           28,
-  p_gender:        'F',                                 // 선택 안 함이면 null
-  p_region_codes:  ['11', '11620'],                     // 이건 JSON 배열 그대로
-  p_occupation:    'employee_office',
-  p_income_decile: 3,
-  p_qvec:          `[${qvec.join(',')}]`,               // ← 문자열! 건너뛰면 null
-  p_topk:          200,
-});
-```
-
-```python
-# 수집·검증 배치 (psycopg)
-cur.execute(
-    "SELECT * FROM match_programs(%s,%s,%s,%s,%s,%s::vector,%s)",
-    (28, 'F', ['11','11620'], 'employee_office', 3, '[' + ','.join(map(str, qvec)) + ']', 200),
-)
+const sql = postgres(process.env.DATABASE_URL!, { prepare: false });
+const qvec: number[] = await embed(userText); // 길이 1024
+const rows = await sql`
+  SELECT * FROM match_programs(
+    ${28}, ${"F"}, ${["11", "11620"]}, ${"employee_office"}, ${3},
+    ${`[${qvec.join(",")}]`}::vector, ${200}
+  )`;
 ```
 
 차원이 1024가 아니면 `different vector dimensions N and 1024` 로 즉시 실패한다 — 임베딩 모델을 바꿨는데 스키마를 안 바꾼 상황이 조용히 지나가지 않는다.
@@ -192,7 +180,7 @@ ON CONFLICT (program_id) DO UPDATE SET
 
 -- 4) 재임베딩은 전체 삭제 후 재삽입 (청크 수가 줄어도 잔여 행이 안 남게)
 DELETE FROM program_embeddings WHERE program_id = $1;
-INSERT INTO program_embeddings (program_id, chunk_idx, embedding) VALUES ...;
+INSERT INTO program_embeddings (program_id, chunk_idx, embedding, provider) VALUES ...;
 ```
 
 무변경(hash 동일) 건은 `UPDATE programs SET fetched_at = now()` 만 하고 파싱·임베딩을 건너뛴다.
@@ -225,9 +213,9 @@ p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
 - `POST /api/match` → 프로필을 읽어 `match_programs(age, gender, region_prefixes(region_code), occupation, income_decile, qvec, 200)`.
   **자유입력 원문은 어디에도 저장하지 않는다**(§8). 임베딩 API 에만 넘기고 버린다 — `profiles` 에 해당 컬럼이 없는 것이 그 강제 장치다.
 - `GET /api/programs/:id` → 상세. 자격 체크리스트(✅/❌)는 `eligibility_rules` 한 행을 읽어 프로필과 대조해 템플릿으로 조립한다(§7.5, 요청 경로에 LLM 없음). `extra_conditions` 는 "추가 확인 필요 조건"으로 그대로 노출하고 판정에 쓰지 않는다(§6.3).
-- `GET /api/unsubscribe/:token` → **별도 토큰 컬럼을 두지 않았다.** `profiles.id` 가 `gen_random_uuid()` 라 추측이 불가능하므로 그 자체를 해지 토큰으로 쓴다. 해지는 행 삭제다:
+- `GET /api/unsubscribe/:token` → 세션 식별자인 `profiles.id`와 분리한 `unsubscribe_token`으로 조회하고, 해지 시 프로필 행을 삭제한다:
   ```sql
-  DELETE FROM profiles WHERE id = $1;   -- §8 "알림 해지 시 프로필까지 즉시 삭제"
+  DELETE FROM profiles WHERE unsubscribe_token = $1; -- §8 "알림 해지 시 프로필까지 즉시 삭제"
   ```
 - 임베딩 API 실패 시 `p_qvec` 을 `NULL` 로 넘기면 자격 축만으로 degraded 동작한다(§8 신뢰성). 별도 코드 경로가 필요 없다.
 - `sim` 은 `p_qvec IS NULL` 일 때 `NULL` 이다. §7.4 에서 유사도 가중치 0.30 을 빼고 나머지를 정규화할 것.
@@ -267,8 +255,10 @@ profiles  (독립. 프로그램과 조인하지 않는다)
 | `eligibility_rules (program_id)` PK | 1:1 조인 |
 | `program_embeddings (program_id, chunk_idx)` PK | 재임베딩 시 삭제·재삽입 |
 | `program_embeddings USING hnsw (embedding vector_cosine_ops)` | 코사인 top-k (SPEC §5) |
+| `program_embeddings.provider` | provider 전환 시 전 공고를 한 번 재색인해 벡터 공간 혼합 방지 |
 | `profiles (created_at) WHERE email IS NULL` | `purge_stale_profiles()` 조건절과 일치하는 부분 인덱스 |
 | `profiles (lower(email)) UNIQUE WHERE email IS NOT NULL` | 중복 구독·해지 조회 |
+| `profiles (unsubscribe_token) UNIQUE` | 1클릭 해지 조회, 세션 식별자와 토큰 분리 |
 
 열거값은 enum 타입이 아니라 `text + CHECK` 다 — PostgREST·수집기에서 캐스팅이 필요 없고, 값 추가에 `ALTER TYPE` 이 필요 없다.
 
@@ -285,4 +275,4 @@ profiles  (독립. 프로그램과 조인하지 않는다)
 | CTE 이름 | `similar`, `similar_by_program` | `vec_topk`, `vec_by_program` | `SIMILAR` 은 SQL 예약어라 파싱 에러가 난다 |
 | `eligibility_rules` 행 생성 | 명시 없음 | `programs` INSERT 시 트리거로 자동 생성 | §7.3 의 `INNER JOIN` 이 1:1 을 전제한다. 규칙이 관례가 아니라 DB 불변식이 된다 |
 | `hnsw.ef_search` | 명시 없음 | 벡터 경로에서 `p_topk` 에 맞춰 상향 | 기본값 40 이라 `LIMIT 200` 이 실제로는 top-40 이 된다 (실측) |
-| 알림 해지 토큰 | §9 `/api/unsubscribe/:token` | 별도 컬럼 없이 `profiles.id` 사용 | §5 profiles 컬럼 목록을 벗어나지 않으면서 추측 불가 토큰을 얻는다 |
+| 알림 해지 토큰 | §9 `/api/unsubscribe/:token` | 별도 `unsubscribe_token` 사용 | 메일로 전달되는 값과 세션 기본키를 분리하고 재구독 시 회전한다 |

@@ -182,11 +182,11 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 
 | 레이어 | 선택 | 이유 |
 |---|---|---|
-| 프론트+API | Next.js (App Router) / Vercel | 한 저장소, 배포 URL 즉시 확보 |
-| SQL DB + 벡터 DB | **Supabase Postgres + `pgvector`** | 별도 벡터 DB 불필요. 교집합을 한 쿼리로 처리 |
-| 수집·파싱 | Python + `httpx` / `re` / `selectolax` | GitHub Actions cron 실행 |
+| 프론트+API | Next.js (App Router) + TypeScript / Vercel | 한 저장소, 배포 URL 즉시 확보 |
+| SQL DB + 벡터 DB | **Supabase Postgres + `pgvector`**, `postgres`(postgres.js) | 별도 벡터 DB 불필요. 교집합을 한 쿼리로 처리 |
+| 수집·파싱 | 독립 TypeScript Node 배치 (`web/ingest`) + native `fetch` | 웹과 언어·의존성을 공유하고 GitHub Actions cron 실행 |
 | 임베딩 | 다국어 임베딩 API (후보: Voyage / OpenAI) — **W1에 한국어 성능 실측 후 확정** | 한국어 공고문 도메인 특성상 사전 검증 필수 |
-| LLM | Claude (`claude-sonnet-5`) | 파싱 보완 + 요약·절차 생성 — **배치 전용, 요청 경로 미사용** (§7.5) |
+| LLM | Claude (`claude-sonnet-5`) + 공식 Anthropic TypeScript SDK | 파싱 보완 + 요약·절차 생성 — **배치 전용, 요청 경로 미사용** (§7.5) |
 | 인증 | 없음 (익명 세션), 알림 시 이메일만 | 개인정보 최소화 (§8) |
 
 **벡터 DB를 따로 두지 않는 이유:** 교집합 연산이 이 설계의 핵심인데, DB가 둘로 나뉘면 A와 B를 애플리케이션 메모리로 끌어와 맞춰야 한다. pgvector면 한 쿼리로 끝난다. 데이터 규모(수천~수만 건)도 pgvector 범위 안이다.
@@ -244,6 +244,7 @@ program_embeddings (
   program_id,
   chunk_idx int,                   -- 짧은 문서는 0 하나
   embedding vector(1024),          -- 차원은 모델 확정 후
+  provider text,                   -- mock | voyage | openai. 변경 시 재색인
   embedded_at,
   PRIMARY KEY (program_id, chunk_idx)
 )
@@ -255,7 +256,8 @@ CREATE INDEX ON program_embeddings USING hnsw (embedding vector_cosine_ops);
 profiles (
   id uuid,
   age, gender, occupation, region_code, income_decile,
-  created_at, email nullable       -- 알림 신청 시에만
+  created_at, email nullable,      -- 알림 신청 시에만
+  unsubscribe_token nullable       -- profiles.id와 분리한 1클릭 해지 토큰
 )
 ```
 
@@ -309,21 +311,21 @@ profiles (
 
 패턴 정리는 눈으로 훑지 말고 **미매칭 리포트로 돌린다** — 파서를 돌린 뒤 필드별 미추출 건수를 세고, 미추출 문서에서 자격요건 문단만 빈도순으로 뽑는다. 상위 표현부터 패턴을 추가하고 다시 돌리는 루프다. 커버리지가 안 오르는 지점에서 멈추고 나머지는 §6.2 LLM 보완에 넘긴다.
 
-```python
-AGE = [
-  (r'만\s*(\d{1,3})\s*세\s*(?:이상|부터)',            lambda m: {'age_min': int(m[1])}),
-  (r'만\s*(\d{1,3})\s*세\s*(?:이하|까지)',            lambda m: {'age_max': int(m[1])}),
-  (r'만\s*(\d{1,3})\s*세\s*미만',                     lambda m: {'age_max': int(m[1]) - 1}),   # 미만은 경계 미포함
-  (r'만?\s*(\d{1,3})\s*[~-]\s*(\d{1,3})\s*세',        lambda m: {'age_min': int(m[1]), 'age_max': int(m[2])}),
-]
+```ts
+const AGE = [
+  /만\s*(\d{1,3})\s*세\s*(?:이상|부터)/,
+  /만\s*(\d{1,3})\s*세\s*(?:이하|까지)/,
+  /만\s*(\d{1,3})\s*세\s*미만/, // 미만은 경계 미포함
+  /만?\s*(\d{1,3})\s*[~-]\s*(\d{1,3})\s*세/,
+];
 
-INCOME = [
-  (r'기준\s*중위소득\s*(\d{1,3})\s*%\s*이하',          lambda m: {'income_decile_max': midrate_to_decile(int(m[1]))}),
-  (r'소득\s*(\d{1,2})\s*분위\s*이하',                  lambda m: {'income_decile_max': int(m[1])}),
-  (r'차상위계층|기초생활수급',                          lambda m: {'income_decile_max': 2}),
-]
+const INCOME = [
+  /기준\s*중위소득\s*(\d{1,3})\s*%\s*이하/,
+  /소득\s*(\d{1,2})\s*분위\s*이하/,
+  /차상위계층|기초생활수급/,
+];
 
-GENDER = [(r'여성만|여성에\s*한(?:함|정)', {'gender': 'F'}), ...]
+const GENDER = [/여성만|여성에\s*한(?:함|정)/];
 ```
 
 지역·직업은 정규식이 아니라 **사전 룩업**이 맞다. 행정표준코드 사전(시도 17 + 시군구 250여)과 직업 동의어 사전(`소상공인`/`자영업자` → `self_employed`)으로 문자열 매칭한다.
@@ -334,9 +336,10 @@ GENDER = [(r'여성만|여성에\s*한(?:함|정)', {'gender': 'F'}), ...]
 
 정규식으로 **채워지지 않은 필드에 대해서만** LLM을 호출한다. 전체 문서를 다시 넘기지 않고 해당 필드 관련 문단만 잘라 보낸다.
 
-```python
-if not rules.age_min and not rules.age_max:
-    rules |= llm_extract(doc, field='age')     # 출력 스키마 강제 + 서버 재검증
+```ts
+if (rules.age_min === null && rules.age_max === null) {
+  Object.assign(rules, await llmExtract(doc, "age")); // 도구 스키마 강제 + 서버 재검증
+}
 ```
 
 - 출력은 JSON 스키마로 강제하고 서버에서 재검증 (나이 0~120, 분위 1~10 등)
@@ -528,9 +531,9 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 
 ## 10. 검증
 
-MVP에 테스트 프레임워크를 붙이지 않되, **파싱과 매칭은 검증 없이 두지 않는다.**
+별도 테스트 프레임워크 의존성 없이 Node 내장 `node:test`를 쓰되, **파싱과 매칭은 검증 없이 두지 않는다.**
 
-- **정규식 파서**: 손으로 만든 자격요건 문장 40개(정상 30 + 함정 10) → `test_parser.py` 한 파일. 함정에는 "만 65세 이상 어르신을 모시는 가구"(→ 신청자 나이 조건 아님) 같은 오탐 유발 케이스 포함
+- **정규식 파서**: 손으로 만든 자격요건 문장 40개(정상 30 + 함정 10) → `web/ingest/tests/parser.test.ts`. 함정에는 "만 65세 이상 어르신을 모시는 가구"(→ 신청자 나이 조건 아님) 같은 오탐 유발 케이스 포함
 - **골든셋**: 페르소나 3종 × 기대 프로그램 목록 → 최종 결과에 들어오는지 확인. **P3(입력 건너뜀) 경로를 반드시 포함** — 상당수 사용자의 실제 경로다
 - **추출 정확도**: 무작위 30건 공고문 손 라벨링 → regex / LLM 결과 대조. 필드 정확도 목표 90%+, 미달 필드는 `needs_review` 격리 후 미노출
 - **교집합 재현율**: 골든셋 기대 프로그램 중 `A ∩ B`에 들어온 비율. 낮으면 top-k 확대 또는 §12-2 대응
