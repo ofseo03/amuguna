@@ -1,0 +1,122 @@
+@import "tailwindcss";
+
+/*
+ * 접근성 (SPEC §8):
+ *  - 모든 본문 색은 배경 대비 WCAG AA(4.5:1) 이상을 만족하도록 고른 값이다.
+ *    회색 계열을 gray-400/500 까지 내리지 않는다 — 고령층 대상 서비스에서 가장 흔한 실패다.
+ *  - 글자 크기 토글은 html[data-fontsize] 로 루트 font-size 를 바꾼다.
+ *    Tailwind 가 rem 기반이므로 여백·행간까지 함께 커진다 (글자만 커져 레이아웃이 깨지지 않는다).
+ */
+
+:root {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --bg-soft: #f6f8fb;
+  --bg-sunken: #eef2f7;
+
+  --ink: #101828; /* 16.1:1 */
+  --ink-2: #344054; /* 10.4:1 */
+  --ink-3: #4a5567; /*  7.6:1 — 최소 본문 색. 이보다 밝게 내리지 않는다 */
+
+  --line: #d7dde5;
+  --line-soft: #e7ebf0;
+
+  --brand: #1a4fd6; /* 6.6:1 */
+  --brand-dark: #143da8;
+  --brand-soft: #eaf0ff;
+
+  --ok: #04724d; /* 5.6:1 */
+  --ok-soft: #e6f4ee;
+  --warn: #9a5b00; /* 5.1:1 */
+  --warn-soft: #fdf3e3;
+  --danger: #b42318; /* 6.3:1 */
+  --danger-soft: #fdecea;
+
+  --focus: #1a4fd6;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-soft: var(--bg-soft);
+  --color-bg-sunken: var(--bg-sunken);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-soft: var(--brand-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+}
+
+html {
+  font-size: 16px;
+}
+html[data-fontsize="large"] {
+  font-size: 18.5px;
+}
+html[data-fontsize="xlarge"] {
+  font-size: 21px;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family:
+    "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR",
+    system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.65;
+  /* 한글은 단어 중간 줄바꿈이 자연스럽지 않다 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
+}
+
+/* 키보드 포커스는 절대 지우지 않는다 (§8 접근성) */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* 마우스 클릭 시에만 outline 억제 */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* 본문 건너뛰기 링크 */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+}
+.skip-link:focus {
+  left: 0.5rem;
+  top: 0.5rem;
+  background: var(--brand);
+  color: #fff;
+  padding: 0.6rem 1rem;
+  border-radius: 6px;
+}
+
+/* 행정용어 툴팁 (§8 접근성) — 마우스 hover 뿐 아니라 키보드 focus 로도 열린다 */
+.term {
+  border-bottom: 1px dotted var(--ink-3);
+  cursor: help;
+}
