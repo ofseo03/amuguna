@@ -81,11 +81,22 @@ jobs:
 
       - name: 증분 수집 실행
         if: github.event.inputs.mode != 'fixtures-dry-run'
+        env:
+          INGEST_SINCE: ${{ steps.since.outputs.date }}
+          INGEST_SOURCE: ${{ github.event.inputs.source }}
         run: |
+          source_args=()
+          if [[ -n "$INGEST_SOURCE" ]]; then
+            source_args=(--source "$INGEST_SOURCE")
+          fi
           python -m ingest \
-            --since "${{ steps.since.outputs.date }}" \
-            ${{ github.event.inputs.source && format('--source {0}', github.event.inputs.source) || '' }} \
+            --since "$INGEST_SINCE" \
+            "${source_args[@]}" \
             --json-report ingest-report.json
+
+      - name: 90일 경과 익명 프로필 삭제
+        if: always() && github.event.inputs.mode != 'fixtures-dry-run'
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT public.purge_stale_profiles() AS deleted_profiles;"
 
       - name: 수집 상태 리포트 보관 (SPEC §10)
         if: always()

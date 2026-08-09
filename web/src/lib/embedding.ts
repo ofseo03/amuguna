@@ -78,23 +78,58 @@ export function resolveProvider(): EmbeddingProvider {
 /**
  * 질의 벡터 생성.
  *
- * 실 provider(voyage/openai)는 W1 한국어 성능 실측 후 확정 예정이라 아직 미연결이다.
- * 키가 없거나 호출이 실패하면 mock으로 폴백한다 —
- * SPEC §8 신뢰성: "임베딩 API 실패 시 → 집합 A만으로 렌더 (degraded)" 의
- * 앞단으로, 완전 실패 전에 결정론적 폴백을 한 번 더 둔다.
+ * 실 provider는 수집과 같은 벡터 공간을 쓰고, Voyage 질의는 query input_type으로 구분한다.
+ * 실 provider가 실패하면 null을 돌려 집합 A만으로 렌더한다 (SPEC §8).
  */
 export async function embedQuery(
   text: string,
-): Promise<{ vector: Float64Array; provider: EmbeddingProvider; degraded: boolean }> {
+): Promise<{ vector: Float64Array | null; provider: EmbeddingProvider; degraded: boolean }> {
   const provider = resolveProvider();
-  if (provider === "mock" || !process.env.EMBEDDING_API_KEY) {
-    return { vector: mockEmbed(text), provider: "mock", degraded: provider !== "mock" };
-  }
+  if (provider === "mock") return { vector: mockEmbed(text), provider, degraded: false };
+  if (!process.env.EMBEDDING_API_KEY) return { vector: null, provider, degraded: true };
   try {
-    // 실 provider 연동 지점 (W1 확정 후 구현).
-    // 현재는 계약된 mock 알고리즘으로 결정론적 동작을 보장한다.
-    return { vector: mockEmbed(text), provider, degraded: false };
+    const response = await fetch(
+      provider === "voyage"
+        ? "https://api.voyageai.com/v1/embeddings"
+        : "https://api.openai.com/v1/embeddings",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${process.env.EMBEDDING_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(
+          provider === "voyage"
+            ? { model: "voyage-3", input: [text], input_type: "query" }
+            : {
+                model: "text-embedding-3-small",
+                input: [text],
+                dimensions: EMBEDDING_DIM,
+              },
+        ),
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
+    if (!response.ok) throw new Error(`embedding API ${response.status}`);
+    const embedding = (
+      (await response.json()) as { data?: Array<{ embedding?: unknown }> }
+    ).data?.[0]?.embedding;
+    if (
+      !Array.isArray(embedding) ||
+      embedding.length !== EMBEDDING_DIM ||
+      !embedding.every(
+        (value: unknown) => typeof value === "number" && Number.isFinite(value),
+      ) ||
+      !embedding.some((value: unknown) => value !== 0)
+    ) {
+      throw new Error("invalid embedding response");
+    }
+    return {
+      vector: Float64Array.from(embedding as number[]),
+      provider,
+      degraded: false,
+    };
   } catch {
-    return { vector: mockEmbed(text), provider: "mock", degraded: true };
+    return { vector: null, provider, degraded: true };
   }
 }

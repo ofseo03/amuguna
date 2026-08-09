@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { runMatch } from "@/lib/matching";
 import { readProfile, readSessionId } from "@/lib/session";
-import { checkRateLimit, rateLimitKey } from "@/lib/rate-limit";
+import { checkSessionAndIpRateLimit } from "@/lib/rate-limit";
 import { validateForm, validatePage, validateQuery } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const sessionId = await readSessionId();
 
-  const rl = checkRateLimit(rateLimitKey(sessionId, req));
+  const rl = checkSessionAndIpRateLimit(sessionId, req);
   if (!rl.allowed) {
     return NextResponse.json(
       {

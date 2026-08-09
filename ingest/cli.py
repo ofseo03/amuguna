@@ -71,10 +71,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _make_database(dry_run: bool, settings: Settings) -> tuple[Database, bool]:
-    if dry_run or not settings.database_url:
-        if not dry_run:
-            log.warning("DATABASE_URL 미설정 → InMemoryDatabase 로 강등 (쓰기 없음)")
+    if dry_run:
         return InMemoryDatabase(), True
+    # 메모리 DB는 명시적 dry-run 전용이라 실수로 성공한 비영속 배치를 만들지 않는다.
+    if not settings.database_url:
+        raise SystemExit("DATABASE_URL이 필요합니다. DB 쓰기 없이 실행하려면 --dry-run을 지정하세요.")
     from .db import PostgresDatabase  # psycopg 는 여기서만 필요
 
     return PostgresDatabase(settings.database_url), False

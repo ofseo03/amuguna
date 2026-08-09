@@ -95,6 +95,7 @@ COMMENT ON FUNCTION purge_stale_profiles(int) IS
 -- -----------------------------------------------------------------------------
 -- 스케줄링
 --
+--   선택 — 무료 티어의 pg_cron 가용성에 의존하지 않도록 현재는 2순위를 적용한다.
 --   1순위 — pg_cron (Supabase Dashboard > Database > Extensions 에서 활성화).
 --           매일 18:20 UTC = 03:20 KST 로 심야 수집 배치와 같은 시간대에 돈다.
 --

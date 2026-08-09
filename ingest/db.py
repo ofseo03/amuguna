@@ -14,11 +14,12 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable, Protocol, Sequence, runtime_checkable
+from typing import Any, ContextManager, Iterable, Protocol, Sequence, runtime_checkable
 
 from .config import EMBEDDING_DIM
 
@@ -77,6 +78,7 @@ RULE_COLUMNS = (
 class Database(Protocol):
     """파이프라인이 의존하는 유일한 DB 계약."""
 
+    def transaction(self) -> ContextManager[Any]: ...
     def latest_content_hash(self, external_id: str) -> str | None: ...
     def insert_raw_document(
         self,
@@ -91,6 +93,9 @@ class Database(Protocol):
     def get_program_id(self, external_id: str) -> int | None: ...
     def upsert_program(self, values: dict[str, Any]) -> int: ...
     def touch_program(self, external_id: str, fetched_at: datetime) -> None: ...
+    def reactivate_program(
+        self, external_id: str, fetched_at: datetime
+    ) -> tuple[str, str, str] | None: ...
     def replace_rules(self, program_id: int, values: dict[str, Any]) -> None: ...
     def replace_embeddings(self, program_id: int, vectors: Sequence[Sequence[float]]) -> None: ...
     def delete_embeddings(self, program_id: int) -> None: ...
@@ -115,6 +120,9 @@ class InMemoryDatabase:
     _next_program_id: int = 1
     _next_raw_id: int = 1
     committed: int = 0
+
+    def transaction(self) -> ContextManager[Any]:
+        return nullcontext()
 
     # -- raw_documents (append-only) ------------------------------------
 
@@ -181,6 +189,16 @@ class InMemoryDatabase:
         program_id = self._by_external.get(external_id)
         if program_id is not None:
             self.programs[program_id]["fetched_at"] = fetched_at
+
+    def reactivate_program(
+        self, external_id: str, fetched_at: datetime
+    ) -> tuple[str, str, str] | None:
+        program_id = self._by_external.get(external_id)
+        if program_id is None or self.programs[program_id].get("status") != "expired":
+            return None
+        row = self.programs[program_id]
+        row.update(status="active", fetched_at=fetched_at)
+        return row["title"], row.get("summary") or "", row.get("body_text") or ""
 
     # -- eligibility_rules -----------------------------------------------
 
@@ -323,7 +341,23 @@ class PostgresDatabase:
                 "--dry-run 으로 InMemoryDatabase 를 쓰세요."
             )
         self.dim = dim
-        self.conn = psycopg.connect(dsn)
+        params = psycopg.conninfo.conninfo_to_dict(dsn)
+        hosts = (
+            params.get("host", "").split(",")
+            + params.get("hostaddr", "").split(",")
+        )
+        local = all(
+            not host
+            or host in {"localhost", "127.0.0.1", "::1"}
+            or host.startswith("/")
+            for host in hosts
+        )
+        # 원격 연결은 인증서를 검증하되 DSN의 SSL 설정과 로컬 평문 연결은 그대로 존중한다.
+        ssl = {} if local or "sslmode" in params else {"sslmode": "verify-full"}
+        self.conn = psycopg.connect(dsn, **ssl)
+
+    def transaction(self) -> ContextManager[Any]:
+        return self.conn.transaction()
 
     # -- raw_documents ----------------------------------------------------
 
@@ -386,6 +420,18 @@ class PostgresDatabase:
                 "UPDATE programs SET fetched_at = %s WHERE external_id = %s",
                 (fetched_at, external_id),
             )
+
+    def reactivate_program(
+        self, external_id: str, fetched_at: datetime
+    ) -> tuple[str, str, str] | None:
+        with self.conn.cursor() as cur:
+            cur.execute(
+                "UPDATE programs SET status = 'active', fetched_at = %s "
+                "WHERE external_id = %s AND status = 'expired' "
+                "RETURNING title, COALESCE(summary, ''), COALESCE(body_text, '')",
+                (fetched_at, external_id),
+            )
+            return cur.fetchone()
 
     # -- eligibility_rules --------------------------------------------------
 

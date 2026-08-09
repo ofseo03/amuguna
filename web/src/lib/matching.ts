@@ -331,7 +331,7 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
   if (hasQueryInput) {
     try {
       const r = await embedQuery(rawQuery);
-      qvec = r.vector;
+      qvec = r.degraded ? null : r.vector;
       degraded = r.degraded;
     } catch {
       // §8 신뢰성: 임베딩 실패 시 집합 A 만으로 렌더 (degraded)
@@ -422,6 +422,7 @@ export async function getProgram(id: number): Promise<Program | null> {
   }
   const sql = getSql();
   if (!sql) return null;
+  // Keep detail visibility aligned with the active matching catalog.
   const rows = await sql`
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
@@ -429,6 +430,8 @@ export async function getProgram(id: number): Promise<Program | null> {
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
     WHERE p.id = ${id}::bigint
+      AND p.status = 'active'
+      AND (p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date)
     LIMIT 1`;
   if (rows.length === 0) return null;
   return rowToProgram(rows[0]);

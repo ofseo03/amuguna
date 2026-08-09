@@ -27,7 +27,12 @@ from .db import Database, utcnow
 from .embedder import Embedder
 from .llm_fallback import LLMFallback, apply_fallback
 from .models import CollectedProgram, EligibilityRules
-from .parser import eligibility_source_text, parse_program
+from .parser import (
+    compute_confidence,
+    eligibility_source_text,
+    parse_program,
+    resolve_parse_method,
+)
 from .summarize import Summarizer
 
 log = logging.getLogger(__name__)
@@ -148,7 +153,18 @@ class Pipeline:
 
         # --- 무변경 -----------------------------------------------------
         if program_id is not None and previous_hash == content_hash:
-            self.db.touch_program(program.external_id, now)
+            restored = self.db.reactivate_program(program.external_id, now)
+            if restored is not None:
+                # 만료 때 지운 벡터는 저장된 동일 입력으로 복원해 재등장 공고를 다시 검색한다.
+                title, summary, body_text = restored
+                result = self.embedder.embed_program(
+                    title=title, summary=summary, body=body_text
+                )
+                self.db.replace_embeddings(program_id, result.vectors)
+                self.report.embeddings_written += 1
+                self.report.chunks_written += len(result.vectors)
+            else:
+                self.db.touch_program(program.external_id, now)
             stats.unchanged += 1
             return
 
@@ -163,10 +179,21 @@ class Pipeline:
         )
 
         rules = parse_program(program)
+        has_age_alternatives = any(
+            condition.get("kind") == "age_alternatives"
+            for condition in rules.extra_conditions
+        )
         if self.llm is not None:
             before = self.llm.calls
             apply_fallback(rules, eligibility_source_text(program), self.llm)
             self.report.llm_parse_calls += self.llm.calls - before
+        if has_age_alternatives:
+            # LLM도 복수 나이군을 min/max로 못 담으므로 최종 정형 필드는 NULL로 유지한다.
+            rules.age_min = rules.age_max = None
+            rules.parse_evidence.pop("age_min", None)
+            rules.parse_evidence.pop("age_max", None)
+            rules.parse_method = resolve_parse_method(rules.parse_evidence)
+            rules.confidence = compute_confidence(rules)
         self.report.parse.record(rules)
 
         # DB 계약: programs.body_text 는 '임베딩 입력 원본(자격요건 문단 포함)'이다.
@@ -236,15 +263,18 @@ class Pipeline:
             return stats
 
         stats.fetched = len(programs)
-        for program in programs:
-            try:
-                self._process(program, stats, now)
-            except Exception as exc:  # 한 건 실패가 배치 전체를 죽이지 않게
-                log.exception("%s 처리 실패: %s", program.external_id, exc)
-                stats.errors.append(f"{program.external_id}: {exc}")
+        with self.db.transaction():
+            for program in programs:
+                try:
+                    # 중첩 psycopg 트랜잭션은 레코드별 savepoint라 한 실패만 되돌린다.
+                    with self.db.transaction():
+                        self._process(program, stats, now)
+                except Exception as exc:  # 한 건 실패가 배치 전체를 죽이지 않게
+                    log.exception("%s 처리 실패: %s", program.external_id, exc)
+                    stats.errors.append(f"{program.external_id}: {exc}")
 
-        if reconcile:
-            stats.expired += self.reconcile(collector)
+            if reconcile:
+                stats.expired += self.reconcile(collector)
 
         self.db.commit()
         return stats

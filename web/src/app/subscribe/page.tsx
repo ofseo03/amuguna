@@ -3,14 +3,19 @@
 /** 알림 신청 (SPEC §9 화면 5) — 이메일 + 동의 체크. §11: MVP 는 수집만, 발송은 이후. */
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function SubscribePage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string; demo?: boolean } | null>(
-    null,
-  );
+  const [result, setResult] = useState<{
+    ok: boolean;
+    message: string;
+    demoMode?: boolean;
+    unsubscribeToken?: string;
+  } | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,11 +28,17 @@ export default function SubscribePage() {
         body: JSON.stringify({ email, consent }),
       });
       const body = await res.json();
+      if (body.code === "no_profile") {
+        router.push("/onboarding");
+        return;
+      }
       setResult({
         ok: Boolean(body.ok),
         message:
           body.message ?? body.errors?.[0]?.message ?? "처리 중 오류가 발생했습니다.",
-        demo: body.demoMode,
+        demoMode: Boolean(body.demoMode),
+        unsubscribeToken:
+          typeof body.unsubscribeToken === "string" ? body.unsubscribeToken : undefined,
       });
     } catch {
       setResult({ ok: false, message: "네트워크 오류가 발생했습니다." });
@@ -114,6 +125,24 @@ export default function SubscribePage() {
             {result.ok ? "완료" : "신청하지 못했습니다"}
           </p>
           <p className="mt-1 text-ink-2">{result.message}</p>
+          {result.ok && !result.demoMode && result.unsubscribeToken && (
+            <div className="mt-4">
+              <p className="text-sm text-ink-2">
+                해지 코드는 다시 확인할 수 없습니다. 복사해 보관해 주세요. 이
+                코드로 등록된 이메일과 프로필 정보를 언제든 즉시 삭제할 수
+                있습니다.
+              </p>
+              <code className="mt-2 block break-all rounded bg-white px-3 py-2 text-ink">
+                {result.unsubscribeToken}
+              </code>
+              <Link
+                href={`/unsubscribe?token=${encodeURIComponent(result.unsubscribeToken)}`}
+                className="mt-3 inline-block font-semibold text-brand-dark underline"
+              >
+                이 코드로 알림 해지하기
+              </Link>
+            </div>
+          )}
         </div>
       )}
 

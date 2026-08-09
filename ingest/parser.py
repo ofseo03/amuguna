@@ -149,6 +149,20 @@ def _clause_of(text: str, start: int, end: int) -> str:
     return text[left:right].strip(" \t-–—·")
 
 
+def _alternative_age_clause(text: str) -> str | None:
+    """서로 다른 나이 매치 사이에 '또는'이 있으면 원문 절을 돌려준다."""
+    spans: list[tuple[int, int]] = []
+    for pattern, _ in AGE:
+        for match in re.finditer(pattern, text):
+            if not any(match.start() < end and start < match.end() for start, end in spans):
+                spans.append((match.start(), match.end()))
+    spans.sort()
+    for (start, end), (next_start, next_end) in zip(spans, spans[1:]):
+        if "또는" in text[end:next_start]:
+            return _clause_of(text, start, next_end)
+    return None
+
+
 def _apply(
     patterns: Iterable[tuple[str, Handler]],
     text: str,
@@ -261,9 +275,22 @@ def parse_eligibility(raw_text: str) -> EligibilityRules:
     evidence: dict[str, Any] = {}
     consumed: list[tuple[int, int]] = []
     rejected: list[dict[str, str]] = []
+    age_alternative = _alternative_age_clause(text) if text else None
 
     if text:
         _apply(AGE, text, out, evidence, consumed, dependent_guard=True, rejected=rejected)
+        if age_alternative:
+            # 단일 min/max로 표현 못 하는 복수 나이군은 원문을 남기고 좁은 필터를 비운다.
+            out["age_min"] = out["age_max"] = None
+            evidence.pop("age_min", None)
+            evidence.pop("age_max", None)
+            rejected.append(
+                {
+                    "kind": "age_alternatives",
+                    "text": age_alternative,
+                    "reason": "'또는'으로 연결된 복수 나이 조건 — 자동 판정 안 함",
+                }
+            )
         # 소득은 가구 단위 조건이라 부양가족 가드를 걸지 않는다
         # ('다자녀 가구 중 중위소득 150% 이하'가 통째로 버려지는 것을 막는다).
         _apply(INCOME, text, out, evidence, consumed, dependent_guard=False, rejected=rejected)
@@ -276,7 +303,11 @@ def parse_eligibility(raw_text: str) -> EligibilityRules:
             evidence.pop("age_min", None)
             evidence.pop("age_max", None)
 
-    has_age = out.get("age_min") is not None or out.get("age_max") is not None
+    has_age = (
+        age_alternative is not None
+        or out.get("age_min") is not None
+        or out.get("age_max") is not None
+    )
     regions, region_ev = lookup_regions(text) if text else ([], [])
     occupations, occupation_ev = (
         lookup_occupations(text, drop_age_descriptors=has_age) if text else ([], [])

@@ -110,6 +110,54 @@ class Collector(ABC):
         """'source_key:원본고유번호' (SPEC §3.2). source_url 을 키로 쓰지 않는다."""
         return f"{self.source_key}:{native_id}"
 
+    def _validate_empty_page(self, payload: Any) -> None:
+        """실 소스별 성공 코드와 빈 목록 모양을 확인한다."""
+        if self.source_key not in {"social_security", "bizinfo", "finlife"}:
+            return
+        if not isinstance(payload, dict):
+            raise CollectorError(f"{self.source_key}: 오류 또는 잘못된 응답 봉투")
+        valid = False
+        message = ""
+        if self.source_key == "social_security":
+            response = payload.get("response") or payload
+            header = response.get("header") if isinstance(response, dict) else None
+            body = response.get("body") if isinstance(response, dict) else None
+            items = body.get("items") if isinstance(body, dict) else None
+            valid = (
+                isinstance(header, dict)
+                and str(header.get("resultCode")) == "00"
+                and (
+                    isinstance(items, list)
+                    or isinstance(items, dict) and (not items or "item" in items)
+                )
+            )
+            message = str(header.get("resultMsg") or "") if isinstance(header, dict) else ""
+        elif self.source_key == "bizinfo":
+            response = payload.get("response") or {}
+            header = response.get("header") if isinstance(response, dict) else {}
+            body = response.get("body") if isinstance(response, dict) else {}
+            header = header if isinstance(header, dict) else {}
+            body = body if isinstance(body, dict) else {}
+            items = payload.get("jsonArray") if "jsonArray" in payload else body.get("items")
+            code = payload.get("resultCode", header.get("resultCode"))
+            valid = str(code) == "0000" and (
+                isinstance(items, list) or isinstance(items, dict)
+            )
+            message = str(payload.get("resultMsg") or header.get("resultMsg") or "")
+        else:
+            result = payload.get("result")
+            items = result.get("baseList") if isinstance(result, dict) else None
+            valid = (
+                isinstance(result, dict)
+                and str(result.get("err_cd")) == "000"
+                and isinstance(items, list)
+            )
+            message = str(result.get("err_msg") or "") if isinstance(result, dict) else ""
+        # 빈 결과는 명시적인 성공 봉투일 때만 페이지 끝으로 인정해 장애를 숨기지 않는다.
+        if not valid:
+            detail = f": {message}" if message else ""
+            raise CollectorError(f"{self.source_key}: 오류 또는 잘못된 응답 봉투{detail}")
+
     # ------------------------------------------------------------------ API
 
     def fetch(self, *, since: str | None = None, max_pages: int = 5) -> list[CollectedProgram]:
@@ -121,6 +169,8 @@ class Collector(ABC):
             for page in range(1, max_pages + 1):
                 payload = self._get(self._query_params(since=since, page=page))
                 items = self._items(payload)
+                if not items:
+                    self._validate_empty_page(payload)
                 payloads.append(payload)
                 if len(items) < self.page_size:
                     break

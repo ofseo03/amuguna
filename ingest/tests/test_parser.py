@@ -173,6 +173,18 @@ def test_parse_evidence_records_matched_span() -> None:
     assert rules.parse_method == "regex"
 
 
+def test_age_conjunction_keeps_intersected_range() -> None:
+    rules = parse_eligibility("만 19세 이상 및 만 34세 이하")
+    assert (rules.age_min, rules.age_max) == (19, 34)
+    assert "age_alternatives" not in {c["kind"] for c in rules.extra_conditions}
+
+
+def test_age_or_is_kept_for_manual_review() -> None:
+    rules = parse_eligibility("만 19세 이하 또는 만 65세 이상")
+    assert (rules.age_min, rules.age_max) == (None, None)
+    assert "age_alternatives" in {c["kind"] for c in rules.extra_conditions}
+
+
 def test_confidence_low_when_nothing_extracted() -> None:
     rules = parse_eligibility("자세한 내용은 공고문을 참고하시기 바랍니다")
     assert rules.filled_fields() == []

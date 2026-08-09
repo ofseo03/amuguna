@@ -28,6 +28,18 @@ export async function POST(req: Request) {
     );
   }
 
+  const profile = await readProfile();
+  if (!profile) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "no_profile",
+        message: "먼저 기본 정보를 입력해 주세요.",
+      },
+      { status: 401 },
+    );
+  }
+
   let body: Record<string, unknown> = {};
   try {
     body = (await req.json()) as Record<string, unknown>;
@@ -68,7 +80,6 @@ export async function POST(req: Request) {
     });
   }
 
-  const profile = await readProfile();
   try {
     const sql = getSql();
     if (!sql) throw new Error("DB 미연결");
@@ -76,11 +87,16 @@ export async function POST(req: Request) {
       INSERT INTO profiles (id, age, gender, occupation, region_code, income_decile, email, unsubscribe_token, created_at)
       VALUES (
         ${sessionId}::uuid,
-        ${profile?.age ?? null}, ${profile?.gender ?? null}, ${profile?.occupation ?? null},
-        ${profile?.sigunguCode ?? null}, ${profile?.incomeDecile ?? null},
+        ${profile.age}, ${profile.gender}, ${profile.occupation},
+        ${profile.sigunguCode}, ${profile.incomeDecile},
         ${email.value}, ${token}, now()
       )
       ON CONFLICT (id) DO UPDATE SET
+        age = EXCLUDED.age,
+        gender = EXCLUDED.gender,
+        occupation = EXCLUDED.occupation,
+        region_code = EXCLUDED.region_code,
+        income_decile = EXCLUDED.income_decile,
         email = EXCLUDED.email,
         unsubscribe_token = EXCLUDED.unsubscribe_token`;
   } catch (e) {

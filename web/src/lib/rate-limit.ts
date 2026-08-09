@@ -67,6 +67,23 @@ export function clientIp(req: Request): string {
   return req.headers.get("x-real-ip") ?? "unknown";
 }
 
+export function checkSessionAndIpRateLimit(
+  sessionId: string | null,
+  req: Request,
+  now = Date.now(),
+): RateLimitResult {
+  // Enforce both identities so rotating sessions cannot reset the IP budget.
+  const ip = clientIp(req);
+  const sessionResult = checkRateLimit(`session:${sessionId ?? `anon:${ip}`}`, now);
+  const ipResult = checkRateLimit(`ip:${ip}`, now);
+  return {
+    allowed: sessionResult.allowed && ipResult.allowed,
+    remaining: Math.min(sessionResult.remaining, ipResult.remaining),
+    retryAfter: Math.max(sessionResult.retryAfter, ipResult.retryAfter),
+    limit: LIMIT,
+  };
+}
+
 export function rateLimitKey(sessionId: string | null, req: Request): string {
   return `${sessionId ?? "anon"}|${clientIp(req)}`;
 }
