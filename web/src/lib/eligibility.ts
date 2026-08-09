@@ -130,6 +130,32 @@ export function isOpen(prog: Program, now = new Date()): boolean {
   return new Date(prog.ends_at).getTime() >= now.getTime();
 }
 
+export type UnavailableReason = "expired" | "ended" | "needs_review";
+
+/**
+ * 이 공고를 '현재 신청 가능한 것'으로 보여주면 안 되는 이유. 없으면 null.
+ *
+ * 매칭 경로는 `isOpen` 으로 이미 걸러지지만, 상세 화면은 id 로 직접 들어온다
+ * (북마크·공유 링크·검색엔진). 거기서 아무 표시가 없으면 원본에서 내려간 공고나
+ * 마감된 공고를 계속 유효한 기회로 읽게 된다.
+ */
+export function unavailableReason(
+  prog: Program,
+  now = new Date(),
+): UnavailableReason | null {
+  if (prog.status === "expired") return "expired";
+  if (prog.status === "needs_review") return "needs_review";
+  if (prog.ends_at && new Date(prog.ends_at).getTime() < now.getTime()) return "ended";
+  return null;
+}
+
+export const UNAVAILABLE_MESSAGE: Record<UnavailableReason, string> = {
+  expired: "이 공고는 원본에서 내려갔습니다. 지금은 신청할 수 없습니다.",
+  ended: "접수가 마감된 공고입니다. 지금은 신청할 수 없습니다.",
+  needs_review:
+    "이 공고는 자격요건을 자동으로 확인하지 못해 검토 중입니다. 아래 내용은 참고용이며 반드시 원문을 확인해 주세요.",
+};
+
 /** 마감 D-n. 상시/무기한이면 null */
 export function dDay(prog: Program, now = new Date()): number | null {
   if (prog.is_always_open || !prog.ends_at) return null;

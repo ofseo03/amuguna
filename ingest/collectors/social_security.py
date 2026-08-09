@@ -50,16 +50,24 @@ class SocialSecurityCollector(Collector):
             params["srchModDt"] = since.replace("-", "")
         return params
 
-    def _items(self, payload: Any) -> list[dict[str, Any]]:
+    def _items_container(self, payload: Any) -> list[Any] | None:
         if not isinstance(payload, dict):
-            return []
-        body = (payload.get("response") or {}).get("body") or payload.get("body") or {}
-        items = body.get("items") or {}
+            return None
+        body = (payload.get("response") or {}).get("body") or payload.get("body")
+        if not isinstance(body, dict):
+            return None  # 봉투 자체가 다르다 → 0건이 아니라 스키마 변경/에러
+        if "items" not in body:
+            return None
+        items = body.get("items")
+        if items in (None, ""):
+            return []  # 항목 컨테이너는 있는데 비었다 = 정상적인 0건
         if isinstance(items, dict):
-            items = items.get("item") or []
+            items = items.get("item")
+            if items in (None, ""):
+                return []
         if isinstance(items, dict):
             items = [items]
-        return [i for i in items if isinstance(i, dict)]
+        return list(items) if isinstance(items, list) else None
 
     def _map_item(self, item: dict[str, Any]) -> CollectedProgram | None:
         native_id = first_of(item, ("servId", "servid", "SERV_ID"))

@@ -50,15 +50,21 @@ class BizinfoCollector(Collector):
             params["searchBgnDe"] = since.replace("-", "")  # 증분 수집 (W1 검증)
         return params
 
-    def _items(self, payload: Any) -> list[dict[str, Any]]:
+    def _items_container(self, payload: Any) -> list[Any] | None:
         if not isinstance(payload, dict):
+            return None
+        if "jsonArray" in payload:
+            job = payload.get("jsonArray")
+        else:
+            body = (payload.get("response") or {}).get("body")
+            if not isinstance(body, dict) or "items" not in body:
+                return None  # 두 봉투 형태 어느 쪽도 아니다 → 0건으로 보지 않는다
+            job = body.get("items")
+        if job in (None, ""):
             return []
-        job = payload.get("jsonArray")
-        if job is None:
-            job = (payload.get("response") or {}).get("body", {}).get("items")
         if isinstance(job, dict):
             job = [job]
-        return [i for i in (job or []) if isinstance(i, dict)]
+        return list(job) if isinstance(job, list) else None
 
     def _map_item(self, item: dict[str, Any]) -> CollectedProgram | None:
         native_id = first_of(item, ("pblancId", "pblance_id"))

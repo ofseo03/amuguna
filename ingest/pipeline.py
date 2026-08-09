@@ -43,11 +43,13 @@ class SourceStats:
     updated: int = 0
     unchanged: int = 0
     expired: int = 0
+    #: expired 였다가 원본에 다시 나타나 status·임베딩을 복구한 건
+    reactivated: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
     def changed(self) -> int:
-        return self.created + self.updated
+        return self.created + self.updated + self.reactivated
 
 
 @dataclass
@@ -105,6 +107,10 @@ class RunReport:
     embedding_provider: str = "mock"
     dry_run: bool = True
     reconciled: bool = False
+    #: SPEC §8 90일 파기로 삭제된 익명 프로필 수 (live 실행에서만 > 0)
+    profiles_purged: int = 0
+    #: 파기 호출이 실패했으면 사유. 수집 결과를 버리지는 않되 리포트로 드러낸다.
+    purge_error: str | None = None
     started_at: datetime = field(default_factory=utcnow)
 
     @property
@@ -116,6 +122,7 @@ class RunReport:
             total.updated += stats.updated
             total.unchanged += stats.unchanged
             total.expired += stats.expired
+            total.reactivated += stats.reactivated
             total.errors.extend(stats.errors)
         return total
 
@@ -145,9 +152,16 @@ class Pipeline:
         content_hash = program.content_hash()
         previous_hash = self.db.latest_content_hash(program.external_id)
         program_id = self.db.get_program_id(program.external_id)
+        previous_status = (
+            self.db.get_program_status(program.external_id) if program_id is not None else None
+        )
+        # 전량 대조로 expired 된 건은 임베딩 행이 지워져 있다 (expire_programs).
+        # 원본에 다시 나타났을 때 fetched_at 만 갱신하면 status 도 임베딩도 그대로라
+        # '내용이 안 바뀐 채 돌아온 공고'는 영영 매칭에서 빠진다. 재적재 경로로 보낸다.
+        returned_from_expired = previous_status == "expired"
 
         # --- 무변경 -----------------------------------------------------
-        if program_id is not None and previous_hash == content_hash:
+        if program_id is not None and previous_hash == content_hash and not returned_from_expired:
             self.db.touch_program(program.external_id, now)
             stats.unchanged += 1
             return
@@ -215,6 +229,8 @@ class Pipeline:
 
         if previous_hash is None:
             stats.created += 1
+        elif returned_from_expired:
+            stats.reactivated += 1
         else:
             stats.updated += 1
 
@@ -238,7 +254,12 @@ class Pipeline:
         stats.fetched = len(programs)
         for program in programs:
             try:
-                self._process(program, stats, now)
+                # SAVEPOINT 안에서 처리한다. 예외가 나면 이 건의 부분 쓰기만
+                # 되돌리고 트랜잭션은 살아 있는 상태로 빠져나온다 — 이게 없으면
+                # 실패한 문장 하나가 트랜잭션을 aborted 로 만들어 이후 전 건이
+                # 연쇄 실패하고, 마지막 commit 이 성공분까지 롤백한다.
+                with self.db.record_scope():
+                    self._process(program, stats, now)
             except Exception as exc:  # 한 건 실패가 배치 전체를 죽이지 않게
                 log.exception("%s 처리 실패: %s", program.external_id, exc)
                 stats.errors.append(f"{program.external_id}: {exc}")
@@ -279,11 +300,30 @@ class Pipeline:
         *,
         since: str | None = None,
         reconcile: bool = False,
+        purge_profiles: bool = False,
     ) -> RunReport:
         for collector in collectors:
             self.run_source(collector, since=since, reconcile=reconcile)
         self.db.commit()
+        if purge_profiles:
+            self.purge_profiles()
         return self.report
+
+    def purge_profiles(self) -> int:
+        """SPEC §8 90일 자동 파기. 심야 배치가 매일 도는 김에 같이 실행한다.
+
+        마이그레이션의 `purge_stale_profiles()` 는 정의만 되어 있고 스케줄러가
+        붙어 있지 않으면 한 번도 실행되지 않는다 — 정책이 문서에만 존재하게 된다.
+        """
+        try:
+            self.report.profiles_purged = self.db.purge_stale_profiles()
+        except Exception as exc:  # 파기 실패가 수집 결과를 되돌리게 두지 않는다
+            log.error("프로필 자동 파기 실패: %s", exc)
+            self.report.purge_error = str(exc)
+            return 0
+        if self.report.profiles_purged:
+            log.info("보존기간 경과 익명 프로필 %d건 삭제", self.report.profiles_purged)
+        return self.report.profiles_purged
 
 
 # ----------------------------------------------------------------- 리포트 렌더
@@ -297,20 +337,26 @@ def render_report(report: RunReport) -> str:
     lines.append(f"시작: {report.started_at.isoformat(timespec='seconds')}")
     lines.append(f"임베딩 provider: {report.embedding_provider}")
     lines.append("")
-    header = f"{'source':<18}{'fetched':>8}{'new':>7}{'changed':>9}{'same':>7}{'expired':>9}{'err':>6}"
+    header = (
+        f"{'source':<18}{'fetched':>8}{'new':>7}{'changed':>9}{'same':>7}"
+        f"{'expired':>9}{'back':>6}{'err':>6}"
+    )
     lines.append(header)
     lines.append("-" * len(header))
     for stats in report.sources.values():
         lines.append(
             f"{stats.source_key:<18}{stats.fetched:>8}{stats.created:>7}"
-            f"{stats.updated:>9}{stats.unchanged:>7}{stats.expired:>9}{len(stats.errors):>6}"
+            f"{stats.updated:>9}{stats.unchanged:>7}{stats.expired:>9}"
+            f"{stats.reactivated:>6}{len(stats.errors):>6}"
         )
     total = report.totals
     lines.append("-" * len(header))
     lines.append(
         f"{'TOTAL':<18}{total.fetched:>8}{total.created:>7}"
-        f"{total.updated:>9}{total.unchanged:>7}{total.expired:>9}{len(total.errors):>6}"
+        f"{total.updated:>9}{total.unchanged:>7}{total.expired:>9}"
+        f"{total.reactivated:>6}{len(total.errors):>6}"
     )
+    lines.append("  (back = expired 였다가 원본에 다시 나타나 복구한 건)")
 
     parse = report.parse
     lines.append("")
@@ -336,6 +382,10 @@ def render_report(report: RunReport) -> str:
     lines.append(
         f"LLM 호출: 자격요건 보완 {report.llm_parse_calls}회 / 요약·절차 {report.llm_summary_calls}회"
     )
+    if report.purge_error:
+        lines.append(f"!! 프로필 90일 파기 실패 (SPEC §8): {report.purge_error}")
+    elif not report.dry_run:
+        lines.append(f"프로필 90일 파기: {report.profiles_purged}건 삭제 (SPEC §8)")
     if total.errors:
         lines.append("")
         lines.append(f"!! 오류 {len(total.errors)}건")

@@ -4,13 +4,20 @@
 import { useState } from "react";
 import Link from "next/link";
 
+interface SubscribeResult {
+  ok: boolean;
+  message: string;
+  demo?: boolean;
+  /** 해지 코드 — MVP 는 이메일 발송이 없어 이 화면이 사용자가 코드를 받는 유일한 경로다 */
+  token?: string;
+  code?: string;
+}
+
 export default function SubscribePage() {
   const [email, setEmail] = useState("");
   const [consent, setConsent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string; demo?: boolean } | null>(
-    null,
-  );
+  const [result, setResult] = useState<SubscribeResult | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -28,6 +35,8 @@ export default function SubscribePage() {
         message:
           body.message ?? body.errors?.[0]?.message ?? "처리 중 오류가 발생했습니다.",
         demo: body.demoMode,
+        token: typeof body.unsubscribeToken === "string" ? body.unsubscribeToken : undefined,
+        code: typeof body.code === "string" ? body.code : undefined,
       });
     } catch {
       setResult({ ok: false, message: "네트워크 오류가 발생했습니다." });
@@ -114,6 +123,45 @@ export default function SubscribePage() {
             {result.ok ? "완료" : "신청하지 못했습니다"}
           </p>
           <p className="mt-1 text-ink-2">{result.message}</p>
+
+          {result.code === "no_profile" && (
+            <p className="mt-3">
+              <Link
+                href="/onboarding"
+                className="font-semibold text-brand underline hover:text-brand-dark"
+              >
+                기본 정보 입력하러 가기 →
+              </Link>
+            </p>
+          )}
+
+          {/*
+            해지 코드 노출. MVP 는 알림 메일을 보내지 않으므로(§11) 이 화면이
+            사용자가 코드를 받는 유일한 경로다. 여기서 버리면 해지 페이지가
+            본 적 없는 코드를 요구하게 되고, 저장된 이메일·프로필을 사용자가
+            지울 방법이 사라진다 (§8 삭제권).
+            메일 발송이 붙으면 이 블록 대신 메일의 해지 링크가 그 역할을 한다.
+          */}
+          {result.ok && result.token && (
+            <div className="mt-4 rounded-lg border border-line bg-white px-4 py-3">
+              <p className="text-sm font-semibold text-ink">
+                해지 코드 — 지금 저장해 주세요
+              </p>
+              <p className="mt-1 text-sm text-ink-2">
+                알림 해지와 저장된 정보 삭제에 필요합니다. 아직 알림 메일을 보내지
+                않는 단계라 이 코드를 다시 보여드릴 방법이 없습니다.
+              </p>
+              <code className="mt-2 block break-all rounded bg-bg-sunken px-3 py-2 font-mono text-sm text-ink">
+                {result.token}
+              </code>
+              <Link
+                href={`/unsubscribe?token=${encodeURIComponent(result.token)}`}
+                className="mt-2 inline-block text-sm font-semibold text-brand underline hover:text-brand-dark"
+              >
+                해지 페이지 열기
+              </Link>
+            </div>
+          )}
         </div>
       )}
 

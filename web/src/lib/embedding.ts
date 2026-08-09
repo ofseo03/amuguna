@@ -78,23 +78,32 @@ export function resolveProvider(): EmbeddingProvider {
 /**
  * 질의 벡터 생성.
  *
- * 실 provider(voyage/openai)는 W1 한국어 성능 실측 후 확정 예정이라 아직 미연결이다.
- * 키가 없거나 호출이 실패하면 mock으로 폴백한다 —
- * SPEC §8 신뢰성: "임베딩 API 실패 시 → 집합 A만으로 렌더 (degraded)" 의
- * 앞단으로, 완전 실패 전에 결정론적 폴백을 한 번 더 둔다.
+ * **질의 벡터는 색인 벡터와 같은 공간에서 나와야 한다.** 수집 파이프라인
+ * (`ingest/embedder.py`)은 EMBEDDING_PROVIDER 가 voyage/openai 이고 키가 있으면
+ * 실제로 그 API 를 호출해 그 벡터를 저장한다. 그런데 여기서 mock bigram 벡터를
+ * 만들어 비교하면 서로 무관한 두 공간을 재는 셈이라 유사도가 난수와 다를 바 없다 —
+ * 그것도 '실 임베딩을 켠' 바로 그 설정에서.
+ *
+ * 실 provider 연동은 W1 한국어 성능 실측 후로 미뤄져 아직 없다. 그래서 그 구성에서는
+ * **mock 으로 대신하지 않고 벡터를 포기한다**(vector: null + degraded). 호출부는
+ * 집합 A(자격 필터)만으로 렌더하고 사용자에게 안내 문구를 띄운다
+ * (SPEC §8 신뢰성 — "임베딩 API 실패 시 → 집합 A만으로 렌더"). 조용히 틀린 순위를
+ * 보여주는 것보다 의도 축이 빠진 것을 드러내는 편이 낫다.
+ *
+ * provider 를 붙일 때는 이 함수에서 같은 모델을 호출하도록 바꾸면 된다.
  */
 export async function embedQuery(
   text: string,
-): Promise<{ vector: Float64Array; provider: EmbeddingProvider; degraded: boolean }> {
+): Promise<{ vector: Float64Array | null; provider: EmbeddingProvider; degraded: boolean }> {
   const provider = resolveProvider();
-  if (provider === "mock" || !process.env.EMBEDDING_API_KEY) {
-    return { vector: mockEmbed(text), provider: "mock", degraded: provider !== "mock" };
+  if (provider === "mock") {
+    // 색인도 mock 알고리즘으로 만들어졌다 (양쪽이 바이트 단위로 같은 계약).
+    return { vector: mockEmbed(text), provider: "mock", degraded: false };
   }
-  try {
-    // 실 provider 연동 지점 (W1 확정 후 구현).
-    // 현재는 계약된 mock 알고리즘으로 결정론적 동작을 보장한다.
-    return { vector: mockEmbed(text), provider, degraded: false };
-  } catch {
-    return { vector: mockEmbed(text), provider: "mock", degraded: true };
-  }
+  // TODO(W1): voyage/openai 질의 임베딩 연동. 연동 전까지는 의도 축을 끈다.
+  console.warn(
+    `[embedding] EMBEDDING_PROVIDER=${provider} 는 질의 경로에 아직 연결되지 않았습니다. ` +
+      "색인 벡터와 다른 공간을 비교하지 않도록 의도 검색을 끕니다 (degraded).",
+  );
+  return { vector: null, provider, degraded: true };
 }

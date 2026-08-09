@@ -4,7 +4,13 @@
  */
 import { NextResponse } from "next/server";
 import { getProgram } from "@/lib/matching";
-import { checklist, dDay, evaluate } from "@/lib/eligibility";
+import {
+  checklist,
+  dDay,
+  evaluate,
+  UNAVAILABLE_MESSAGE,
+  unavailableReason,
+} from "@/lib/eligibility";
 import { readProfile } from "@/lib/session";
 import { isDbConfigured } from "@/lib/db";
 
@@ -43,10 +49,17 @@ export async function GET(
 
   const profile = await readProfile();
   const ev = profile ? evaluate(program.rules, profile) : null;
+  // 상세는 id 로만 조회하므로 매칭 경로의 status·마감일 필터를 타지 않는다.
+  // 만료·마감 여부를 응답에 실어 소비자가 '현재 유효한 기회'로 오인하지 않게 한다.
+  const unavailable = unavailableReason(program);
 
   return NextResponse.json({
     ok: true,
     program,
+    status: program.status,
+    available: unavailable === null,
+    unavailableReason: unavailable,
+    unavailableMessage: unavailable ? UNAVAILABLE_MESSAGE[unavailable] : null,
     dDay: dDay(program),
     checklist: profile ? checklist(program.rules, profile) : null,
     eligible: ev ? ev.violations === 0 : null,

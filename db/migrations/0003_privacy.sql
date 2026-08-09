@@ -93,24 +93,28 @@ COMMENT ON FUNCTION purge_stale_profiles(int) IS
 
 
 -- -----------------------------------------------------------------------------
--- 스케줄링
+-- 스케줄링 — **수집 배치가 매 실행 호출한다 (기본 동작)**
 --
---   1순위 — pg_cron (Supabase Dashboard > Database > Extensions 에서 활성화).
---           매일 18:20 UTC = 03:20 KST 로 심야 수집 배치와 같은 시간대에 돈다.
+--   `ingest/pipeline.py::Pipeline.purge_profiles` 가 live 실행마다
+--   `SELECT purge_stale_profiles()` 를 호출하고, 삭제 건수를 수집 리포트에
+--   남긴다 (§10 수집 상태 로깅과 같은 자리). 실패하면 리포트에 purge_error 로
+--   드러나고 stderr 에 경고가 찍힌다. 끄려면 `python -m ingest --no-purge`.
+--
+--   이 파일에 pg_cron 스케줄을 심지 않는 이유: 확장 활성화가 요금제·대시보드
+--   설정에 의존해 마이그레이션만으로 보장되지 않는다. 실제로 매일 도는 것이
+--   확인된 실행 지점(심야 수집 배치)에 붙이는 편이 정책이 '문서에만 존재하는'
+--   상태를 만들지 않는다.
+--
+--   DB 쪽에서도 이중으로 돌리고 싶으면 (수집 배치가 멈춰도 파기는 돌게):
 --
 --     CREATE EXTENSION IF NOT EXISTS pg_cron;
 --     SELECT cron.schedule(
 --       'purge-stale-profiles',
---       '20 18 * * *',
+--       '20 18 * * *',                       -- 18:20 UTC = 03:20 KST
 --       $cron$ SELECT public.purge_stale_profiles(); $cron$
 --     );
 --
---   2순위 — pg_cron 을 쓸 수 없으면(무료 티어 정책 등) 수집 배치의 마지막 단계에서
---           호출한다. GitHub Actions 심야 cron 이 이미 매일 도므로 추가 인프라가 없다.
---
---     psql "$DATABASE_URL" -c "SELECT purge_stale_profiles();"
---
---   어느 쪽이든 삭제 건수를 배치 로그에 남긴다 (§10 수집 상태 로깅과 같은 자리).
+--   함수가 멱등이라 두 경로가 겹쳐 돌아도 안전하다 (두 번째는 0건 삭제).
 --   심사 구간(9/7~9/11) 중에도 동작해야 하는 항목이므로 W4 배포 점검에 포함할 것.
 -- -----------------------------------------------------------------------------
 

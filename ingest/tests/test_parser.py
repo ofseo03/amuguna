@@ -234,3 +234,52 @@ def test_age_descriptor_is_not_also_an_occupation_condition() -> None:
     assert rules.occupations is None
     # 나이 조건이 없으면 직업 신호로 남긴다
     assert parse_eligibility("노인 대상 일자리 연계 사업").occupations == ["retired"]
+
+
+# --------------------------------------------------------------------------
+# 배타적 연령 구간 (코드리뷰 지적) — 좁히지 말고 비운다
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "만 19세 이상 34세 이하 또는 만 65세 이상인 자",
+        "만 19~34세 및 만 65세 이상 어르신",
+        "만 19세 이상 34세 이하 혹은 만 65세 이상",
+    ],
+)
+def test_disjoint_age_ranges_are_not_narrowed(text: str) -> None:
+    """'19~34세 또는 65세 이상'을 19~34세로 저장하면 고령자가 전원 오탈락한다.
+
+    단일 [min, max] 로 표현할 수 없으므로 NULL(= 통과) 로 두고 원문을 노출한다.
+    """
+    rules = parse_eligibility(text)
+    assert rules.age_min is None and rules.age_max is None
+    assert rules.review_reason == "age_alternatives"
+    assert "age" in rules.unrepresentable  # LLM 보완이 다시 좁히지 못하게
+    kinds = [c.get("kind") for c in rules.extra_conditions]
+    assert "age_alternatives" in kinds, "원문 조건이 상세 화면에 남아야 한다"
+
+
+def test_single_age_range_is_still_parsed() -> None:
+    """대안 감지가 정상 단일 구간까지 비우면 안 된다 (과잉 반응 방지)."""
+    rules = parse_eligibility("만 19세 이상 34세 이하 청년")
+    assert (rules.age_min, rules.age_max) == (19, 34)
+    assert rules.review_reason != "age_alternatives"
+
+
+def test_distant_age_mention_does_not_trigger_alternatives() -> None:
+    """접속사 없이 멀리 떨어진 언급은 대안으로 보지 않는다 (기존 동작 유지)."""
+    rules = parse_eligibility(
+        "서울시 관악구에 거주하는 만 19세 이상 34세 이하 청년. "
+        "별도 공고로 만 65세 이상 어르신 대상 사업도 운영합니다."
+    )
+    assert (rules.age_min, rules.age_max) == (19, 34)
+
+
+def test_unrepresentable_age_blocks_llm_fallback() -> None:
+    from ingest.llm_fallback import missing_field_groups
+
+    rules = parse_eligibility("만 19세 이상 34세 이하 또는 만 65세 이상")
+    assert "age" not in missing_field_groups(rules)

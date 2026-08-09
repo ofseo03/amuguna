@@ -238,12 +238,19 @@ p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
 
 `purge_stale_profiles(p_retention_days int DEFAULT 90) RETURNS integer` — 이메일이 **없는** 프로필만 90일 경과 시 삭제하고 삭제 건수를 반환한다. 이메일 등록 프로필은 알림 유지를 위해 제외하며(예외를 두지 않으면 90일 뒤 알림이 조용히 죽는다), 해지 시 즉시 `DELETE` 한다.
 
-스케줄링은 둘 중 하나 — 자세한 스니펫은 `0003_privacy.sql` 하단 주석에 있다.
+**스케줄링은 이미 붙어 있다 — 수집 배치가 매 live 실행 호출한다.** `Pipeline.purge_profiles`
+가 `SELECT purge_stale_profiles()` 를 돌리고 삭제 건수를 수집 리포트(`privacy.profiles_purged`)에
+남긴다. 실패하면 `privacy.purge_error` 와 stderr 경고로 드러난다. 끄려면 `--no-purge`.
 
-1. **pg_cron** (권장). `CREATE EXTENSION pg_cron;` 후 `cron.schedule('purge-stale-profiles','20 18 * * *', ...)` = 매일 03:20 KST.
-2. **수집 배치에서 호출.** GitHub Actions 심야 cron 마지막 단계에 `psql "$DATABASE_URL" -c "SELECT purge_stale_profiles();"`. 추가 인프라가 없다.
+함수를 정의만 해두고 스케줄러를 붙이지 않으면 "90일 자동 파기" 가 문서에만 존재하는
+상태가 된다. pg_cron 은 확장 활성화가 요금제·대시보드 설정에 달려 있어 마이그레이션만으로
+보장되지 않으므로, 실제로 매일 도는 것이 확인된 심야 배치를 1순위 실행 지점으로 삼았다.
 
-어느 쪽이든 반환값을 배치 로그에 남긴다. 심사 구간(9/7~9/11)에도 동작해야 하므로 **W4 배포 점검 항목**이다.
+수집 배치가 멈춰도 파기는 돌게 하려면 pg_cron 을 **추가로** 걸어도 된다 (함수가 멱등이라
+겹쳐 돌아도 안전하다). 스니펫은 `0003_privacy.sql` 하단 주석에 있다.
+
+심사 구간(9/7~9/11)에도 동작해야 하므로 **W4 배포 점검 항목**이다 — 리포트 아티팩트에서
+`privacy.profiles_purged` 가 찍히는지 확인한다.
 
 ---
 

@@ -37,10 +37,14 @@ class FinlifeCollector(Collector):
             "pageNo": page,
         }
 
-    def _items(self, payload: Any) -> list[dict[str, Any]]:
+    def _items_container(self, payload: Any) -> list[Any] | None:
         if not isinstance(payload, dict):
-            return []
-        result = payload.get("result") or {}
+            return None
+        result = payload.get("result")
+        if not isinstance(result, dict) or "baseList" not in result:
+            # finlife 는 인증 실패도 200 + {"result": {"err_cd": "010", ...}} 로 준다.
+            # baseList 가 아예 없으면 '상품 0건'이 아니라 에러/스키마 변경이다.
+            return None
         base = result.get("baseList") or []
         options = result.get("optionList") or []
         by_product: dict[str, list[dict[str, Any]]] = {}

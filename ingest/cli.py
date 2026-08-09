@@ -65,16 +65,32 @@ def build_parser() -> argparse.ArgumentParser:
         "--previous-counts",
         help="전일 소스별 건수 JSON ('{\"bizinfo\": 120}') — 50%% 이상 감소 시 경고 (SPEC §10)",
     )
+    parser.add_argument(
+        "--no-purge",
+        action="store_true",
+        help="보존기간 경과 익명 프로필 자동 파기(SPEC §8)를 건너뛴다. 기본은 실행",
+    )
     parser.add_argument("--json-report", help="리포트를 JSON 으로 저장할 경로")
     parser.add_argument("-v", "--verbose", action="store_true")
     return parser
 
 
+class ConfigError(RuntimeError):
+    """실행 전 구성 오류. 배치를 시작하지 않고 실패로 끝낸다."""
+
+
 def _make_database(dry_run: bool, settings: Settings) -> tuple[Database, bool]:
-    if dry_run or not settings.database_url:
-        if not dry_run:
-            log.warning("DATABASE_URL 미설정 → InMemoryDatabase 로 강등 (쓰기 없음)")
+    if dry_run:
         return InMemoryDatabase(), True
+    if not settings.database_url:
+        # 예전에는 여기서 InMemoryDatabase 로 조용히 강등했다. 그러면 스케줄러의
+        # DATABASE_URL 시크릿이 비었을 때 수집·파싱을 다 하고 아무것도 저장하지 않은 채
+        # 성공 종료한다 — 워크플로는 계속 녹색인데 서비스 데이터는 무기한 정지한다.
+        # InMemoryDatabase 는 명시적 --dry-run 전용이다.
+        raise ConfigError(
+            "DATABASE_URL 이 비어 있습니다. 실 적재에는 필수입니다 "
+            "(쓰기 없이 돌려보려면 --dry-run 을 주세요)."
+        )
     from .db import PostgresDatabase  # psycopg 는 여기서만 필요
 
     return PostgresDatabase(settings.database_url), False
@@ -94,9 +110,14 @@ def _report_to_json(report) -> dict:
                 "updated": s.updated,
                 "unchanged": s.unchanged,
                 "expired": s.expired,
+                "reactivated": s.reactivated,
                 "errors": s.errors,
             }
             for key, s in report.sources.items()
+        },
+        "privacy": {
+            "profiles_purged": report.profiles_purged,
+            "purge_error": report.purge_error,
         },
         "parse": {
             "parsed": parse.parsed,
@@ -131,7 +152,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         # 픽스처 데모는 항상 재현 가능해야 한다 → mock 임베딩 고정.
         settings = dataclasses.replace(settings, mock_embeddings=True)
 
-    db, in_memory = _make_database(args.dry_run, settings)
+    try:
+        db, in_memory = _make_database(args.dry_run, settings)
+    except ConfigError as exc:
+        print(f"구성 오류: {exc}", file=sys.stderr)
+        log.error("%s", exc)
+        return 2
     embedder = Embedder(settings)
     summarizer = Summarizer(
         settings if not args.no_llm else dataclasses.replace(settings, anthropic_api_key="")
@@ -151,7 +177,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     try:
         report = pipeline.run(
-            collectors, since=args.since, reconcile=args.weekly_reconcile
+            collectors,
+            since=args.since,
+            reconcile=args.weekly_reconcile,
+            # 인메모리에는 profiles 가 없다. 실 적재 실행에서만 파기가 의미 있다.
+            purge_profiles=not in_memory and not args.no_purge,
         )
     finally:
         db.close()
@@ -167,6 +197,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         with open(args.json_report, "w", encoding="utf-8") as fh:
             json.dump(_report_to_json(report), fh, ensure_ascii=False, indent=2)
         print(f"\nJSON 리포트 저장: {args.json_report}")
+
+    if report.purge_error:
+        print(
+            "\n[WARN] 프로필 90일 자동 파기가 실행되지 않았습니다 (SPEC §8): "
+            f"{report.purge_error}",
+            file=sys.stderr,
+        )
 
     total = report.totals
     if total.fetched == 0 and total.errors:

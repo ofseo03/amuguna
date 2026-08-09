@@ -3,12 +3,12 @@
  *
  * 자유입력은 이 요청 시점에만 사용하고 저장하지 않는다 (§8).
  * 요청 경로에 LLM 은 없다 (§7.5) — 임베딩 1회 + 조회 1회가 전부다.
- * Rate limit: 익명 세션 + IP 기준 10회/분 (§8).
+ * Rate limit: 세션 10회/분 · IP 60회/분을 각각 검사한다 (§8).
  */
 import { NextResponse } from "next/server";
 import { runMatch } from "@/lib/matching";
 import { readProfile, readSessionId } from "@/lib/session";
-import { checkRateLimit, rateLimitKey } from "@/lib/rate-limit";
+import { checkRequestLimits } from "@/lib/rate-limit";
 import { validateForm, validatePage, validateQuery } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export async function POST(req: Request) {
   const sessionId = await readSessionId();
 
-  const rl = checkRateLimit(rateLimitKey(sessionId, req));
+  const rl = checkRequestLimits(sessionId, req, "match");
   if (!rl.allowed) {
     return NextResponse.json(
       {

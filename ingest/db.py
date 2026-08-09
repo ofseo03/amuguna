@@ -14,11 +14,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Iterable, Protocol, Sequence, runtime_checkable
+from typing import Any, ContextManager, Iterable, Protocol, Sequence, runtime_checkable
 
 from .config import EMBEDDING_DIM
 
@@ -89,6 +90,7 @@ class Database(Protocol):
         fetched_at: datetime,
     ) -> int: ...
     def get_program_id(self, external_id: str) -> int | None: ...
+    def get_program_status(self, external_id: str) -> str | None: ...
     def upsert_program(self, values: dict[str, Any]) -> int: ...
     def touch_program(self, external_id: str, fetched_at: datetime) -> None: ...
     def replace_rules(self, program_id: int, values: dict[str, Any]) -> None: ...
@@ -96,6 +98,8 @@ class Database(Protocol):
     def delete_embeddings(self, program_id: int) -> None: ...
     def active_external_ids(self, source_key: str) -> set[str]: ...
     def expire_programs(self, external_ids: Iterable[str]) -> int: ...
+    def record_scope(self) -> ContextManager[Any]: ...
+    def purge_stale_profiles(self) -> int: ...
     def commit(self) -> None: ...
     def close(self) -> None: ...
 
@@ -153,6 +157,12 @@ class InMemoryDatabase:
 
     def get_program_id(self, external_id: str) -> int | None:
         return self._by_external.get(external_id)
+
+    def get_program_status(self, external_id: str) -> str | None:
+        program_id = self._by_external.get(external_id)
+        if program_id is None:
+            return None
+        return self.programs[program_id].get("status")
 
     def upsert_program(self, values: dict[str, Any]) -> int:
         # 파이프라인이 넘기는 키가 SPEC §5 programs 컬럼과 어긋나면 여기서 즉시 터진다.
@@ -236,6 +246,17 @@ class InMemoryDatabase:
             count += 1
         return count
 
+    def record_scope(self) -> ContextManager[Any]:
+        """한 건 처리 구간. 인메모리에는 롤백할 트랜잭션이 없어 no-op 이다.
+
+        `--dry-run` 은 쓰기가 없으므로 부분 상태가 남아도 부작용이 없다.
+        실 적재의 격리는 `PostgresDatabase.record_scope`(SAVEPOINT) 가 담당한다.
+        """
+        return contextlib.nullcontext()
+
+    def purge_stale_profiles(self) -> int:
+        return 0
+
     def commit(self) -> None:
         self.committed += 1
 
@@ -309,6 +330,34 @@ def to_pgvector(vector: Sequence[float]) -> str:
     return "[" + ",".join(f"{v:.8f}" for v in vector) + "]"
 
 
+#: 로컬 개발용 호스트 — TLS 를 강제하지 않는다.
+_LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
+
+
+def ensure_sslmode(dsn: str, default: str = "verify-full") -> str:
+    """DSN 에 sslmode 가 없으면 인증서 검증까지 켠 값을 채워 넣는다.
+
+    sslmode 를 지정하지 않으면 libpq 기본값은 `prefer` 다 — 암호화는 되지만
+    **서버 인증서를 검증하지 않아** 경로상 공격자가 연결을 중계하면 프로필·이메일
+    질의를 관찰·변조할 수 있다. RLS 는 애플리케이션 role 의 작업을 막지 못한다.
+
+    명시된 값이 있으면 존중한다 (로컬 Postgres 는 `sslmode=disable`).
+    """
+    from urllib.parse import parse_qs, urlsplit
+
+    parts = urlsplit(dsn)
+    if "sslmode=" in (parts.query or "") or "sslmode=" in dsn:
+        return dsn
+    if parse_qs(parts.query).get("sslmode"):
+        return dsn
+    host = (parts.hostname or "").lower()
+    if not host or host in _LOCAL_HOSTS:
+        return dsn
+    separator = "&" if parts.query else "?"
+    log.info("DSN 에 sslmode 가 없어 sslmode=%s 를 적용합니다", default)
+    return f"{dsn}{separator}sslmode={default}"
+
+
 class PostgresDatabase:
     """psycopg 기반 실 적재 구현.
 
@@ -323,7 +372,7 @@ class PostgresDatabase:
                 "--dry-run 으로 InMemoryDatabase 를 쓰세요."
             )
         self.dim = dim
-        self.conn = psycopg.connect(dsn)
+        self.conn = psycopg.connect(ensure_sslmode(dsn))
 
     # -- raw_documents ----------------------------------------------------
 
@@ -368,6 +417,12 @@ class PostgresDatabase:
     def get_program_id(self, external_id: str) -> int | None:
         with self.conn.cursor() as cur:
             cur.execute("SELECT id FROM programs WHERE external_id = %s", (external_id,))
+            row = cur.fetchone()
+        return row[0] if row else None
+
+    def get_program_status(self, external_id: str) -> str | None:
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT status FROM programs WHERE external_id = %s", (external_id,))
             row = cur.fetchone()
         return row[0] if row else None
 
@@ -441,6 +496,34 @@ class PostgresDatabase:
                     "DELETE FROM program_embeddings WHERE program_id = ANY(%s)", (program_ids,)
                 )
         return len(program_ids)
+
+    # -- 트랜잭션 -------------------------------------------------------------
+
+    def record_scope(self) -> ContextManager[Any]:
+        """한 건 처리를 감싸는 SAVEPOINT.
+
+        psycopg 는 autocommit=False 라 문 하나가 실패하면 **트랜잭션 전체가
+        aborted 상태**가 된다. 그 뒤 문장은 전부 InFailedSqlTransaction 으로 죽고,
+        마지막 commit() 은 그 소스의 성공분까지 통째로 되돌린다 — 한 건 실패를
+        격리하려던 파이프라인 의도와 정반대다.
+
+        `conn.transaction()` 은 이미 트랜잭션이 열려 있으면 SAVEPOINT 를 잡고
+        예외 시 그 지점까지만 롤백한다. 열려 있지 않으면 트랜잭션을 시작하고
+        블록 종료 시 커밋한다 (= 건 단위 커밋).
+        """
+        return self.conn.transaction()
+
+    def purge_stale_profiles(self) -> int:
+        """SPEC §8 — 보존기간(기본 90일) 지난 익명 프로필 삭제.
+
+        마이그레이션(0003)의 함수를 배치가 직접 호출한다. pg_cron 은 요금제·확장
+        활성화에 의존하는데, 심야 배치는 어차피 매일 도는 확실한 실행 지점이다.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("SELECT purge_stale_profiles()")
+            row = cur.fetchone()
+        self.conn.commit()
+        return int(row[0]) if row and row[0] is not None else 0
 
     def commit(self) -> None:
         self.conn.commit()

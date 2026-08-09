@@ -158,6 +158,7 @@ def _apply(
     *,
     dependent_guard: bool,
     rejected: list[dict[str, str]],
+    conflicts: list[dict[str, Any]] | None = None,
 ) -> None:
     for pattern, handler in patterns:
         for m in re.finditer(pattern, text):
@@ -179,6 +180,14 @@ def _apply(
             values = handler(m)
             fresh = {k: v for k, v in values.items() if out.get(k) is None}
             if not fresh:
+                # 이미 채워진 필드에 **다른 값**을 주는 매치 = 별개의 대안 조건일 수 있다.
+                # 그냥 버리면 '19~34세 또는 65세 이상'이 조용히 19~34세로 좁혀진다.
+                if conflicts is not None and any(
+                    out.get(k) is not None and out[k] != v for k, v in values.items()
+                ):
+                    conflicts.append(
+                        {"start": m.start(), "end": m.end(), "text": m.group(0), "values": values}
+                    )
                 continue
             out.update(fresh)
             for key in fresh:
@@ -190,6 +199,60 @@ def _apply(
                     "method": "regex",
                 }
             consumed.append((m.start(), m.end()))
+
+
+#: 두 조건을 '둘 중 하나'로 잇는 표현. 이게 사이에 있으면 뒤 조건은 앞 조건의
+#: 상세화가 아니라 **대안**이다.
+_ALTERNATION = re.compile(r"또는|혹은|이거나|거나|및|,|·|/")
+
+#: 대안 판정에 쓰는 최대 간격. 이보다 멀면 같은 절이 아니라고 본다.
+_ALTERNATION_GAP = 30
+
+
+def _alternation_between(text: str, a: tuple[int, int], b: tuple[int, int]) -> bool:
+    """두 매치 구간 사이가 '또는' 류로 이어져 있는지."""
+    lo, hi = (a, b) if a[1] <= b[0] else (b, a)
+    gap = text[lo[1] : hi[0]]
+    if len(gap) > _ALTERNATION_GAP:
+        return False
+    return bool(_ALTERNATION.search(gap))
+
+
+def _resolve_age_alternatives(
+    text: str,
+    out: dict[str, Any],
+    evidence: dict[str, Any],
+    conflicts: list[dict[str, Any]],
+) -> dict[str, str] | None:
+    """서로 배타적인 연령 구간이 둘 이상이면 정형 필드를 비운다.
+
+    `만 19세 이상 34세 이하 또는 만 65세 이상` 같은 규칙은 단일 [min, max] 로
+    표현할 수 없다. 먼저 잡힌 구간만 남기면 65세 이상 신청자가 전원 오탈락하고,
+    그 사실이 아무 데도 남지 않는다. 좁히는 것보다 **조건 없음(NULL = 통과) +
+    원문 노출**이 안전하다 (SPEC §7.3 'NULL = 통과', §6.3 extra_conditions).
+    """
+    spans = [
+        (v["start"], v["end"])
+        for k, v in evidence.items()
+        if k in ("age_min", "age_max") and isinstance(v, dict) and "start" in v
+    ]
+    if not spans:
+        return None
+    for conflict in conflicts:
+        c_span = (conflict["start"], conflict["end"])
+        if not any(_alternation_between(text, span, c_span) for span in spans):
+            continue
+        lo = min(min(s for s, _ in spans), c_span[0])
+        hi = max(max(e for _, e in spans), c_span[1])
+        out["age_min"] = out["age_max"] = None
+        evidence.pop("age_min", None)
+        evidence.pop("age_max", None)
+        return {
+            "kind": "age_alternatives",
+            "text": _clause_of(text, lo, hi),
+            "reason": "연령 조건이 둘 이상의 구간으로 나뉘어 있어 자동 판정하지 않습니다",
+        }
+    return None
 
 
 def _extract_extra_conditions(text: str) -> list[dict[str, str]]:
@@ -261,9 +324,20 @@ def parse_eligibility(raw_text: str) -> EligibilityRules:
     evidence: dict[str, Any] = {}
     consumed: list[tuple[int, int]] = []
     rejected: list[dict[str, str]] = []
+    age_conflicts: list[dict[str, Any]] = []
+    unrepresentable: list[str] = []
 
     if text:
-        _apply(AGE, text, out, evidence, consumed, dependent_guard=True, rejected=rejected)
+        _apply(
+            AGE,
+            text,
+            out,
+            evidence,
+            consumed,
+            dependent_guard=True,
+            rejected=rejected,
+            conflicts=age_conflicts,
+        )
         # 소득은 가구 단위 조건이라 부양가족 가드를 걸지 않는다
         # ('다자녀 가구 중 중위소득 150% 이하'가 통째로 버려지는 것을 막는다).
         _apply(INCOME, text, out, evidence, consumed, dependent_guard=False, rejected=rejected)
@@ -275,6 +349,15 @@ def parse_eligibility(raw_text: str) -> EligibilityRules:
             out["age_min"] = out["age_max"] = None
             evidence.pop("age_min", None)
             evidence.pop("age_max", None)
+
+    # '19~34세 또는 65세 이상' 처럼 배타적 구간이 여럿이면 좁히지 않고 비운다.
+    age_alternatives = (
+        _resolve_age_alternatives(text, out, evidence, age_conflicts) if age_conflicts else None
+    )
+    if age_alternatives:
+        rejected.append(age_alternatives)
+        # LLM 보완이 다시 하나의 구간으로 좁히지 못하게 막는다 (§6.2 는 미추출 필드만 채운다).
+        unrepresentable.append("age")
 
     has_age = out.get("age_min") is not None or out.get("age_max") is not None
     regions, region_ev = lookup_regions(text) if text else ([], [])
@@ -298,7 +381,11 @@ def parse_eligibility(raw_text: str) -> EligibilityRules:
         income_decile_max=out.get("income_decile_max"),
         extra_conditions=extras,
         parse_evidence=evidence,
+        unrepresentable=unrepresentable,
     )
+    if age_alternatives:
+        rules.needs_review = True
+        rules.review_reason = "age_alternatives"
     rules.parse_method = resolve_parse_method(evidence)
     rules.confidence = compute_confidence(rules)
     return rules

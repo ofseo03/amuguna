@@ -9,7 +9,14 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getProgram } from "@/lib/matching";
-import { checklist, DIMENSION_LABEL, dDay, evaluate } from "@/lib/eligibility";
+import {
+  checklist,
+  DIMENSION_LABEL,
+  dDay,
+  evaluate,
+  UNAVAILABLE_MESSAGE,
+  unavailableReason,
+} from "@/lib/eligibility";
 import { readProfile } from "@/lib/session";
 import { FORM_LABEL } from "@/lib/forms";
 import { dDayLabel, formatDate, formatDateTime, isUrgent, issuerLevelLabel } from "@/lib/format";
@@ -42,6 +49,9 @@ export default async function ProgramDetailPage({ params }: Props) {
   const ev = profile ? evaluate(program.rules, profile) : null;
   const d = dDay(program);
   const extras = program.rules.extra_conditions ?? [];
+  // 결과 목록은 열려 있는 공고만 보여주지만 이 화면은 북마크·공유 링크로 직접 열린다.
+  // 만료·마감 공고를 아무 표시 없이 보여주면 사용자가 지난 기회를 좇게 된다.
+  const unavailable = unavailableReason(program);
 
   return (
     <article className="mx-auto max-w-3xl px-4 py-8">
@@ -66,8 +76,35 @@ export default async function ProgramDetailPage({ params }: Props) {
       </h1>
       <p className="mt-2 text-lg text-ink-2">{program.summary}</p>
 
+      {/* ---------------- 종료·검토중 고지 (§8 정확성) ---------------- */}
+      {unavailable && (
+        <div
+          role="status"
+          className={`mt-6 rounded-xl border-2 px-5 py-4 ${
+            unavailable === "needs_review"
+              ? "border-warn bg-warn-soft"
+              : "border-danger bg-danger-soft"
+          }`}
+        >
+          <p
+            className={`text-lg font-bold ${
+              unavailable === "needs_review" ? "text-warn" : "text-danger"
+            }`}
+          >
+            {unavailable === "needs_review" ? "⚠️ 확인 중인 공고입니다" : "🚫 종료된 공고입니다"}
+          </p>
+          <p className="mt-1 text-ink-2">{UNAVAILABLE_MESSAGE[unavailable]}</p>
+          <p className="mt-2">
+            <Link href="/results" className="font-semibold underline">
+              지금 신청할 수 있는 지원 보기 →
+            </Link>
+          </p>
+        </div>
+      )}
+
       {/* ---------------- 자격 판정 요약 ---------------- */}
-      {ev && (
+      {/* 종료된 공고에서는 '대상에 해당합니다'를 띄우지 않는다 — 신청 가능하다는 오해를 준다 */}
+      {ev && unavailable !== "expired" && unavailable !== "ended" && (
         <div
           className={`mt-6 rounded-xl border-2 px-5 py-4 ${
             ev.violations === 0
@@ -111,7 +148,10 @@ export default async function ProgramDetailPage({ params }: Props) {
           <Fact
             label="접수 기한"
             value={
-              program.is_always_open || !program.ends_at ? (
+              // 만료된 상시 공고에 '상시 접수'를 그대로 두면 종료 사실이 가려진다.
+              unavailable === "expired" ? (
+                <span className="font-semibold text-danger">접수 종료</span>
+              ) : program.is_always_open || !program.ends_at ? (
                 <Term name="상시">상시 접수</Term>
               ) : (
                 <>
@@ -259,16 +299,27 @@ export default async function ProgramDetailPage({ params }: Props) {
             발행 기관 {program.issuer} · 식별자 {program.external_id} · 자격요건
             추출 방식 {program.rules.parse_method}
           </p>
-          {program.apply_url && (
-            <a
-              href={program.apply_url}
-              target="_blank"
-              rel="noopener noreferrer nofollow"
-              className="mt-4 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"
-            >
-              신청 페이지로 이동 ↗
-            </a>
-          )}
+          {/* 종료된 공고에 신청 버튼을 그대로 두면 헛걸음을 시킨다. 링크는 남기되 성격을 바꾼다. */}
+          {program.apply_url &&
+            (unavailable === "expired" || unavailable === "ended" ? (
+              <a
+                href={program.apply_url}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="mt-4 inline-block rounded-lg border-2 border-line px-6 py-3 font-semibold text-ink-2 no-underline hover:border-brand hover:text-brand"
+              >
+                (종료) 신청 페이지 확인 ↗
+              </a>
+            ) : (
+              <a
+                href={program.apply_url}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="mt-4 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"
+              >
+                신청 페이지로 이동 ↗
+              </a>
+            ))}
         </div>
       </section>
 

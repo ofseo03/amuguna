@@ -154,10 +154,17 @@ SPEC §7.5 그대로다. 한 줄 요약과 신청 절차 3단계는 수집 배�
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `DATABASE_URL` | (없음) | 없으면 데모 모드. Supabase Transaction pooler(6543) 권장 |
-| `EMBEDDING_PROVIDER` | `mock` | `voyage` \| `openai` \| `mock` |
+| `EMBEDDING_PROVIDER` | `mock` | `voyage` \| `openai` \| `mock`. **질의 경로는 아직 mock 만 연결됨** — 실 provider 로 두면 의도 축을 끄고 degraded 로 표시한다 (색인과 다른 벡터 공간을 비교하지 않기 위해) |
 | `EMBEDDING_API_KEY` | (없음) | 실 provider 사용 시 |
 | `MOCK_EMBEDDINGS` | — | `1` 이면 provider 무시하고 항상 mock |
 | `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 서명 키 |
+| `DATABASE_CA_CERT` / `DATABASE_CA_CERT_PATH` | (없음) | Postgres 서버 인증서 검증용 CA. 없으면 Node 기본 신뢰 저장소로 검증한다 |
+| `DATABASE_SSL_INSECURE` | — | `1` 이면 인증서 검증을 끈다 (중간자 공격 노출). 풀러 체인 문제 임시 우회 전용이며 서버 로그에 경고가 남는다 |
+| `TRUSTED_PROXY_HOPS` | `1` | `x-forwarded-for` 에서 오른쪽부터 몇 번째를 클라이언트 IP 로 볼지. rate limit 이 헤더 위조로 우회되지 않게 한다 |
+
+Rate limit 은 **세션 10회/분** 과 **IP 60회/분** 을 각각 센다. 두 값을 한 버킷으로
+합치면 세션 쿠키를 버리는 것만으로 한도가 초기화되므로 반드시 독립적으로 유지한다
+(`src/lib/rate-limit.ts`).
 
 ---
 

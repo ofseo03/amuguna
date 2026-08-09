@@ -98,9 +98,12 @@ class EligibilityRules:
     parse_evidence: dict[str, Any] = field(default_factory=dict)
     confidence: float = 0.0
 
-    # -- 이하 두 필드는 eligibility_rules 컬럼이 아니다 (파이프라인 내부 신호) --
+    # -- 이하 세 필드는 eligibility_rules 컬럼이 아니다 (파이프라인 내부 신호) --
     needs_review: bool = False
     review_reason: str | None = None
+    #: 정형 필드로 표현할 수 없다고 판정된 필드 그룹 (예: 배타적 연령 구간이 둘 이상).
+    #: LLM 보완이 이 그룹을 하나의 값으로 좁히지 못하게 막는다 (SPEC §6.2).
+    unrepresentable: list[str] = field(default_factory=list)
 
     #: 이 사유들만 programs.status = 'needs_review' 로 승격한다.
     #: LLM이 아예 설정되지 않은 상태(llm_unavailable)는 '이 공고의 문제'가 아니라
@@ -116,6 +119,7 @@ class EligibilityRules:
         row = asdict(self)
         row.pop("needs_review")
         row.pop("review_reason")
+        row.pop("unrepresentable")
         return row
 
     def filled_fields(self) -> list[str]:

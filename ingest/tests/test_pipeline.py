@@ -62,7 +62,7 @@ class FakeCollector(Collector):
     def _query_params(self, *, since, page):  # pragma: no cover - 미사용
         return {}
 
-    def _items(self, payload):  # pragma: no cover - 미사용
+    def _items_container(self, payload):  # pragma: no cover - 미사용
         return []
 
     def _map_item(self, item):  # pragma: no cover - 미사용
@@ -523,3 +523,100 @@ def test_summarizer_falls_back_to_mock_on_api_error() -> None:
 
     card = S(SETTINGS, client=_StubClient(RuntimeError("429"))).generate(make_program())
     assert card.method == "mock"
+
+
+# --------------------------------------------------------------------------
+# 코드리뷰 반영 — 만료 복귀 / 에러 봉투 / DATABASE_URL 강등
+# --------------------------------------------------------------------------
+
+
+def test_expired_program_returning_unchanged_is_reactivated() -> None:
+    """전량 대조로 내려간 공고가 그대로 다시 올라오면 복구되어야 한다.
+
+    expire_programs 가 임베딩을 지우므로, fetched_at 만 갱신하면 status 는
+    expired 로 남고 임베딩도 비어 영영 매칭에서 빠진다.
+    """
+    db = InMemoryDatabase()
+    pipeline = make_pipeline(db)
+    program = make_program()
+
+    pipeline.run_source(FakeCollector([program]))
+    program_id = db.get_program_id(program.external_id)
+    assert db.programs[program_id]["status"] == "active"
+
+    # 원본 목록에서 사라져 만료 (목록 자체가 비면 소스 장애로 보고 건너뛰므로 다른 id 를 채운다)
+    pipeline.run_source(
+        FakeCollector([program], source_ids={"fake:999"}), reconcile=True
+    )
+    assert db.programs[program_id]["status"] == "expired"
+    assert db.embeddings.get(program_id) is None
+
+    # 내용 변경 없이 원본에 다시 등장 (stats 는 소스 단위 누적이므로 증분으로 본다)
+    unchanged_before = pipeline.report.sources["fake"].unchanged
+    stats = pipeline.run_source(FakeCollector([program]))
+    assert db.programs[program_id]["status"] == "active"
+    assert db.embeddings.get(program_id), "임베딩이 복구되어야 벡터 검색에 다시 잡힌다"
+    assert stats.reactivated == 1
+    assert stats.unchanged == unchanged_before, "무변경으로 흘려보내면 안 된다"
+    assert db.get_program_id(program.external_id) == program_id  # id 유지 (SPEC §3.2)
+
+
+class EnvelopeCollector(Collector):
+    """봉투 검증만 보기 위한 최소 수집기 — `_get` 을 고정 payload 로 대체한다."""
+
+    source_key = "envelope"
+
+    def __init__(self, payload):
+        super().__init__(SETTINGS)
+        self.payload = payload
+
+    def _query_params(self, *, since, page):
+        return {}
+
+    def _items_container(self, payload):
+        if not isinstance(payload, dict):
+            return None
+        body = (payload.get("response") or {}).get("body")
+        if not isinstance(body, dict) or "items" not in body:
+            return None
+        return list(body.get("items") or [])
+
+    def _map_item(self, item):
+        return None
+
+    def _get(self, params):
+        return self.payload
+
+
+def test_error_envelope_is_not_treated_as_empty_page() -> None:
+    """HTTP 200 + 에러 봉투를 0건으로 처리하면 워크플로는 녹색인 채 데이터가 정지한다."""
+    collector = EnvelopeCollector(
+        {"response": {"header": {"resultCode": "22", "resultMsg": "LIMITED NUMBER OF SERVICE REQUESTS"}}}
+    )
+    with pytest.raises(CollectorError):
+        collector.fetch()
+
+
+def test_unknown_schema_is_not_treated_as_empty_page() -> None:
+    collector = EnvelopeCollector({"unexpected": {"shape": []}})
+    with pytest.raises(CollectorError):
+        collector.fetch()
+
+
+def test_genuinely_empty_page_is_accepted() -> None:
+    """증분 수집에서 '이번엔 변경분 0건'은 정상이다 — 에러로 만들면 안 된다."""
+    collector = EnvelopeCollector(
+        {"response": {"header": {"resultCode": "00"}, "body": {"items": []}}}
+    )
+    assert collector.fetch() == []
+
+
+def test_live_run_without_database_url_fails_instead_of_degrading() -> None:
+    """DATABASE_URL 이 비었는데 조용히 인메모리로 강등하면 데이터가 무기한 정지한다."""
+    from ingest.cli import ConfigError, _make_database
+
+    with pytest.raises(ConfigError):
+        _make_database(False, Settings(database_url=""))
+
+    db, in_memory = _make_database(True, Settings(database_url=""))
+    assert in_memory and isinstance(db, InMemoryDatabase)  # --dry-run 은 그대로 허용

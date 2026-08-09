@@ -102,9 +102,15 @@ def relevant_paragraphs(text: str, fields: Iterable[str], *, limit: int = 6) -> 
 
 
 def missing_field_groups(rules: EligibilityRules) -> list[str]:
-    """정규식이 못 채운 필드 그룹만 (SPEC §6.2 조건부 호출)."""
+    """정규식이 못 채운 필드 그룹만 (SPEC §6.2 조건부 호출).
+
+    '정형 필드로 표현 불가'로 판정된 그룹은 제외한다 — 비어 있는 이유가
+    '못 찾아서'가 아니라 '단일 값으로 좁히면 틀려서'이기 때문이다.
+    """
     missing = []
     for group, columns in FIELD_COLUMNS.items():
+        if group in rules.unrepresentable:
+            continue
         if all(getattr(rules, col) in (None, [], "") for col in columns):
             missing.append(group)
     return missing

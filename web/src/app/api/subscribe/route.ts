@@ -10,17 +10,17 @@
 import { NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { getSql, isDbConfigured } from "@/lib/db";
-import { readOrCreateSessionId, readProfile } from "@/lib/session";
-import { checkRateLimit, rateLimitKey } from "@/lib/rate-limit";
+import { readOrCreateSessionId, readProfile, readSessionId } from "@/lib/session";
+import { checkRequestLimits } from "@/lib/rate-limit";
 import { validateEmail } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const sessionId = await readOrCreateSessionId();
-
-  const rl = checkRateLimit(`subscribe:${rateLimitKey(sessionId, req)}`);
+  // 세션을 만들기 **전에** 검사한다. 먼저 발급하면 쿠키를 버릴 때마다 새 세션 =
+  // 새 버킷이 되어 한도가 무의미해진다.
+  const rl = checkRequestLimits(await readSessionId(), req, "subscribe");
   if (!rl.allowed) {
     return NextResponse.json(
       { ok: false, message: `요청이 너무 잦습니다. ${rl.retryAfter}초 후 다시 시도해 주세요.` },
@@ -55,6 +55,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, errors: email.errors }, { status: 400 });
   }
 
+  // 프로필이 없으면 매칭 속성이 전부 NULL 인 행이 남는다 — 약속한 '맞춤 알림'을
+  // 계산할 근거가 없는 채 이메일만 보관하게 되므로 받지 않는다 (§8 최소 수집).
+  const profile = await readProfile();
+  if (!profile) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "no_profile",
+        message:
+          "맞춤 알림을 보내드리려면 기본 정보가 먼저 필요합니다. 정보를 입력한 뒤 다시 신청해 주세요.",
+      },
+      { status: 400 },
+    );
+  }
+
   const token = randomBytes(24).toString("base64url");
 
   if (!isDbConfigured()) {
@@ -68,21 +83,55 @@ export async function POST(req: Request) {
     });
   }
 
-  const profile = await readProfile();
+  const sessionId = await readOrCreateSessionId();
+  let resubscribed = false;
   try {
     const sql = getSql();
     if (!sql) throw new Error("DB 미연결");
-    await sql`
-      INSERT INTO profiles (id, age, gender, occupation, region_code, income_decile, email, unsubscribe_token, created_at)
-      VALUES (
-        ${sessionId}::uuid,
-        ${profile?.age ?? null}, ${profile?.gender ?? null}, ${profile?.occupation ?? null},
-        ${profile?.sigunguCode ?? null}, ${profile?.incomeDecile ?? null},
-        ${email.value}, ${token}, now()
-      )
-      ON CONFLICT (id) DO UPDATE SET
-        email = EXCLUDED.email,
-        unsubscribe_token = EXCLUDED.unsubscribe_token`;
+
+    // profiles 에는 lower(email) 유니크 인덱스가 있다. 같은 사람이 다른 브라우저에서
+    // (또는 세션 쿠키 만료 후) 다시 신청하면 ON CONFLICT (id) 로는 잡히지 않아
+    // 유니크 위반 → 500 이 된다. 이메일 행을 먼저 갱신해 재신청을 정상 처리한다.
+    const refreshExisting = () => sql`
+      UPDATE profiles SET
+        age = ${profile.age},
+        gender = ${profile.gender},
+        occupation = ${profile.occupation},
+        region_code = ${profile.sigunguCode},
+        income_decile = ${profile.incomeDecile},
+        unsubscribe_token = ${token}
+      WHERE lower(email) = lower(${email.value})
+      RETURNING id`;
+
+    const existing = await refreshExisting();
+    resubscribed = existing.length > 0;
+
+    if (!resubscribed) {
+      try {
+        await sql`
+          INSERT INTO profiles (id, age, gender, occupation, region_code, income_decile, email, unsubscribe_token, created_at)
+          VALUES (
+            ${sessionId}::uuid,
+            ${profile.age}, ${profile.gender}, ${profile.occupation},
+            ${profile.sigunguCode}, ${profile.incomeDecile},
+            ${email.value}, ${token}, now()
+          )
+          ON CONFLICT (id) DO UPDATE SET
+            age = EXCLUDED.age,
+            gender = EXCLUDED.gender,
+            occupation = EXCLUDED.occupation,
+            region_code = EXCLUDED.region_code,
+            income_decile = EXCLUDED.income_decile,
+            email = EXCLUDED.email,
+            unsubscribe_token = EXCLUDED.unsubscribe_token`;
+      } catch (e) {
+        // 위 SELECT-then-INSERT 사이에 다른 요청이 같은 이메일을 넣은 경우.
+        if ((e as { code?: string })?.code !== "23505") throw e;
+        const retried = await refreshExisting();
+        if (retried.length === 0) throw e;
+        resubscribed = true;
+      }
+    }
   } catch (e) {
     console.error("[api/subscribe] 저장 실패", e);
     return NextResponse.json(
@@ -94,7 +143,10 @@ export async function POST(req: Request) {
   return NextResponse.json({
     ok: true,
     demoMode: false,
-    message: "알림 신청이 완료되었습니다.",
+    resubscribed,
+    message: resubscribed
+      ? "이미 신청하신 이메일입니다. 최신 정보로 갱신했습니다."
+      : "알림 신청이 완료되었습니다.",
     unsubscribeToken: token,
   });
 }

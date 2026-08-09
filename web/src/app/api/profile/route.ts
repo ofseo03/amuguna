@@ -7,13 +7,29 @@
  */
 import { NextResponse } from "next/server";
 import { getSql, isDbConfigured } from "@/lib/db";
-import { readOrCreateSessionId, writeProfile } from "@/lib/session";
+import { readOrCreateSessionId, readSessionId, writeProfile } from "@/lib/session";
+import { checkRequestLimits } from "@/lib/rate-limit";
 import { validateProfile } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  // 이 라우트가 세션을 발급하므로 여기에 한도가 없으면 '세션을 새로 받아
+  // 다른 라우트의 세션 한도를 초기화하는' 경로가 열린다. 세션 발급 **전에**
+  // 검사해야 하므로 쿠키를 읽기만 한다 (readOrCreateSessionId 는 아래에서).
+  const rl = checkRequestLimits(await readSessionId(), req, "profile");
+  if (!rl.allowed) {
+    return NextResponse.json(
+      {
+        ok: false,
+        code: "rate_limited",
+        message: `요청이 너무 잦습니다. ${rl.retryAfter}초 후에 다시 시도해 주세요.`,
+      },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+    );
+  }
+
   let body: unknown;
   try {
     body = await req.json();

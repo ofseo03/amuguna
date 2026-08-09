@@ -331,6 +331,8 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
   if (hasQueryInput) {
     try {
       const r = await embedQuery(rawQuery);
+      // vector 가 null 이면 provider 미연결 — 색인과 다른 공간을 비교하느니
+      // 의도 축을 빼고 집합 A 만으로 간다 (§8 신뢰성).
       qvec = r.vector;
       degraded = r.degraded;
     } catch {

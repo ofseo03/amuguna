@@ -81,11 +81,20 @@ jobs:
 
       - name: 증분 수집 실행
         if: github.event.inputs.mode != 'fixtures-dry-run'
+        # `${{ }}` 를 run 블록에 직접 쓰면 셸이 파싱하기 **전에** 문자열로 치환된다.
+        # workflow_dispatch 입력은 신뢰 대상이 아니므로 `a; curl ...; :` 같은 값이
+        # 그대로 실행되고, 이 스텝 env 의 DATABASE_URL·API 키가 통째로 노출된다.
+        # argparse choices 는 셸이 이미 실행한 뒤라 방어선이 되지 못한다.
+        # → 입력은 env 로 받아 인용한 인자로만 넘긴다.
+        env:
+          SINCE: ${{ steps.since.outputs.date }}
+          SOURCE: ${{ github.event.inputs.source }}
         run: |
-          python -m ingest \
-            --since "${{ steps.since.outputs.date }}" \
-            ${{ github.event.inputs.source && format('--source {0}', github.event.inputs.source) || '' }} \
-            --json-report ingest-report.json
+          args=(--since "$SINCE" --json-report ingest-report.json)
+          if [ -n "$SOURCE" ]; then
+            args+=(--source "$SOURCE")
+          fi
+          python -m ingest "${args[@]}"
 
       - name: 수집 상태 리포트 보관 (SPEC §10)
         if: always()
