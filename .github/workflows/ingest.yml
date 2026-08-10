@@ -22,7 +22,7 @@ on:
         default: incremental
         options: [incremental, reconcile, fixtures-dry-run]
       source:
-        description: "특정 소스만 (social_security | bizinfo | finlife). 비우면 전체"
+        description: "특정 소스명. 비우면 검증된 기본 3종만 실행"
         type: string
         default: ""
 

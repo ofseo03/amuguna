@@ -5,6 +5,9 @@ import {
   BizinfoCollector,
   CollectorError,
   FinlifeCollector,
+  Gov24Collector,
+  KstartupCollector,
+  LocalWelfareCollector,
   SocialSecurityCollector,
 } from "../collectors";
 import { USER_AGENT } from "../collectors/base";
@@ -65,16 +68,19 @@ test("central welfare XML joins detail eligibility before regex parsing", async 
   assert(["income_amount", "employment_period", "business_history"].every((kind) => kinds.has(kind)));
 });
 
-test("three fixture envelopes map all 27 unique records", async () => {
+test("six fixture envelopes map all 30 unique records", async () => {
   const collectors = [
     new SocialSecurityCollector({ useFixtures: true }),
     new BizinfoCollector({ useFixtures: true }),
     new FinlifeCollector({ useFixtures: true }),
+    new Gov24Collector({ useFixtures: true }),
+    new KstartupCollector({ useFixtures: true }),
+    new LocalWelfareCollector({ useFixtures: true }),
   ];
   const programs = (await Promise.all(collectors.map((collector) => collector.fetch()))).flat();
 
-  assert.equal(programs.length, 27);
-  assert.equal(new Set(programs.map((program) => program.external_id)).size, 27);
+  assert.equal(programs.length, 30);
+  assert.equal(new Set(programs.map((program) => program.external_id)).size, 30);
   assert.ok(programs.every((program) => program.title && program.source_url));
   const fixedRate = programs.find(
     (program) => program.external_id === "finlife:0010001-KB-YOUTH-01",

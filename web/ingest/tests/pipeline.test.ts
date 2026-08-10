@@ -172,7 +172,7 @@ test("CLI exits non-zero when every fetched record rolls back", () => {
   assert.equal(result.status, 1, result.stdout + result.stderr);
 });
 
-test("all 27 fixtures match the established coverage baseline and are idempotent", async () => {
+test("all 30 fixtures match the established coverage baseline and are idempotent", async () => {
   const db = new InMemoryDatabase();
   const ingest = pipeline(db);
   const collectors = Object.keys(COLLECTORS)
@@ -182,21 +182,21 @@ test("all 27 fixtures match the established coverage baseline and are idempotent
   await ingest.run(collectors);
   assert.deepEqual(
     Object.fromEntries([...ingest.report.sources].map(([key, value]) => [key, value.fetched])),
-    { bizinfo: 8, finlife: 7, social_security: 12 },
+    { bizinfo: 8, finlife: 7, gov24: 1, kstartup: 1, local_welfare: 1, social_security: 12 },
   );
-  assert.equal(ingest.report.totals.created, 27);
+  assert.equal(ingest.report.totals.created, 30);
   assert.deepEqual(ingest.report.parse.fieldHits, {
-    age_min: 9,
-    age_max: 6,
-    regions: 4,
+    age_min: 12,
+    age_max: 9,
+    regions: 5,
     occupations: 8,
-    income_decile_max: 9,
+    income_decile_max: 11,
   });
-  assert.equal(ingest.report.parse.withExtraConditions, 12);
-  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.679);
+  assert.equal(ingest.report.parse.withExtraConditions, 13);
+  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.707);
 
   await ingest.run(collectors);
   assert.equal(ingest.report.totals.updated, 0);
-  assert.equal(ingest.report.totals.unchanged, 27);
-  assert.equal(db.rawDocuments.length, 27);
+  assert.equal(ingest.report.totals.unchanged, 30);
+  assert.equal(db.rawDocuments.length, 30);
 });

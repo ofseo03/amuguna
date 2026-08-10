@@ -24,7 +24,7 @@ npm run start        # 빌드 결과 실행
 npm run lint         # ESLint
 npm run typecheck    # tsc --noEmit
 npm test             # 웹 회귀 테스트 + TypeScript 배치 테스트
-npm run ingest -- --fixtures --dry-run  # 루트 ingest/ 픽스처 27건 드라이런
+npm run ingest -- --fixtures --dry-run  # 루트 ingest/ 픽스처 30건 드라이런
 npm run sync:shared  # ../shared/*.json → src/data/ 재복사
 ```
 
@@ -121,6 +121,11 @@ curl -s -b jar localhost:3000/api/programs/1
 소유하며, 중앙부처 복지서비스는 XML 목록을 받은 뒤 각 `servId`의 XML 상세를 조회해
 `tgtrDtlCn`과 `slctCritCn`을 자격 파서에 전달한다.
 
+공공데이터포털 전용 어댑터는 `gov24`(보조금24 JSON), `local_welfare`(지자체복지 XML
+목록·상세), `kstartup`(K-Startup JSON)이다. 세 소스는 공식 명세 fixture와 테스트에는
+포함되지만, 실제 데이터셋 활용승인과 첫 성공 응답 대조 전에는 스케줄 기본값에 넣지 않는다.
+승인 후 `npm run ingest -- --source gov24`처럼 소스별로 검증한다.
+
 ### mock 임베딩은 손대지 말 것
 
 `src/lib/embedding.ts` 의 `mockEmbed()` 는 **`ingest/embedder.ts`가 문서를 색인할 때 쓰는
@@ -169,7 +174,7 @@ cp .env.example .env.local
 | `EMBEDDING_PROVIDER` | `mock` | `voyage` (`voyage-4-large`) \| `openai` \| `mock` |
 | `EMBEDDING_API_KEY` | (없음) | 실 provider 사용 시 |
 | `MOCK_EMBEDDINGS` | — | `1` 이면 provider 무시하고 항상 mock |
-| `DATA_GO_KR_API_KEY` | (없음) | 중앙부처 복지서비스 실 API 수집 시 |
+| `DATA_GO_KR_API_KEY` | (없음) | 공공데이터포털 소스 실수집 시. 데이터셋별 활용신청 필요 |
 | `BIZINFO_API_KEY` | (없음) | 기업마당 실 API 수집 시 |
 | `FINLIFE_API_KEY` | (없음) | 금융상품 한눈에 실 API 수집 시 |
 | `OPENROUTER_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |

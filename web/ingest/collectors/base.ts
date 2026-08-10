@@ -160,6 +160,10 @@ export abstract class Collector {
       const result = recordOrUndefined(payload.result);
       valid = result !== undefined && String(result.err_cd) === "000" && Array.isArray(result.baseList);
       message = result ? String(result.err_msg || "") : "";
+    } else if (this.sourceKey === "gov24") {
+      valid = Array.isArray(payload.data);
+    } else if (this.sourceKey === "kstartup") {
+      valid = Array.isArray(payload.data);
     } else {
       return;
     }
