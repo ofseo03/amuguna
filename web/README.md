@@ -117,6 +117,10 @@ curl -s -b jar localhost:3000/api/programs/1
 | `src/lib/rate-limit.ts` | 세션+IP 10회/분 | §8 |
 | `src/lib/shared-data.ts` | 팀 공통 계약 데이터 접근자 | — |
 
+수집기의 공통층은 HTTP·재시도만 담당한다. 응답 형식과 필드 매핑은 소스별 수집기가
+소유하며, 중앙부처 복지서비스는 XML 목록을 받은 뒤 각 `servId`의 XML 상세를 조회해
+`tgtrDtlCn`과 `slctCritCn`을 자격 파서에 전달한다.
+
 ### mock 임베딩은 손대지 말 것
 
 `src/lib/embedding.ts` 의 `mockEmbed()` 는 **`ingest/embedder.ts`가 문서를 색인할 때 쓰는
@@ -134,8 +138,8 @@ L2 정규화
 
 SPEC §7.5 그대로다. 한 줄 요약과 신청 절차 3단계는 수집 배치가 미리 만들어 DB에 넣고,
 매칭 근거 문장은 `eligibility_rules` 의 매칭된 필드로 **템플릿 조립**한다.
-따라서 웹 요청 경로에는 Anthropic API 키를 쓰지 않는다. `ANTHROPIC_API_KEY`는 공식
-Anthropic TypeScript SDK를 사용하는 독립 Node 배치(`ingest/`)에서만 읽는다.
+따라서 웹 요청 경로에는 OpenRouter API 키를 쓰지 않는다. `OPENROUTER_API_KEY`는
+OpenRouter API를 호출하는 독립 Node 배치(`ingest/`)에서만 읽는다.
 
 ---
 
@@ -152,17 +156,24 @@ Anthropic TypeScript SDK를 사용하는 독립 Node 배치(`ingest/`)에서만 
 
 ## 환경변수
 
-Next.js 로컬 실연동 값은 `web/.env.local`에 둔다. 독립 배치는 같은 변수를 실행 셸에
-`export`하며, GitHub Actions에서는 Secrets/Variables로 주입한다.
+Next.js와 독립 배치의 로컬 실연동 값은 `web/.env.local`에 둔다. `npm run ingest`도
+이 파일을 자동으로 읽으며, GitHub Actions에서는 Secrets/Variables로 주입한다.
+
+```bash
+cp .env.example .env.local
+```
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
 | `DATABASE_URL` | (없음) | 없으면 데모 모드. Supabase Transaction pooler(6543) 권장 |
-| `EMBEDDING_PROVIDER` | `mock` | `voyage` \| `openai` \| `mock` |
+| `EMBEDDING_PROVIDER` | `mock` | `voyage` (`voyage-4-large`) \| `openai` \| `mock` |
 | `EMBEDDING_API_KEY` | (없음) | 실 provider 사용 시 |
 | `MOCK_EMBEDDINGS` | — | `1` 이면 provider 무시하고 항상 mock |
-| `DATA_GO_KR_API_KEY` | (없음) | `ingest/` 실 API 수집 시 |
-| `ANTHROPIC_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |
+| `DATA_GO_KR_API_KEY` | (없음) | 중앙부처 복지서비스 실 API 수집 시 |
+| `BIZINFO_API_KEY` | (없음) | 기업마당 실 API 수집 시 |
+| `FINLIFE_API_KEY` | (없음) | 금융상품 한눈에 실 API 수집 시 |
+| `OPENROUTER_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |
+| `LLM_MODEL` | `google/gemma-4-31b-it:free` | OpenRouter 모델 ID |
 | `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 서명 키 |
 
 ---
@@ -192,7 +203,7 @@ Next.js 로컬 실연동 값은 `web/.env.local`에 둔다. 독립 배치는 같
 
 1. T1 세 소스의 실제 응답으로 엔드포인트·파라미터·봉투 필드명을 확인한다.
 2. Supabase에 마이그레이션을 적용한 뒤 `match_programs` RPC와 구독·해지를 왕복 검증한다.
-3. Voyage/OpenAI 중 한국어 성능을 실측해 웹 질의와 배치 색인에 같은 provider·모델을 확정한다.
+3. `voyage-4-large`의 한국어 검색 품질을 실측한다.
 4. Vercel 배포와 GitHub Actions 실 배치를 실행해 Secrets, 90일 삭제, 심사 구간 가용성을 확인한다.
 
 ---

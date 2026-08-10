@@ -5,7 +5,7 @@ import { FIXTURES_DIR, settingsFromEnv, type Settings } from "../config";
 import type { CollectedProgram } from "../models";
 
 export const USER_AGENT =
-  "amuguna-ingest/0.1 (2026 금융 AI Challenge; contact: ofseo03@gmail.com)";
+  "amuguna-ingest/0.1 (contact: ofseo03@gmail.com)";
 
 export class CollectorError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -77,12 +77,17 @@ export abstract class Collector {
     }
   }
 
-  private async get(params: Record<string, string | number>): Promise<unknown> {
-    if (!this.settings.data_go_kr_api_key) {
-      throw new CollectorError(`${this.sourceKey}: DATA_GO_KR_API_KEY 미설정`);
-    }
+  protected requireApiKey(name: string, value: string): string {
+    if (!value) throw new CollectorError(`${this.sourceKey}: ${name} 미설정`);
+    return value;
+  }
 
-    const url = new URL(this.endpoint);
+  protected async request<T>(
+    params: Record<string, string | number>,
+    parse: (response: Response) => Promise<T>,
+    endpoint = this.endpoint,
+  ): Promise<T> {
+    const url = new URL(endpoint);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
 
     let lastError: unknown;
@@ -101,7 +106,7 @@ export abstract class Collector {
           }
           lastError = new Error(`HTTP ${response.status}`);
         } else {
-          return (await response.json()) as unknown;
+          return await parse(response);
         }
       } catch (error) {
         if (error instanceof CollectorError) throw error;
@@ -113,6 +118,10 @@ export abstract class Collector {
     }
 
     throw new CollectorError(`${this.sourceKey} 호출 실패`, { cause: lastError });
+  }
+
+  private async getJson(params: Record<string, string | number>): Promise<unknown> {
+    return this.request(params, async (response) => (await response.json()) as unknown);
   }
 
   externalId(nativeId: string): string {
@@ -168,7 +177,7 @@ export abstract class Collector {
       payloads.push(await this.loadJson(this.fixturePath));
     } else {
       for (let page = 1; page <= maxPages; page += 1) {
-        const payload = await this.get(this.queryParams({ since, page }));
+        const payload = await this.getJson(this.queryParams({ since, page }));
         const pageItems = this.items(payload);
         if (pageItems.length === 0) this.validateEmptyPage(payload);
         payloads.push(payload);

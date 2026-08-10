@@ -15,7 +15,7 @@ export class FinlifeCollector extends Collector {
 
   protected queryParams({ page }: { since: string | null; page: number }) {
     return {
-      auth: this.settings.data_go_kr_api_key,
+      auth: this.requireApiKey("FINLIFE_API_KEY", this.settings.finlife_api_key),
       topFinGrpNo: TOP_FIN_GRP_NO,
       pageNo: page,
     };

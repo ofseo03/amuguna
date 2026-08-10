@@ -69,7 +69,7 @@ async function main(): Promise<number> {
   const noLlm = values["no-llm"];
   const pipeline = new Pipeline(db, {
     embedder: new Embedder(settings),
-    summarizer: new Summarizer(noLlm ? { anthropic_api_key: "" } : settings),
+    summarizer: new Summarizer(noLlm ? { openrouter_api_key: "" } : settings),
     llm: noLlm ? null : new LLMFallback(settings),
     dryRun: values["dry-run"],
   });

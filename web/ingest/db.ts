@@ -1,5 +1,6 @@
 import postgres from "postgres";
 
+import { sslOption } from "../src/lib/db";
 import { toPgVectorLiteral } from "../src/lib/embedding";
 
 export const PROGRAM_COLUMNS = [
@@ -322,7 +323,7 @@ export class InMemoryDatabase implements Database {
 type RootSql = ReturnType<typeof postgres>;
 type QuerySql = RootSql | postgres.TransactionSql;
 
-function postgresOptions(dsn: string): postgres.Options<Record<string, never>> {
+export function postgresOptions(dsn: string): postgres.Options<Record<string, never>> {
   let local = false;
   let hasSslMode = false;
   try {
@@ -337,7 +338,11 @@ function postgresOptions(dsn: string): postgres.Options<Record<string, never>> {
     connect_timeout: 10,
     idle_timeout: 20,
     prepare: false,
-    ...(!local && !hasSslMode ? { ssl: "verify-full" as const } : {}),
+    ...(process.env.PGSSLROOTCERT
+      ? { ssl: sslOption() }
+      : !local && !hasSslMode
+        ? { ssl: "verify-full" as const }
+        : {}),
   };
 }
 

@@ -193,17 +193,17 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 
 | # | 키 | 발급처 | 활용신청 대상 | 건수 |
 |---|---|---|---|---|
-| 1 | `DATA_GO_KR_KEY` | [data.go.kr](https://www.data.go.kr/) (자동승인) | 보조금24 [`15113968`](https://www.data.go.kr/data/15113968/openapi.do) / 중앙부처복지 [`15090532`](https://www.data.go.kr/data/15090532/openapi.do) / 지자체복지 [`15108347`](https://www.data.go.kr/data/15108347/openapi.do) / 온통청년 [`15143273`](https://www.data.go.kr/data/15143273/openapi.do) / K-Startup [`15125364`](https://www.data.go.kr/data/15125364/openapi.do) / 청약홈 [`15098547`](https://www.data.go.kr/data/15098547/openapi.do) / 법제처 [`15000115`](https://www.data.go.kr/data/15000115/openapi.do) | **7** |
-| 2 | `BIZINFO_KEY` | [bizinfo.go.kr](https://www.bizinfo.go.kr/apiDetail.do?id=bizinfoApi) (상세 페이지 하단 폼) | 지원사업정보 | 1 |
-| 3 | `FINLIFE_KEY` | [finlife.fss.or.kr](https://finlife.fss.or.kr/finlife/main/contents.do?menuNo=700029) | 금융상품 8종 — **1키로 8종 전부** | 1 |
+| 1 | `DATA_GO_KR_API_KEY` | [data.go.kr](https://www.data.go.kr/) (자동승인) | 보조금24 [`15113968`](https://www.data.go.kr/data/15113968/openapi.do) / 중앙부처복지 [`15090532`](https://www.data.go.kr/data/15090532/openapi.do) / 지자체복지 [`15108347`](https://www.data.go.kr/data/15108347/openapi.do) / 온통청년 [`15143273`](https://www.data.go.kr/data/15143273/openapi.do) / K-Startup [`15125364`](https://www.data.go.kr/data/15125364/openapi.do) / 청약홈 [`15098547`](https://www.data.go.kr/data/15098547/openapi.do) / 법제처 [`15000115`](https://www.data.go.kr/data/15000115/openapi.do) | **7** |
+| 2 | `BIZINFO_API_KEY` | [bizinfo.go.kr](https://www.bizinfo.go.kr/apiDetail.do?id=bizinfoApi) (상세 페이지 하단 폼) | 지원사업정보 | 1 |
+| 3 | `FINLIFE_API_KEY` | [finlife.fss.or.kr](https://finlife.fss.or.kr/finlife/main/contents.do?menuNo=700029) | 금융상품 8종 — **1키로 8종 전부** | 1 |
 | 4 | `SEOUL_OPENAPI_KEY` | [data.seoul.go.kr](https://data.seoul.go.kr/together/mypage/actKey.do) (가입 즉시) | 서울 열린데이터광장 | 1 |
 | 5 | `EMBEDDING_API_KEY` | [Voyage](https://dashboard.voyageai.com/organization/api-keys) / [OpenAI](https://platform.openai.com/api-keys) (§4 W1 확정) | — | 1 |
-| 6 | `ANTHROPIC_API_KEY` | [Anthropic](https://platform.claude.com/settings/keys) | — | 1 |
+| 6 | `OPENROUTER_API_KEY` | [OpenRouter](https://openrouter.ai/settings/keys) | — | 1 |
 | | | | **합계** | **키 6 / 신청 12** |
 
-**MVP(§11 범위)만이면 키 5 / 신청 7이다** — data.go.kr 3건(보조금24·중앙부처·지자체) + 기업마당 + 금감원 + 임베딩 + Anthropic. 나머지는 T2 확장분이다.
+**MVP(§11 범위)만이면 키 5 / 신청 7이다** — data.go.kr 3건(보조금24·중앙부처·지자체) + 기업마당 + 금감원 + 임베딩 + OpenRouter. 나머지는 T2 확장분이다.
 
-**링크 검증 상태 (2026-08-09 조회).** 실물 확인된 것은 중앙부처복지 `15090532`, 기업마당 상세 페이지, Anthropic·Voyage·OpenAI 키 페이지다. data.go.kr 나머지 6건은 `https://www.data.go.kr/data/{데이터셋ID}/openapi.do` 패턴으로 생성한 주소이며 **개별 확인 전이다.** finlife는 사이트 응답이 없어 진입 페이지만 적었고 **신청 폼 직접 URL은 미확인**, data.seoul.go.kr 인증키 페이지도 **미확인**이다.
+**링크 검증 상태 (2026-08-09 조회).** 실물 확인된 것은 중앙부처복지 `15090532`, 기업마당 상세 페이지, OpenRouter·Voyage·OpenAI 키 페이지다. data.go.kr 나머지 6건은 `https://www.data.go.kr/data/{데이터셋ID}/openapi.do` 패턴으로 생성한 주소이며 **개별 확인 전이다.** finlife는 사이트 응답이 없어 진입 페이지만 적었고 **신청 폼 직접 URL은 미확인**, data.seoul.go.kr 인증키 페이지도 **미확인**이다.
 
 **data.go.kr 서비스키는 Decoding / Encoding 두 형태로 발급된다.** 수집기는 httpx `params=`로 넘기므로 **Decoding 키**를 넣어 라이브러리가 한 번만 인코딩하게 한다. URL에 직접 문자열로 붙일 때만 Encoding 키다. 이중 인코딩(`%`→`%25`)과 디코딩 키의 `+`가 공백으로 바뀌는 것이 인증 실패의 대표 원인이다 ([게이트웨이 가이드](https://www.data.go.kr/images/biz/swagger-guide/gw/gateway_swagger_guide.pdf)).
 
@@ -261,8 +261,8 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 | 프론트+API | Next.js (App Router) + TypeScript / Vercel | 한 저장소, 배포 URL 즉시 확보 |
 | SQL DB + 벡터 DB | **Supabase Postgres + `pgvector`**, `postgres`(postgres.js) | 별도 벡터 DB 불필요. 교집합을 한 쿼리로 처리 |
 | 수집·파싱 | 독립 TypeScript Node 배치 (`web/ingest`) + native `fetch` | 웹과 언어·의존성을 공유하고 GitHub Actions cron 실행 |
-| 임베딩 | 다국어 임베딩 API (후보: Voyage / OpenAI) — **W1에 한국어 성능 실측 후 확정** | 한국어 공고문 도메인 특성상 사전 검증 필수 |
-| LLM | Claude (`claude-sonnet-5`) + 공식 Anthropic TypeScript SDK | 파싱 보완 + 요약·절차 생성 — **배치 전용, 요청 경로 미사용** (§7.5) |
+| 임베딩 | Voyage AI `voyage-4-large` (1024차원) | 문서 `document` / 질의 `query` 입력 타입 분리, W1 한국어 성능 실측 |
+| LLM | OpenRouter (`google/gemma-4-31b-it:free`) | 파싱 보완 + 요약·절차 생성 — **배치 전용, 요청 경로 미사용** (§7.5) |
 | 인증 | 없음 (익명 세션), 알림 시 이메일만 | 개인정보 최소화 (§8) |
 
 **벡터 DB를 따로 두지 않는 이유:** 교집합 연산이 이 설계의 핵심인데, DB가 둘로 나뉘면 A와 B를 애플리케이션 메모리로 끌어와 맞춰야 한다. pgvector면 한 쿼리로 끝난다. 데이터 규모(수천~수만 건)도 pgvector 범위 안이다.
@@ -543,7 +543,7 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 ### 보안
 
 - HTTPS 강제, CSP 헤더 설정
-- API 키는 서버 환경변수. 클라이언트 노출 금지. **키 6종 / 활용신청 12건** — 공공데이터포털 1키로 7개 API를 쓰므로 키 수와 신청 수가 다르다 (§3.5)
+- API 키(공공데이터포털, 임베딩, OpenRouter)는 서버 환경변수. 클라이언트 노출 금지. **키 6종 / 활용신청 12건** — 공공데이터포털 1키로 7개 API를 쓰므로 키 수와 신청 수가 다르다 (§3.5)
 - 입력값 서버 측 검증 (나이 0~120, 지역코드 화이트리스트, 분위 1~10, 자유입력 200자)
 - 크롤러 외부 요청 URL 화이트리스트 고정 (SSRF 방지)
 - **Rate limit**: 익명 세션 + IP 기준 검색 횟수 제한 (예: 10회/분). 검색 1회 = 임베딩 API 과금 1회이므로 abuse가 곧 비용이고, 인증이 없는 서비스라 이것이 유일한 방어선이다

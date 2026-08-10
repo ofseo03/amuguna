@@ -94,6 +94,10 @@ test("dependent and unformalizable clauses remain in extra_conditions", () => {
   const exception = parseEligibility("기준 중위소득 150% 초과 가구는 지원 대상에서 제외됩니다");
   assert.equal(exception.income_decile_max, null);
   assert(exception.extra_conditions.some(({ kind }) => kind === "income_exception"));
+
+  const industrial = parseEligibility("산업재해로 치료 중인 산재근로자를 지원합니다");
+  assert(industrial.extra_conditions.some(({ kind }) => kind === "industrial_accident"));
+  assert.deepEqual(industrial.occupations?.sort(), ["employee_field", "employee_office"]);
 });
 
 test("age conjunction intersects while OR alternatives stay unfiltered", () => {
@@ -104,6 +108,8 @@ test("age conjunction intersects while OR alternatives stay unfiltered", () => {
   const alternative = parseEligibility("만 19세 이하 또는 만 65세 이상");
   assert.deepEqual([alternative.age_min, alternative.age_max], [null, null]);
   assert(alternative.extra_conditions.some(({ kind }) => kind === "age_alternatives"));
+  const synonym = parseEligibility("만 19세 이하 혹은 만 65세 이상");
+  assert.deepEqual([synonym.age_min, synonym.age_max], [null, null]);
 
   const reversed = parseEligibility("만 65세 이상 19세 이하");
   assert.deepEqual([reversed.age_min, reversed.age_max], [null, null]);
@@ -155,6 +161,124 @@ test("occupation and gender blockers avoid false exclusions", () => {
   assert.equal(age.age_min, 65);
   assert.equal(age.occupations, null);
   assert.deepEqual(parseEligibility("노인 대상 일자리 연계 사업").occupations, ["retired"]);
+});
+
+test("non-requirements and partial alternatives never become hard filters", () => {
+  const excluded = parseEligibility(
+    "만 18세 이상 미취업 장애인을 지원합니다. 사업자 등록을 한 사람은 참여 대상에서 제외합니다.",
+  );
+  assert.equal(excluded.age_min, 18);
+  assert.deepEqual(excluded.occupations, ["jobseeker"]);
+  assert(!excluded.extra_conditions.some(({ kind }) => kind === "business_history"));
+  assert.equal(parseEligibility("만 18세 이상이되 사업자는 제외합니다.").age_min, 18);
+  assert.equal(parseEligibility("서울특별시 거주자는 제외합니다.").regions, null);
+  assert.equal(parseEligibility("여성은 우대합니다.").gender, null);
+
+  const exempted = parseEligibility(
+    "등록 장애인이 신청합니다. 기초생활수급자는 운전면허 요건을 면제받습니다. 의사의 소견을 제출해야 합니다.",
+  );
+  assert.equal(exempted.income_decile_max, null);
+  assert.equal(exempted.occupations, null);
+
+  const farmer = parseEligibility(
+    "일반 농업인 또는 기초생활수급자 등 저소득 농업인 단체를 지원합니다.",
+  );
+  assert.deepEqual(farmer.occupations, ["farmer_fisher"]);
+  assert.equal(farmer.income_decile_max, null);
+
+  assert.equal(
+    parseEligibility("부모와 영유아 또는 어린이집 보육교직원이 신청할 수 있습니다.")
+      .occupations,
+    null,
+  );
+
+  assert.equal(parseEligibility("차상위계층 또는 기초생활수급 가구").income_decile_max, 2);
+  assert.equal(parseEligibility("생계급여 또는 의료급여 수급 가구").income_decile_max, 2);
+  assert.deepEqual(parseEligibility("농업인 또는 어업인").occupations, ["farmer_fisher"]);
+  assert.deepEqual(parseEligibility("취업준비생 또는 개인사업자").occupations?.sort(), [
+    "jobseeker",
+    "self_employed",
+  ]);
+  assert.deepEqual(parseEligibility("의사 또는 간호사만 신청 가능합니다").occupations, [
+    "medical",
+  ]);
+
+  assert.equal(parseEligibility("만 19세 이상 또는 장애인").age_min, null);
+  assert.equal(parseEligibility("서울특별시 거주자 또는 장애인").regions, null);
+  assert.deepEqual(
+    parseEligibility("미취업 장애인을 지원합니다. 농업인 또는 일반 가구에 우대합니다.").occupations,
+    ["jobseeker"],
+  );
+  assert.equal(
+    parseEligibility("기준 중위소득 100% 이하인 농업인 또는 어업인").income_decile_max,
+    5,
+  );
+  assert.deepEqual(
+    parseEligibility("전라남도 순천시에 거주하는 농업인 또는 어업인").regions,
+    ["46150"],
+  );
+  assert.equal(parseEligibility("만 19세 이상 청년 중 저소득층을 우대합니다.").age_min, 19);
+  assert.equal(
+    parseEligibility("기준 중위소득 100% 이하 가구 중 한부모 가구를 우선 지원합니다.")
+      .income_decile_max,
+    5,
+  );
+  assert.equal(
+    parseEligibility("만 19세 이상 청년을 지원하며 저소득층을 우대합니다.").age_min,
+    19,
+  );
+  assert.deepEqual(
+    parseEligibility("서울특별시 거주자를 지원하며 장애인에게 가점을 부여합니다.").regions,
+    ["11"],
+  );
+  assert.equal(
+    parseEligibility("기준 중위소득 100% 이하 가구를 지원하며 한부모 가구를 우선 지원합니다.")
+      .income_decile_max,
+    5,
+  );
+  assert.equal(
+    parseEligibility("기준 중위소득 100% 이하인 농업인 또는 소득 무관 어업인")
+      .income_decile_max,
+    null,
+  );
+  assert.equal(
+    parseEligibility("만 19세 이상인 근로자 또는 연령 무관 자영업자").age_min,
+    null,
+  );
+  assert.equal(
+    parseEligibility("서울특별시에 거주하는 농업인 또는 지역 무관 어업인").regions,
+    null,
+  );
+  assert.equal(
+    parseEligibility("기준 중위소득 100% 이하인 농업인 또는 소득 제한 없는 어업인")
+      .income_decile_max,
+    null,
+  );
+  assert.equal(
+    parseEligibility("만 19세 이상인 근로자 또는 연령 제한 없는 자영업자").age_min,
+    null,
+  );
+  assert.equal(
+    parseEligibility("서울특별시에 거주하는 농업인 또는 전국 어업인").regions,
+    null,
+  );
+  assert.equal(
+    parseEligibility("농업인을 지원하며 기초생활수급자를 우선 선정합니다.").income_decile_max,
+    null,
+  );
+  assert.deepEqual(
+    parseEligibility("미취업 장애인을 지원합니다. 농업인 또는 일반 가구에 추가 혜택을 제공합니다.").occupations,
+    ["jobseeker"],
+  );
+
+  const dependentAlternative = parseEligibility(
+    "만 12세 이하 아동 또는 만 6세 이하 자녀를 양육하는 가정",
+  );
+  assert(!dependentAlternative.extra_conditions.some(({ kind }) => kind === "age_alternatives"));
+  assert.equal(
+    dependentAlternative.extra_conditions.filter(({ kind }) => kind === "dependent_person").length,
+    1,
+  );
 });
 
 test("CollectedProgram hashes stable fields and builds the embedding source", () => {

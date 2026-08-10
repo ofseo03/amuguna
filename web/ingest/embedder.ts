@@ -1,6 +1,7 @@
 import {
   EMBEDDING_DIM,
   mockEmbed,
+  VOYAGE_MODEL,
   type EmbeddingProvider,
 } from "../src/lib/embedding";
 
@@ -129,7 +130,12 @@ export class Embedder {
         },
         body: JSON.stringify(
           this.provider === "voyage"
-            ? { model: "voyage-3", input: texts, input_type: "document" }
+            ? {
+                model: VOYAGE_MODEL,
+                input: texts,
+                input_type: "document",
+                output_dimension: EMBEDDING_DIM,
+              }
             : {
                 model: "text-embedding-3-small",
                 input: texts,

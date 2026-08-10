@@ -7,12 +7,13 @@ export const SHARED_DIR = resolve(REPO_ROOT, "shared");
 export const FIXTURES_DIR = resolve(REPO_ROOT, "ingest/fixtures");
 
 export const EMBEDDING_DIM = 1024;
-export const LLM_MODEL = "claude-sonnet-5";
 
 export interface Settings {
   database_url: string;
   data_go_kr_api_key: string;
-  anthropic_api_key: string;
+  bizinfo_api_key: string;
+  finlife_api_key: string;
+  openrouter_api_key: string;
   embedding_provider: string;
   embedding_api_key: string;
   mock_embeddings: boolean;
@@ -30,7 +31,9 @@ export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Settings 
   return {
     database_url: envValue(env, "DATABASE_URL"),
     data_go_kr_api_key: envValue(env, "DATA_GO_KR_API_KEY"),
-    anthropic_api_key: envValue(env, "ANTHROPIC_API_KEY"),
+    bizinfo_api_key: envValue(env, "BIZINFO_API_KEY"),
+    finlife_api_key: envValue(env, "FINLIFE_API_KEY"),
+    openrouter_api_key: envValue(env, "OPENROUTER_API_KEY"),
     embedding_provider: forcedMock ? "mock" : provider,
     embedding_api_key: embeddingKey,
     mock_embeddings: forcedMock || provider === "mock" || !embeddingKey,

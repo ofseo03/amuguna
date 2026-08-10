@@ -115,11 +115,18 @@ function blocked(
   end: number,
   blockers: readonly string[],
 ): boolean {
-  const window = text.slice(Math.max(0, start - 8), end + 8);
-  return blockers.some((word) => window.includes(word));
+  for (const word of blockers) {
+    const left = Math.max(0, start - word.length + 1);
+    for (let at = text.indexOf(word, left); at !== -1 && at < end; at = text.indexOf(word, at + 1)) {
+      if (at + word.length > start) return true;
+    }
+  }
+  return false;
 }
 
 type TextMatch = { text: string; start: number; end: number };
+export type LookupMatch = TextMatch & { codes: string[] };
+export type LookupMeta = { matches: LookupMatch[]; rejected: boolean };
 
 function matches(pattern: RegExp, text: string): TextMatch[] {
   return [...text.matchAll(pattern)].map((match) => ({
@@ -129,17 +136,87 @@ function matches(pattern: RegExp, text: string): TextMatch[] {
   }));
 }
 
-export function lookupRegions(text: string): [string[], string[]] {
+export function clauseBounds(text: string, start: number, end: number): [number, number] {
+  let left = 0;
+  let right = text.length;
+  for (const match of text.matchAll(/[\n·;,]|(?<=[.。])\s/gu)) {
+    const matchStart = match.index;
+    const matchEnd = matchStart + match[0].length;
+    if (matchEnd <= start) left = matchEnd;
+    else if (matchStart >= end) {
+      right = matchStart;
+      break;
+    }
+  }
+  return [left, right];
+}
+
+export function clauseOf(text: string, start: number, end: number): string {
+  const [left, right] = clauseBounds(text, start, end);
+  return text.slice(left, right).replace(/^[ \t\-–—·]+|[ \t\-–—·]+$/gu, "");
+}
+
+const NON_REQUIREMENT_MARKERS = [
+  "제외",
+  "불가",
+  "해당하지 않",
+  "신청할 수 없",
+  "참여할 수 없",
+  "지원하지 않",
+  "면제",
+  "우선지원",
+  "우선 지원",
+  "우선 선정",
+  "우선 선발",
+  "우선적으로 선정",
+  "우선적으로 선발",
+  "우대",
+  "가점",
+  "추가 혜택",
+];
+
+export function nonRequirementReason(text: string, start: number, end: number): string | null {
+  const [left, right] = clauseBounds(text, start, end);
+  const clause = text.slice(left, right);
+  const candidate = start - left;
+  for (const marker of NON_REQUIREMENT_MARKERS) {
+    const at = clause.indexOf(marker);
+    if (at === -1) continue;
+    if (
+      candidate !== -1 &&
+      candidate < at &&
+      /(?:이되|다만|그러나|반면|중|가운데|지원하며|지원하고|지원합니다)/u.test(
+        clause.slice(candidate + (end - start), at),
+      )
+    ) {
+      continue;
+    }
+    return marker;
+  }
+  return null;
+}
+
+export function lookupRegions(text: string): [string[], string[], LookupMeta] {
   const codes: string[] = [];
   const evidence: string[] = [];
-  const sigunguMatches = matches(sigunguPattern, text).filter(
-    (match) =>
-      !blocked(text, match.start, match.end, REGION_BLOCKERS),
-  );
+  const accepted: LookupMatch[] = [];
+  let rejected = false;
+  const sigunguMatches = matches(sigunguPattern, text).filter((match) => {
+    if (blocked(text, match.start, match.end, REGION_BLOCKERS)) return false;
+    if (nonRequirementReason(text, match.start, match.end)) {
+      rejected = true;
+      return false;
+    }
+    return true;
+  });
 
-  const sidoHits: Array<{ start: number; entry: RegionEntry }> = [];
+  const sidoHits: Array<{ match: TextMatch; entry: RegionEntry }> = [];
   for (const match of matches(sidoPattern, text)) {
     if (blocked(text, match.start, match.end, REGION_BLOCKERS)) continue;
+    if (nonRequirementReason(text, match.start, match.end)) {
+      rejected = true;
+      continue;
+    }
     if (
       sigunguMatches.some(
         ({ start, end }) => match.start < end && start < match.end,
@@ -148,13 +225,13 @@ export function lookupRegions(text: string): [string[], string[]] {
       continue;
     }
     const entries = sidoIndex.get(match.text) ?? [];
-    if (entries.length === 1) sidoHits.push({ start: match.start, entry: entries[0] });
+    if (entries.length === 1) sidoHits.push({ match, entry: entries[0] });
   }
 
   const consumedSido = new Set<string>();
   for (const match of sigunguMatches) {
     const candidates = sigunguIndex.get(match.text) ?? [];
-    const context = sidoHits.filter(({ start }) => start < match.start);
+    const context = sidoHits.filter(({ match: sidoMatch }) => sidoMatch.start < match.start);
     const nearest = context.at(-1)?.entry;
     const matched = nearest
       ? candidates.filter(({ sido }) => sido === nearest.sido)
@@ -165,23 +242,25 @@ export function lookupRegions(text: string): [string[], string[]] {
       codes.push(entry.code);
       evidence.push(match.text);
     }
+    accepted.push({ ...match, codes: [entry.code] });
     consumedSido.add(entry.sido);
   }
 
-  for (const { entry } of sidoHits) {
+  for (const { match, entry } of sidoHits) {
     if (consumedSido.has(entry.sido)) continue;
     if (!codes.includes(entry.code)) {
       codes.push(entry.code);
       evidence.push(entry.name);
     }
+    accepted.push({ ...match, codes: [entry.code] });
     consumedSido.add(entry.sido);
   }
-  return [codes, evidence];
+  return [codes, evidence, { matches: accepted, rejected }];
 }
 
-const occupationIndex = new Map<string, string>();
+const occupationIndex = new Map<string, string[]>();
 for (const row of occupations.categories) {
-  for (const synonym of row.synonyms) occupationIndex.set(synonym, row.code);
+  for (const synonym of row.synonyms) add(occupationIndex, synonym, row.code);
 }
 
 export const occupationCodes = new Set(
@@ -202,6 +281,7 @@ const OCCUPATION_BLOCKERS = [
   "중소기업",
   "여성기업",
   "상시근로자",
+  "사업자등록",
 ];
 const DEPENDENT_VERBS = [
   "모시",
@@ -215,13 +295,6 @@ const DEPENDENT_VERBS = [
   "포함된",
 ];
 const DEPENDENT_NOUNS = ["자녀", "아동", "손자녀", "가구원", "세대원", "피부양"];
-const EXCLUSION_MARKERS = [
-  "제외",
-  "불가",
-  "해당하지 않",
-  "신청할 수 없",
-  "지원하지 않",
-];
 const AGE_DESCRIPTOR_SYNONYMS = new Set(["어르신", "노인", "청소년"]);
 const OPEN_TO_ALL_MARKERS = [
   "실명의 개인",
@@ -243,36 +316,38 @@ export function hasDependentContext(
   return null;
 }
 
-function hasExclusionContext(text: string, end: number, window = 40): string | null {
-  let tail = text.slice(end, end + window);
-  for (const terminator of ["\n", ".", "。"]) {
-    const cut = tail.indexOf(terminator);
-    if (cut !== -1) tail = tail.slice(0, cut);
-  }
-  return EXCLUSION_MARKERS.find((marker) => tail.includes(marker)) ?? null;
-}
-
 export function lookupOccupations(
   text: string,
   options: { dropAgeDescriptors?: boolean } = {},
-): [string[], string[]] {
+): [string[], string[], LookupMeta] {
   const codes: string[] = [];
   const evidence: string[] = [];
-  if (OPEN_TO_ALL_MARKERS.some((marker) => text.includes(marker))) return [codes, evidence];
+  const accepted: LookupMatch[] = [];
+  let rejected = false;
+  if (OPEN_TO_ALL_MARKERS.some((marker) => text.includes(marker))) {
+    return [codes, evidence, { matches: accepted, rejected }];
+  }
 
   for (const match of matches(occupationPattern, text)) {
     const word = match.text;
     if (options.dropAgeDescriptors && AGE_DESCRIPTOR_SYNONYMS.has(word)) continue;
     if (blocked(text, match.start, match.end, OCCUPATION_BLOCKERS)) continue;
-    if (hasDependentContext(text, match.start, match.end)) continue;
-    if (hasExclusionContext(text, match.end)) continue;
-    const code = occupationIndex.get(word);
-    if (code && !codes.includes(code)) {
-      codes.push(code);
-      evidence.push(word);
+    if (
+      hasDependentContext(text, match.start, match.end) ||
+      nonRequirementReason(text, match.start, match.end) ||
+      /^의\s*(?:소견|진단서?|처방|확인서?|추천)/u.test(text.slice(match.end))
+    ) {
+      rejected = true;
+      continue;
     }
+    const matchedCodes = occupationIndex.get(word) ?? [];
+    for (const code of matchedCodes) {
+      if (!codes.includes(code)) codes.push(code);
+    }
+    if (!evidence.includes(word)) evidence.push(word);
+    accepted.push({ ...match, codes: matchedCodes });
   }
-  return [codes, evidence];
+  return [codes, evidence, { matches: accepted, rejected }];
 }
 
 export function normalizeText(text: string): string {

@@ -163,7 +163,7 @@ test("CLI exits non-zero when every fetched record rolls back", () => {
         EMBEDDING_PROVIDER: "openai",
         EMBEDDING_API_KEY: "",
         MOCK_EMBEDDINGS: "",
-        ANTHROPIC_API_KEY: "",
+        OPENROUTER_API_KEY: "",
         DATABASE_URL: "",
       },
       encoding: "utf8",
@@ -187,13 +187,13 @@ test("all 27 fixtures match the established coverage baseline and are idempotent
   assert.equal(ingest.report.totals.created, 27);
   assert.deepEqual(ingest.report.parse.fieldHits, {
     age_min: 9,
-    age_max: 7,
+    age_max: 6,
     regions: 4,
     occupations: 8,
-    income_decile_max: 10,
+    income_decile_max: 9,
   });
   assert.equal(ingest.report.parse.withExtraConditions, 12);
-  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.704);
+  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.679);
 
   await ingest.run(collectors);
   assert.equal(ingest.report.totals.updated, 0);

@@ -39,11 +39,13 @@
 
 ## 실 연동 (키 준비 후)
 
-Next.js는 `web/.env.local`, 독립 배치는 실행 셸 환경변수, GitHub Actions는 Secrets에 값을 넣으면 실 API로 전환된다.
+Next.js와 독립 배치는 `web/.env.local`, GitHub Actions는 Secrets에 값을 넣으면 실 API로 전환된다.
 
 | 변수 | 용도 |
 |---|---|
 | `DATABASE_URL` | Supabase Postgres (`db/migrations/` 순서대로 적용) |
-| `DATA_GO_KR_API_KEY` | 공공데이터포털 (수집기 엔드포인트는 W1 실물 검증 필요) |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | voyage \| openai \| mock (차원 1024 고정) |
-| `ANTHROPIC_API_KEY` | 배치 전용 — 공식 Anthropic TypeScript SDK로 파싱 보완 + 요약 생성 (`claude-sonnet-5`) |
+| `DATA_GO_KR_API_KEY` | 공공데이터포털 중앙부처 복지서비스 |
+| `BIZINFO_API_KEY` | 기업마당 지원사업 API |
+| `FINLIFE_API_KEY` | 금융감독원 금융상품 한눈에 API |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | `voyage-4-large` \| openai \| mock (차원 1024 고정) |
+| `OPENROUTER_API_KEY` | 배치 전용 — OpenRouter로 파싱 보완 + 요약 생성 (`google/gemma-4-31b-it:free`) |

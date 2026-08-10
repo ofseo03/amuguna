@@ -50,7 +50,7 @@ psql -p 55432 -d amuguna -f db/migrations/0001_init.sql   # 0002~0004도 동일
 
 - `DATABASE_URL`은 서버 전용이다. `NEXT_PUBLIC_` 접두사를 붙이지 말 것 — 붙는 순간 번들에 실려 나간다.
 - 커넥션 풀러(포트 `6543`, PgBouncer transaction mode)를 쓸 경우 `PREPARE` / 세션 GUC 가 요청 간에 유지되지 않는다. `match_programs()` 는 트랜잭션 로컬 설정만 쓰므로 영향이 없지만, 마이그레이션은 반드시 직결 포트 `5432` 로 적용한다.
-- SPEC §8: 수집 API 키·임베딩 키·Anthropic 키도 전부 서버 환경변수. 클라이언트 노출 금지.
+- SPEC §8: 수집 API 키·임베딩 키·OpenRouter 키도 전부 서버 환경변수. 클라이언트 노출 금지.
 
 ---
 
