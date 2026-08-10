@@ -8,17 +8,18 @@ Postgres (Supabase) + `pgvector`. SPEC.md §5(데이터 모델) / §7.3(교차 �
 | `migrations/0002_match.sql` | `match_programs()` 교차 검증 RPC + `region_prefixes()` 헬퍼 |
 | `migrations/0003_privacy.sql` | `profiles` + `purge_stale_profiles()` (90일 정리) + 스케줄링 안내 |
 | `migrations/0004_embedding_provider.sql` | 벡터 공간 혼합을 막는 provider 식별자 |
+| `migrations/0006_income_axes.sql` | 소득분위와 기준중위소득 비율의 독립 저장·매칭 |
 | `migrations/0007_embedding_vector_space.sql` | provider 식별자에 모델명 포함 — 같은 provider 안의 모델 교체도 재색인 |
 
 ---
 
 ## 1. 적용
 
-번호 순서대로 **한 번씩** 적용한다. 재실행을 가정한 멱등 스크립트가 아니다(`CREATE TABLE` 에 `IF NOT EXISTS` 를 두지 않았다 — 이미 만들어진 스키마를 조용히 건너뛰는 것보다 에러가 낫다). 스키마를 바꿔야 하면 `0005_*.sql` 을 새로 만든다.
+번호 순서대로 **한 번씩** 적용한다. 재실행을 가정한 멱등 스크립트가 아니다(`CREATE TABLE` 에 `IF NOT EXISTS` 를 두지 않았다 — 이미 만들어진 스키마를 조용히 건너뛰는 것보다 에러가 낫다). `0005`는 함수 권한 강화 마이그레이션(PR #3)에 예약되어 있으며, 다음 스키마 변경은 `0008_*.sql`을 쓴다.
 
 ```bash
 # psql 직접 적용
-for f in db/migrations/0001_init.sql db/migrations/0002_match.sql db/migrations/0003_privacy.sql db/migrations/0004_embedding_provider.sql; do
+for f in db/migrations/*.sql; do
   psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f"
 done
 
@@ -65,7 +66,8 @@ match_programs(
   p_gender         text,          -- 'M' | 'F' | NULL('선택 안 함')
   p_region_codes   text[],        -- {시도2, 시군구5} — region_prefixes() 로 만든다
   p_occupation     text,          -- shared/occupations.json 의 code
-  p_income_decile  int,           -- 1..10
+  p_income_decile  int,           -- 1..10, 모르면 NULL
+  p_median_income_percent int,    -- 기준중위소득 대비 %, 모르면 NULL
   p_qvec           vector(1024) DEFAULT NULL,   -- NULL = 의도 입력 건너뜀
   p_topk           int          DEFAULT 200     -- 청크 단위 top-k
 ) RETURNS TABLE (
@@ -91,6 +93,7 @@ FROM match_programs(
        region_prefixes('11620'),        -- → {11,11620}
        'employee_office',
        3,
+       80,
        '[0.0123,-0.0456, ... 1024개 ... ,0.0789]'::vector(1024),
        200
      )
@@ -107,10 +110,10 @@ ORDER BY violations, sim DESC;
 
 ```sql
 -- 의도 입력을 건너뛴 경로 (P3). p_qvec 을 생략하면 sim 은 NULL 이고 자격 축만으로 동작한다.
-SELECT * FROM match_programs(67, 'F', region_prefixes('46150'), 'retired', 1);
+SELECT * FROM match_programs(67, 'F', region_prefixes('46150'), 'retired', 1, 70);
 
 -- §7.7 1단계 완화: top-k 200 → 500
-SELECT * FROM match_programs(28,'F',region_prefixes('11620'),'employee_office',3, $1::vector, 500);
+SELECT * FROM match_programs(28,'F',region_prefixes('11620'),'employee_office',3,80,$1::vector,500);
 ```
 
 ### 벡터를 wire 로 넘기는 법
@@ -125,7 +128,7 @@ const qvec: number[] = await embed(userText); // 길이 1024
 const rows = await sql`
   SELECT * FROM match_programs(
     ${28}, ${"F"}, ${["11", "11620"]}, ${"employee_office"}, ${3},
-    ${`[${qvec.join(",")}]`}::vector, ${200}
+    ${80}, ${`[${qvec.join(",")}]`}::vector, ${200}
   )`;
 ```
 
@@ -175,7 +178,8 @@ RETURNING id;
 
 -- 3) 자격요건도 upsert. 행은 이미 존재한다 (아래 트리거 참고)
 INSERT INTO eligibility_rules (program_id, age_min, age_max, gender, regions, occupations,
-                               income_decile_max, extra_conditions, parse_method,
+                               income_decile_max, median_income_percent_max,
+                               extra_conditions, parse_method,
                                parse_evidence, confidence)
 VALUES (...)
 ON CONFLICT (program_id) DO UPDATE SET
@@ -196,7 +200,7 @@ INSERT INTO program_embeddings (program_id, chunk_idx, embedding, provider) VALU
 2. **`status` 를 `'expired'` 로 바꾸면 임베딩 행이 자동 삭제된다** (트리거 `programs_drop_embeddings_on_expire_trg`). 만료 건이 벡터 top-k 슬롯을 점유하지 않게(§5). 다시 `active` 로 되돌리면 **재임베딩이 필요하다.**
 3. **`regions` / `occupations` 에 빈 배열 `'{}'` 을 넣을 수 없다** (CHECK). `NULL`(=무관, 통과)과 달리 `'{}' && ARRAY[...]` 는 항상 false 라 전원을 탈락시키는 조용한 파서 버그가 된다. 조건이 없으면 `NULL` 을 넣을 것.
 4. **`regions` 원소는 2자리 또는 5자리 숫자여야 한다** (CHECK). `&&` 는 원소 동등 비교라 3자리·6자리가 섞이면 매칭이 0건이 된다(SPEC §5 경고). 코드 사전은 `shared/regions.json`.
-5. `age_min <= age_max`, `benefit_amount_min <= benefit_amount_max`, `starts_at <= ends_at`, `status` / `form` / `issuer_level` / `parse_method` / `gender` 화이트리스트, `income_decile_max` 1..10, `age` 0..120 — 전부 CHECK 로 막혀 있다. 파서 검증(SPEC §6.2)과 이중으로 걸린다.
+5. `age_min <= age_max`, `benefit_amount_min <= benefit_amount_max`, `starts_at <= ends_at`, 상태 화이트리스트, 소득분위 1..10, 기준중위소득 비율 범위, 나이 0..120 — 전부 CHECK 로 막혀 있다. 파서 검증(SPEC §6.2)과 이중으로 걸린다.
 
 ### `ends_at` 은 `date` 이고 KST 기준으로 비교한다
 
@@ -213,7 +217,7 @@ p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
 ## 6. 웹 팀 통합 노트
 
 - `POST /api/profile` → `INSERT INTO profiles (...) RETURNING id`. 이 `id`(uuid)를 세션 쿠키에 담는다.
-- `POST /api/match` → 프로필을 읽어 `match_programs(age, gender, region_prefixes(region_code), occupation, income_decile, qvec, 200)`.
+- `POST /api/match` → 프로필을 읽어 `match_programs(age, gender, region_prefixes(region_code), occupation, income_decile, median_income_percent, qvec, 200)`.
   **자유입력 원문은 어디에도 저장하지 않는다**(§8). 임베딩 API 에만 넘기고 버린다 — `profiles` 에 해당 컬럼이 없는 것이 그 강제 장치다.
 - `GET /api/programs/:id` → 상세. 자격 체크리스트(✅/❌)는 `eligibility_rules` 한 행을 읽어 프로필과 대조해 템플릿으로 조립한다(§7.5, 요청 경로에 LLM 없음). `extra_conditions` 는 "추가 확인 필요 조건"으로 그대로 노출하고 판정에 쓰지 않는다(§6.3).
 - `GET /api/unsubscribe/:token` → 세션 식별자인 `profiles.id`와 분리한 `unsubscribe_token`으로 조회하고, 해지 시 프로필 행을 삭제한다:

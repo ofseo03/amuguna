@@ -34,8 +34,9 @@
         "gender": null,
         "regions": null,
         "occupations": ["employee_office", "employee_field"],
-        "income_decile_max": 7,
+        "income_decile_max": null,
         "extra_conditions": [
+          { "label": "연소득 요건", "text": "부부 합산 연소득 5천만원 이하(외벌이 3천5백만원 이하)" },
           { "label": "무주택 세대주", "text": "대출 신청일 현재 세대주를 포함한 세대원 전원이 무주택인 자" },
           { "label": "중소·중견기업 재직", "text": "중소기업기본법상 중소기업 또는 중견기업 재직 중일 것" },
           { "label": "주택 요건", "text": "임차 전용면적 85㎡ 이하, 임차보증금 2억원 이하" }
@@ -74,8 +75,9 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 7,
+        "income_decile_max": null,
         "extra_conditions": [
+          { "label": "연소득 요건", "text": "부부 합산 연소득 5천만원 이하" },
           { "label": "무주택 세대주", "text": "세대주를 포함한 세대원 전원이 무주택일 것" },
           { "label": "순자산 요건", "text": "세대 순자산 가액 3억 3천7백만원 이하" }
         ],
@@ -113,8 +115,9 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 5,
+        "income_decile_max": null,
         "extra_conditions": [
+          { "label": "가구별 소득 요건", "text": "청년가구 중위소득 60% 이하 및 원가구 중위소득 100% 이하" },
           { "label": "무주택", "text": "본인 명의 주택을 소유하지 않을 것" },
           { "label": "임차 요건", "text": "보증금 5천만원 이하 및 월세 70만원 이하 주택 거주" },
           { "label": "중복 수급 제한", "text": "지자체 자체 월세 지원 사업과 중복 수급 불가" }
@@ -153,8 +156,9 @@
         "gender": null,
         "regions": ["11"],
         "occupations": null,
-        "income_decile_max": 6,
+        "income_decile_max": null,
         "extra_conditions": [
+          { "label": "연소득 요건", "text": "부부 합산 연소득 4천7백만원 이하" },
           { "label": "무주택", "text": "신청일 기준 본인 무주택일 것" },
           { "label": "서울 소재 주택", "text": "임차 목적물이 서울시 관내에 있을 것" }
         ],
@@ -192,7 +196,8 @@
         "gender": null,
         "regions": ["11620"],
         "occupations": null,
-        "income_decile_max": 5,
+        "income_decile_max": null,
+        "median_income_percent_max": 100,
         "extra_conditions": [
           { "label": "관내 거주 기간", "text": "신청일 기준 관악구에 6개월 이상 계속 거주" },
           { "label": "1인 가구", "text": "주민등록상 1인 가구일 것" },
@@ -232,8 +237,9 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 8,
+        "income_decile_max": null,
         "extra_conditions": [
+          { "label": "연소득 요건", "text": "부부 합산 연소득 7천5백만원 이하" },
           { "label": "혼인 요건", "text": "혼인신고일로부터 7년 이내 또는 3개월 이내 결혼 예정" },
           { "label": "무주택 세대주", "text": "세대원 전원 무주택" }
         ],
@@ -388,7 +394,8 @@
         "gender": null,
         "regions": ["26350"],
         "occupations": ["self_employed"],
-        "income_decile_max": 7,
+        "income_decile_max": null,
+        "median_income_percent_max": 150,
         "extra_conditions": [
           { "label": "관내 영업 기간", "text": "해운대구 내 사업장에서 6개월 이상 계속 영업" },
           { "label": "사후 정산", "text": "선 시공 후 증빙 제출 방식으로 지급" }
@@ -466,7 +473,7 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 7,
+        "income_decile_max": null,
         "extra_conditions": [
           { "label": "소득인정액 기준", "text": "가구 소득인정액이 보건복지부 고시 선정기준액 이하" },
           { "label": "공무원연금 등 수급자 제외", "text": "직역연금 수급권자와 그 배우자는 원칙적으로 제외" }
@@ -505,7 +512,8 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 2,
+        "income_decile_max": null,
+        "median_income_percent_max": 75,
         "extra_conditions": [
           { "label": "위기 사유", "text": "주 소득자 사망·질병·실직, 화재, 가정폭력 등 긴급복지지원법상 위기 사유 해당" },
           { "label": "금융재산 기준", "text": "가구 금융재산이 고시 기준 이하일 것" }
@@ -544,7 +552,7 @@
         "gender": null,
         "regions": ["46", "47", "48", "44", "43", "52", "51", "50"],
         "occupations": null,
-        "income_decile_max": 6,
+        "income_decile_max": null,
         "extra_conditions": [
           { "label": "읍·면 거주", "text": "읍·면 지역에 거주 중이거나 이주 예정일 것" },
           { "label": "주택 보유", "text": "무주택이거나 노후 주택 1채만 소유" },
@@ -584,7 +592,8 @@
         "gender": null,
         "regions": ["46150"],
         "occupations": null,
-        "income_decile_max": 3,
+        "income_decile_max": null,
+        "median_income_percent_max": 50,
         "extra_conditions": [
           { "label": "관내 거주 기간", "text": "신청일 기준 순천시에 1년 이상 계속 거주" }
         ],
@@ -622,8 +631,9 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 5,
+        "income_decile_max": null,
         "extra_conditions": [
+          { "label": "공적 급여 수급 조건", "text": "기초생활수급자, 차상위계층 또는 기초연금 수급자" },
           { "label": "장기요양 등급자 제외", "text": "노인장기요양보험 등급 판정자는 대상에서 제외" },
           { "label": "우선 선정", "text": "독거·조손 가구 우선" }
         ],
@@ -661,7 +671,8 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 9,
+        "income_decile_max": null,
+        "median_income_percent_max": 250,
         "extra_conditions": [
           { "label": "가구 소득", "text": "가구 소득이 기준 중위소득 250% 이하" },
           { "label": "직전 과세기간 소득 발생", "text": "직전 과세기간에 소득이 있을 것 (비과세 소득만 있는 경우 제외)" }
@@ -700,7 +711,7 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 4,
+        "income_decile_max": null,
         "extra_conditions": [
           { "label": "재산 요건", "text": "가구원 재산 합계액이 2억 4천만원 미만" },
           { "label": "소득 요건", "text": "가구 유형별 총소득 기준금액 미만" }
@@ -739,8 +750,9 @@
         "gender": null,
         "regions": null,
         "occupations": null,
-        "income_decile_max": 6,
+        "income_decile_max": null,
         "extra_conditions": [
+          { "label": "연소득 요건", "text": "연소득 3,500만원 이하 또는 4,500만원 이하이면서 신용평점 하위 20%" },
           { "label": "정책서민금융 이용 이력", "text": "1년 이상 성실 상환 중이거나 최근 3년 내 완제" },
           { "label": "신용평점", "text": "연소득 4,500만원 이하 시 개인신용평점 하위 20% 해당" }
         ],

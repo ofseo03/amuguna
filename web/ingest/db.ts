@@ -33,6 +33,7 @@ export const RULE_COLUMNS = [
   "regions",
   "occupations",
   "income_decile_max",
+  "median_income_percent_max",
   "extra_conditions",
   "parse_method",
   "parse_evidence",
@@ -69,6 +70,7 @@ export type RuleValues = {
   regions: string[] | null;
   occupations: string[] | null;
   income_decile_max: number | null;
+  median_income_percent_max: number | null;
   extra_conditions: Array<Record<string, string>>;
   parse_method: "regex" | "llm" | "mixed";
   parse_evidence: Record<string, unknown>;
@@ -509,12 +511,14 @@ export class PostgresDatabase implements Database {
     await this.sql`
       INSERT INTO eligibility_rules (
         program_id, age_min, age_max, gender, regions, occupations,
-        income_decile_max, extra_conditions, parse_method, parse_evidence, confidence
+        income_decile_max, median_income_percent_max,
+        extra_conditions, parse_method, parse_evidence, confidence
       ) VALUES (
         ${programId}, ${values.age_min}, ${values.age_max}, ${values.gender},
         ${values.regions ? this.sql.array(values.regions) : null}::text[],
         ${values.occupations ? this.sql.array(values.occupations) : null}::text[],
-        ${values.income_decile_max}, ${JSON.stringify(values.extra_conditions)}::jsonb,
+        ${values.income_decile_max}, ${values.median_income_percent_max},
+        ${JSON.stringify(values.extra_conditions)}::jsonb,
         ${values.parse_method}, ${JSON.stringify(values.parse_evidence)}::jsonb, ${values.confidence}
       )
       ON CONFLICT (program_id) DO UPDATE SET
@@ -524,6 +528,7 @@ export class PostgresDatabase implements Database {
         regions = EXCLUDED.regions,
         occupations = EXCLUDED.occupations,
         income_decile_max = EXCLUDED.income_decile_max,
+        median_income_percent_max = EXCLUDED.median_income_percent_max,
         extra_conditions = EXCLUDED.extra_conditions,
         parse_method = EXCLUDED.parse_method,
         parse_evidence = EXCLUDED.parse_evidence,

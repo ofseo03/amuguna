@@ -47,7 +47,7 @@
 
 | 축 | 질문 | 입력 | 판정 |
 |---|---|---|---|
-| **자격** | 내가 대상인가? | 인적사항 5필드 | 정형 조건 대조 (SQL) |
+| **자격** | 내가 대상인가? | 인적사항 + 소득 두 기준 | 정형 조건 대조 (SQL) |
 | **의도** | 내가 찾는 것인가? | 원하는 것 한 줄 | 의미 유사도 (벡터) |
 
 자격만 맞으면 수백 건의 무관한 정보가 쏟아지고, 의도만 맞으면 대상도 아닌 것을 권하게 된다. 두 축이 **서로 다른 것을 재기 때문에** 교집합이 정보가 된다.
@@ -272,7 +272,7 @@ K-Startup   GET https://apis.data.go.kr/B552735/kisedKstartupService01/getAnnoun
 
 [사용자 요청]
 
-  인적사항 5필드 ──→ (A) SQL 자격 필터   → 집합 A  "대상이 되는 것"
+  인적사항·소득 기준 ─→ (A) SQL 자격 필터 → 집합 A  "대상이 되는 것"
   원하는 것 한 줄 ─→ (B) 임베딩 → top-k  → 집합 B  "찾는 것과 가까운 것"
                  ↓
            A ∩ B  (입력 있을 때)
@@ -341,6 +341,7 @@ eligibility_rules (
                                    -- `&&`는 원소 '동등' 비교이므로 양쪽이 같은 자리수 체계를 써야만 매칭된다
   occupations text[],              -- NULL = 무관
   income_decile_max,               -- 소득분위 상한. NULL = 무관
+  median_income_percent_max,       -- 기준중위소득 비율 상한. NULL = 무관
   extra_conditions jsonb,          -- 무주택 등 정형화 실패분 (표시 전용)
   parse_method,                    -- regex | llm | mixed
   parse_evidence jsonb,            -- 필드별 매칭된 원문 구간 (추적용)
@@ -363,7 +364,8 @@ CREATE INDEX ON program_embeddings USING hnsw (embedding vector_cosine_ops);
 -- 사용자 프로필 (익명)
 profiles (
   id uuid,
-  age, gender, occupation, region_code, income_decile,
+  age, gender, occupation, region_code,
+  income_decile, median_income_percent,
   created_at, email nullable,      -- 알림 신청 시에만
   unsubscribe_token nullable       -- profiles.id와 분리한 1클릭 해지 토큰
 )
@@ -381,10 +383,10 @@ profiles (
 | 2 | 성별 | 남 / 여 / 선택 안 함 | SQL (미선택 시 성별 조건 프로그램도 포함) |
 | 3 | 직업·직무 | 대분류 12종 택1 → 소분류 | SQL |
 | 4 | 거주지역 | 시/도 → 시군구 2단계 (행정표준코드) | SQL |
-| 5 | 소득분위 | 1~10분위 택1, 소득 구간 라벨 병기 | SQL |
+| 5 | 소득 | 소득분위(1~10 또는 모름) + 가구원 수·월소득 선택 계산 | SQL |
 | 6 | **원하는 것** | **자유입력 한 줄 (200자), 건너뛰기 가능** | **벡터** |
 
-**소득분위** — 사용자 자가 입력이다. 선택지에 분위 번호만 두지 않고 `3분위 (월 소득 약 250~330만원)` 처럼 실제 소득 구간을 병기한다. 자기 분위를 아는 사용자가 거의 없다. 라벨용 기준표는 정적 데이터로 두고 연 1회 갱신. 마이데이터 / 건강보험공단 연동은 기관 제휴가 필요하므로 로드맵 항목.
+**소득** — 사용자가 아는 소득분위는 그대로 입력한다. 별도로 가구원 수와 월 가구소득(또는 알고 있는 소득인정액)을 입력하면 브라우저가 보건복지부의 2026년 가구원별 기준중위소득표로 비율을 계산한다. 두 축은 서로 환산하지 않고 공고문과 같은 단위끼리만 비교한다. 실제 월 금액과 가구원 수는 서버로 보내거나 저장하지 않고 계산된 정수 비율만 저장한다. 월소득만 쓴 값은 재산의 소득환산액 등이 빠진 예상치이므로 상세 화면에서 원문 확인을 안내한다. 기준표는 `shared/median_income_2026.json`으로 두고 연 1회 갱신한다.
 
 **원하는 것** — 의도 축의 유일한 입력이다.
 
@@ -430,7 +432,6 @@ const AGE = [
 const INCOME = [
   /기준\s*중위소득\s*(\d{1,3})\s*%\s*이하/,
   /소득\s*(\d{1,2})\s*분위\s*이하/,
-  /차상위계층|기초생활수급/,
 ];
 
 const GENDER = [/여성만|여성에\s*한(?:함|정)/];
@@ -438,7 +439,7 @@ const GENDER = [/여성만|여성에\s*한(?:함|정)/];
 
 지역·직업은 정규식이 아니라 **사전 룩업**이 맞다. 행정표준코드 사전(시도 17 + 시군구 250여)과 직업 동의어 사전(`소상공인`/`자영업자` → `self_employed`)으로 문자열 매칭한다.
 
-`중위소득 %` → 분위 환산표는 정적 데이터로 보관한다 (기준 중위소득 고시 기준, 연 1회 갱신).
+`중위소득 %`는 `median_income_percent_max`, 명시적인 `N분위`는 `income_decile_max`에 저장한다. 차상위·기초생활수급 문구는 두 수치 중 하나로 추정하지 않고 `extra_conditions`에 보존한다.
 
 ### 6.2 LLM 보완
 
@@ -450,7 +451,7 @@ if (rules.age_min === null && rules.age_max === null) {
 }
 ```
 
-- 출력은 JSON 스키마로 강제하고 서버에서 재검증 (나이 0~120, 분위 1~10 등)
+- 출력은 JSON 스키마로 강제하고 서버에서 재검증 (나이 0~120, 분위 1~10, 중위소득 비율 0~1000 등)
 - 검증 실패 → 해당 필드 `NULL` (= 조건 없음), `needs_review` 플래그
 - `parse_method`에 regex / llm / mixed 기록 → 어느 쪽이 문제인지 사후 분리 가능
 
@@ -490,7 +491,9 @@ WITH eligible AS (          -- 집합 A: 자격
                              -- :gender NULL = '선택 안 함'. 성별 조건 프로그램도 포함한다 (§5 입력 필드 정의)
     AND (e.regions   IS NULL OR e.regions && :region_prefixes)
     AND (e.occupations IS NULL OR :occupation = ANY(e.occupations))
-    AND (e.income_decile_max IS NULL OR :income_decile <= e.income_decile_max)
+    AND (e.income_decile_max IS NULL OR :income_decile IS NULL OR :income_decile <= e.income_decile_max)
+    AND (e.median_income_percent_max IS NULL OR :median_income_percent IS NULL
+         OR :median_income_percent <= e.median_income_percent_max)
 ),
 similar AS (                -- 집합 B: 벡터 top-k (청크 단위 검색)
   SELECT program_id, embedding <=> :qvec AS dist
@@ -617,7 +620,7 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 | # | 화면 | 내용 |
 |---|---|---|
 | 1 | 랜딩 | 한 문장 가치 제안 + "1분 만에 확인하기" CTA |
-| 2 | 온보딩 | 6단계 (인적사항 5 + 원하는 것 1), 진행바, 뒤로가기, 마지막 단계 건너뛰기 |
+| 2 | 온보딩 | 6단계 (인적사항·소득 5단계 + 원하는 것 1), 진행바, 뒤로가기, 마지막 단계 건너뛰기 |
 | 3 | 결과 | 매칭 요약 배너("28세·서울 관악구 기준 12건") + `form` 탭 + 카드 리스트 + 근접탈락 + 완화 안내 |
 | 4 | 상세 | 자격 체크리스트(✅/❌), `extra_conditions` 확인 필요 항목, 금액, 기한, 신청 절차, 원문 링크 |
 | 5 | 알림 신청 | 이메일 + 동의 체크 (선택) |
@@ -627,7 +630,7 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 
 | 메서드 | 경로 | 입력 | 출력 |
 |---|---|---|---|
-| POST | `/api/profile` | 인적사항 5필드 | 익명 프로필 생성, 세션 쿠키 발급 |
+| POST | `/api/profile` | 정규화한 프로필 | 익명 프로필 생성, 세션 쿠키 발급. 월소득·가구원 수는 받지 않음 |
 | POST | `/api/match` | 원하는 것 한 줄 (선택, 200자) | 카드 리스트(스코어순) + 근접탈락 + 적용된 완화 단계(§7.7) + 페이지 커서 |
 | GET | `/api/programs/:id` | 세션 쿠키 | 상세 — 세션 프로필 대조 자격 체크리스트(✅/❌), `extra_conditions`, 출처·수집시각 |
 | POST | `/api/subscribe` | email + 동의 | 알림 등록 |

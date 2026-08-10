@@ -8,9 +8,6 @@ type RegionData = {
 type OccupationData = {
   categories: Array<{ code: string; synonyms: string[] }>;
 };
-type MidincomeData = {
-  mapping: Array<{ max_percent: number | null; decile: number }>;
-};
 
 function load<T>(name: string): T {
   return JSON.parse(
@@ -18,17 +15,8 @@ function load<T>(name: string): T {
   ) as T;
 }
 
-const midincome = load<MidincomeData>("midincome_to_decile.json");
 const regions = load<RegionData>("regions.json");
 const occupations = load<OccupationData>("occupations.json");
-
-export function midrateToDecile(percent: number): number {
-  return (
-    midincome.mapping.find(
-      ({ max_percent }) => max_percent === null || percent <= max_percent,
-    )?.decile ?? 10
-  );
-}
 
 const SIDO_ALIAS_SUFFIXES = [
   "특별자치시",

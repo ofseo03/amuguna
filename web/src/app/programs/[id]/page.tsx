@@ -76,8 +76,10 @@ export default async function ProgramDetailPage({ params }: Props) {
           }`}
         >
           <p className="text-lg font-bold">
-            {ev.violations === 0 ? (
+            {ev.violations === 0 && ev.unknownDimensions.length === 0 ? (
               <span className="text-ok">✅ 입력하신 정보로는 대상에 해당합니다</span>
+            ) : ev.violations === 0 ? (
+              <span className="text-warn">⚠️ 입력하지 않은 조건을 추가로 확인해 주세요</span>
             ) : (
               <span className="text-warn">
                 ⚠️ 조건 {ev.violations}개가 맞지 않습니다
@@ -147,16 +149,18 @@ export default async function ProgramDetailPage({ params }: Props) {
                 className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-4 py-3 ${
                   !c.constrained
                     ? "border-line-soft bg-bg-soft"
+                    : c.unknown
+                      ? "border-warn bg-warn-soft"
                     : c.pass
                       ? "border-ok bg-ok-soft"
                       : "border-danger bg-danger-soft"
                 }`}
               >
                 <span aria-hidden="true" className="text-lg">
-                  {!c.constrained ? "➖" : c.pass ? "✅" : "❌"}
+                  {!c.constrained ? "➖" : c.unknown ? "⚠️" : c.pass ? "✅" : "❌"}
                 </span>
                 <span className="sr-only">
-                  {!c.constrained ? "조건 없음" : c.pass ? "충족" : "미충족"}
+                  {!c.constrained ? "조건 없음" : c.unknown ? "추가 확인 필요" : c.pass ? "충족" : "미충족"}
                 </span>
                 <span className="w-20 font-semibold text-ink">
                   {DIMENSION_LABEL[c.dimension]}

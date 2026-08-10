@@ -3,7 +3,7 @@
 > 개인 프로필 기반 공공 금융정보 매칭 서비스
 > 2026 금융 AI Challenge 출품작 · 상위 스펙은 [`../SPEC.md`](../SPEC.md)
 
-나이·성별·직업·지역·소득분위 5필드와 "원하는 것" 한 줄을 받아,
+나이·성별·직업·지역과 소득분위/기준중위소득 비율, "원하는 것" 한 줄을 받아,
 **자격(SQL 규칙 대조) ∩ 의도(벡터 유사도)** 의 교집합만 카드로 보여준다.
 
 ---
@@ -90,7 +90,7 @@ SPEC §5 의 예시 문구 4종으로 실측해 정한 값이다.
 ```bash
 # 1) 프로필 생성 — 세션 쿠키 발급
 curl -s -c jar -X POST localhost:3000/api/profile -H 'content-type: application/json' \
-  -d '{"age":28,"gender":"F","occupation":"employee_office","sidoCode":"11","sigunguCode":"11620","incomeDecile":3}'
+  -d '{"age":28,"gender":"F","occupation":"employee_office","sidoCode":"11","sigunguCode":"11620","incomeDecile":3,"medianIncomePercent":80}'
 
 # 2) 매칭 — 자유입력은 이 요청에만 쓰이고 저장되지 않는다
 curl -s -b jar -X POST localhost:3000/api/match -H 'content-type: application/json' \
@@ -150,7 +150,7 @@ OpenRouter API를 호출하는 독립 Node 배치(`ingest/`)에서만 읽는다.
 
 ## 팀 공통 계약 데이터
 
-`../shared/*.json` (행정구역 코드 · 직업 대분류 12종 · 소득분위 라벨 · 중위소득 환산표)이
+`../shared/*.json` (행정구역 코드 · 직업 대분류 12종 · 소득분위 라벨 · 2026 기준중위소득표)이
 단일 출처다. **원본은 수정하지 않는다.**
 
 `scripts/copy-shared.mjs` 가 `predev` / `prebuild` 훅에서 `src/data/` 로 복사한다.

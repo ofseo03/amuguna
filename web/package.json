@@ -9,7 +9,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/blockers.test.mjs ingest/tests/*.test.ts",
+    "test": "tsx --test src/lib/*.test.mjs ingest/tests/*.test.ts",
     "test:ingest": "tsx --test ingest/tests/*.test.ts",
     "ingest": "node --env-file-if-exists=.env.local --import tsx ingest/cli.ts",
     "typecheck": "tsc --noEmit",

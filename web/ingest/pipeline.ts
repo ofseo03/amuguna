@@ -18,6 +18,7 @@ export const FIELD_NAMES = [
   "regions",
   "occupations",
   "income_decile_max",
+  "median_income_percent_max",
 ] as const;
 
 export class SourceStats {

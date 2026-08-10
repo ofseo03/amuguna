@@ -1,7 +1,7 @@
 /**
  * 익명 세션 (SPEC §8 개인정보).
  *
- * 회원가입 없음. 프로필 5필드는 httpOnly 쿠키에만 담고,
+ * 회원가입 없음. 정규화한 프로필은 httpOnly 쿠키에 담고,
  * 자유입력("원하는 것")은 절대 쿠키에도 DB 에도 넣지 않는다 — 요청 처리 중에만 존재한다.
  *
  * 쿠키에는 HMAC 서명을 붙여 클라이언트 변조를 막는다. 서명 키가 없으면
@@ -59,12 +59,14 @@ export function deserializeProfile(raw: string | undefined): Profile | null {
       typeof obj?.age !== "number" ||
       typeof obj?.occupation !== "string" ||
       typeof obj?.sidoCode !== "string" ||
-      typeof obj?.sigunguCode !== "string" ||
-      typeof obj?.incomeDecile !== "number"
+      typeof obj?.sigunguCode !== "string"
     ) {
       return null;
     }
-    return obj as Profile;
+    const incomeDecile = typeof obj.incomeDecile === "number" ? obj.incomeDecile : null;
+    const medianIncomePercent =
+      typeof obj.medianIncomePercent === "number" ? obj.medianIncomePercent : null;
+    return { ...obj, incomeDecile, medianIncomePercent } as Profile;
   } catch {
     return null;
   }
