@@ -11,7 +11,10 @@ export const LLM_MODEL = "claude-sonnet-5";
 
 export interface Settings {
   database_url: string;
+  // 인증키는 발급처별로 다르다 (SPEC §3.5). 포털 키 하나로 세 소스를 부를 수 없다.
   data_go_kr_api_key: string;
+  bizinfo_key: string;
+  finlife_key: string;
   anthropic_api_key: string;
   embedding_provider: string;
   embedding_api_key: string;
@@ -30,6 +33,8 @@ export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Settings 
   return {
     database_url: envValue(env, "DATABASE_URL"),
     data_go_kr_api_key: envValue(env, "DATA_GO_KR_API_KEY"),
+    bizinfo_key: envValue(env, "BIZINFO_KEY"),
+    finlife_key: envValue(env, "FINLIFE_KEY"),
     anthropic_api_key: envValue(env, "ANTHROPIC_API_KEY"),
     embedding_provider: forcedMock ? "mock" : provider,
     embedding_api_key: embeddingKey,

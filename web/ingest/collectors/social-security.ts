@@ -17,7 +17,7 @@ export class SocialSecurityCollector extends Collector {
 
   protected queryParams({ since, page }: { since: string | null; page: number }) {
     const params: Record<string, string | number> = {
-      serviceKey: this.settings.data_go_kr_api_key,
+      serviceKey: this.apiKey,
       callTp: "L",
       pageNo: page,
       numOfRows: this.pageSize,

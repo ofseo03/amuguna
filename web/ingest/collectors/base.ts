@@ -38,6 +38,18 @@ export abstract class Collector {
   abstract readonly idListEndpoint: string;
   readonly defaultForm: string = "subsidy";
 
+  /**
+   * 인증키 발급처는 소스마다 다르다 (SPEC §3.5). 공공데이터포털 경유 소스는
+   * 계정당 키 1개를 공유하지만, 자체 창구에서 발급하는 소스는 자기 키를 쓴다.
+   * 기본값은 포털 키이며, 발급처가 다른 수집기가 재정의한다.
+   */
+  protected get apiKey(): string {
+    return this.settings.data_go_kr_api_key;
+  }
+
+  /** 미설정 오류 메시지에 쓸 환경변수 이름. `apiKey` 와 짝을 맞춰 재정의한다. */
+  protected readonly apiKeyEnvName: string = "DATA_GO_KR_API_KEY";
+
   readonly settings: Settings;
   readonly useFixtures: boolean;
   readonly pageSize: number;
@@ -78,8 +90,8 @@ export abstract class Collector {
   }
 
   private async get(params: Record<string, string | number>): Promise<unknown> {
-    if (!this.settings.data_go_kr_api_key) {
-      throw new CollectorError(`${this.sourceKey}: DATA_GO_KR_API_KEY 미설정`);
+    if (!this.apiKey) {
+      throw new CollectorError(`${this.sourceKey}: ${this.apiKeyEnvName} 미설정`);
     }
 
     const url = new URL(this.endpoint);

@@ -239,8 +239,11 @@ sections.push(`
   ${codeBlock("web/ingest/collectors/index.ts", "TypeScript")}
 
   <h3>4.6 설정 — 인증키 주입</h3>
-  <p>인증키는 <b>소스코드에 포함하지 않고</b> 환경변수(<code>DATA_GO_KR_API_KEY</code>)로만 주입합니다.
-  저장소에는 키가 커밋되지 않으며, 실행 환경(GitHub Actions Secrets)에서 공급합니다.</p>
+  <p>인증키는 <b>소스코드에 포함하지 않고</b> 환경변수로만 주입합니다. 저장소에는 키가 커밋되지 않으며,
+  실행 환경(GitHub Actions Secrets)에서 공급합니다. 공공데이터포털 경유 소스는
+  <code>DATA_GO_KR_API_KEY</code> 하나를 공유하고, 자체 창구에서 키를 발급하는 소스는
+  각자의 환경변수(<code>BIZINFO_KEY</code>, <code>FINLIFE_KEY</code>)를 사용하여
+  <b>포털 인증키가 포털 외부로 전송되지 않도록</b> 분리했습니다.</p>
   ${codeBlock("web/ingest/config.ts", "TypeScript")}
 </section>`);
 

@@ -161,7 +161,9 @@ Next.js 로컬 실연동 값은 `web/.env.local`에 둔다. 독립 배치는 같
 | `EMBEDDING_PROVIDER` | `mock` | `voyage` \| `openai` \| `mock` |
 | `EMBEDDING_API_KEY` | (없음) | 실 provider 사용 시 |
 | `MOCK_EMBEDDINGS` | — | `1` 이면 provider 무시하고 항상 mock |
-| `DATA_GO_KR_API_KEY` | (없음) | `ingest/` 실 API 수집 시 |
+| `DATA_GO_KR_API_KEY` | (없음) | `ingest/` 복지·지원금 소스. **Decoding 키** — 수집기가 `searchParams` 로 한 번 인코딩하므로 Encoding 키를 넣으면 이중 인코딩으로 인증 실패한다 |
+| `BIZINFO_KEY` | (없음) | `ingest/` 기업마당. bizinfo.go.kr 자체 발급 — 포털 키와 다르다 |
+| `FINLIFE_KEY` | (없음) | `ingest/` 금감원 공시. finlife.fss.or.kr 자체 발급 — 포털 키와 다르다 |
 | `ANTHROPIC_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |
 | `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 서명 키 |
 
