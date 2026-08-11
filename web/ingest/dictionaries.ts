@@ -185,13 +185,26 @@ export function nonRequirementReason(text: string, start: number, end: number): 
     if (
       candidate !== -1 &&
       candidate < at &&
-      /(?:이되|다만|그러나|반면|중|가운데|지원하며|지원하고|지원합니다)/u.test(
+      /(?:이되|이며|이고|하고|다만|그러나|반면|중|가운데|지원하며|지원하고|지원합니다|\([^)]*(?:여성|남성))/u.test(
         clause.slice(candidate + (end - start), at),
       )
     ) {
       continue;
     }
     return marker;
+  }
+  return null;
+}
+
+function regionNonRequirementContext(text: string, start: number, end: number): string | null {
+  const [left, right] = clauseBounds(text, start, end);
+  const head = text.slice(left, start);
+  const tail = text.slice(end, right);
+  if (/(?:행사|교육|상담|설명회)\s*(?:장소|장|개최지)\s*[:：]?.*$/u.test(head)) {
+    return "행사 장소";
+  }
+  if (/^(?:에서|에서의)\s*(?:개최|진행|운영|교육|상담)/u.test(tail)) {
+    return "개최 장소";
   }
   return null;
 }
@@ -203,7 +216,11 @@ export function lookupRegions(text: string): [string[], string[], LookupMeta] {
   let rejected = false;
   const sigunguMatches = matches(sigunguPattern, text).filter((match) => {
     if (blocked(text, match.start, match.end, REGION_BLOCKERS)) return false;
-    if (nonRequirementReason(text, match.start, match.end)) {
+    if (
+      hasDependentContext(text, match.start, match.end, false) ||
+      nonRequirementReason(text, match.start, match.end) ||
+      regionNonRequirementContext(text, match.start, match.end)
+    ) {
       rejected = true;
       return false;
     }
@@ -213,7 +230,11 @@ export function lookupRegions(text: string): [string[], string[], LookupMeta] {
   const sidoHits: Array<{ match: TextMatch; entry: RegionEntry }> = [];
   for (const match of matches(sidoPattern, text)) {
     if (blocked(text, match.start, match.end, REGION_BLOCKERS)) continue;
-    if (nonRequirementReason(text, match.start, match.end)) {
+    if (
+      hasDependentContext(text, match.start, match.end, false) ||
+      nonRequirementReason(text, match.start, match.end) ||
+      regionNonRequirementContext(text, match.start, match.end)
+    ) {
       rejected = true;
       continue;
     }
@@ -236,8 +257,9 @@ export function lookupRegions(text: string): [string[], string[], LookupMeta] {
     const matched = nearest
       ? candidates.filter(({ sido }) => sido === nearest.sido)
       : candidates;
-    if (matched.length !== 1) continue;
-    const entry = matched[0];
+    const unique = [...new Map(matched.map((entry) => [entry.code, entry])).values()];
+    if (unique.length !== 1) continue;
+    const entry = unique[0];
     if (!codes.includes(entry.code)) {
       codes.push(entry.code);
       evidence.push(match.text);
@@ -282,6 +304,8 @@ const OCCUPATION_BLOCKERS = [
   "여성기업",
   "상시근로자",
   "사업자등록",
+  "보건소",
+  "의료급여",
 ];
 const DEPENDENT_VERBS = [
   "모시",
@@ -294,25 +318,44 @@ const DEPENDENT_VERBS = [
   "동거하는",
   "포함된",
 ];
-const DEPENDENT_NOUNS = ["자녀", "아동", "손자녀", "가구원", "세대원", "피부양"];
+const DEPENDENT_NOUNS = [
+  "자녀",
+  "아동",
+  "손자녀",
+  "부모",
+  "조부모",
+  "직계존속",
+  "배우자",
+  "가구원",
+  "세대원",
+  "피부양",
+];
 const AGE_DESCRIPTOR_SYNONYMS = new Set(["어르신", "노인", "청소년"]);
-const OPEN_TO_ALL_MARKERS = [
-  "실명의 개인",
-  "누구나",
-  "제한 없음",
-  "제한없음",
-  "가입 제한 없",
+const OPEN_TO_ALL_PATTERNS = [
+  /실명의\s*개인/u,
+  /개인\s*(?:\([^)]*개인사업자\s*포함[^)]*\)|(?:및|또는|·)\s*개인사업자)/u,
+  /누구나|제한\s*없음|가입\s*제한\s*없/u,
 ];
 
 export function hasDependentContext(
   text: string,
-  _start: number,
+  start: number,
   end: number,
+  includeVerbs = true,
 ): string | null {
+  const head = text.slice(Math.max(0, start - 20), start);
+  for (const noun of DEPENDENT_NOUNS) {
+    if (new RegExp(`${noun}(?:가|이|의|는|에게|을|를)?(?![가-힣])\\s*$`, "u").test(head)) {
+      return noun;
+    }
+  }
   const tail = text.slice(end, end + 25);
-  for (const verb of DEPENDENT_VERBS) if (tail.includes(verb)) return verb;
-  const near = text.slice(end, end + 5);
-  for (const noun of DEPENDENT_NOUNS) if (near.includes(noun)) return noun;
+  if (includeVerbs) {
+    for (const verb of DEPENDENT_VERBS) if (tail.includes(verb)) return verb;
+  }
+  for (const noun of DEPENDENT_NOUNS) {
+    if (new RegExp(`${noun}(?:가|이|의|는|에게|을|를)?(?![가-힣])`, "u").test(tail)) return noun;
+  }
   return null;
 }
 
@@ -324,7 +367,7 @@ export function lookupOccupations(
   const evidence: string[] = [];
   const accepted: LookupMatch[] = [];
   let rejected = false;
-  if (OPEN_TO_ALL_MARKERS.some((marker) => text.includes(marker))) {
+  if (OPEN_TO_ALL_PATTERNS.some((pattern) => pattern.test(text))) {
     return [codes, evidence, { matches: accepted, rejected }];
   }
 

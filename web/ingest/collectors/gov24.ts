@@ -57,7 +57,7 @@ export class Gov24Collector extends Collector {
     const criteria = firstOf(item, ["선정기준"]);
     const benefit = firstOf(item, ["지원내용"]);
     const deadline = firstOf(item, ["신청기한"]);
-    const eligibility = [target, criteria].filter(Boolean).join("\n");
+    const eligibility = [target, criteria].filter(Boolean).join("\n\n");
     const bodyText = [
       summary,
       benefit && `[지원내용]\n${benefit}`,

@@ -170,6 +170,34 @@ test("six fixture envelopes map all 30 unique records", async () => {
   assert.match(fixedRate?.body_text ?? "", /최고 5\.0%/);
 });
 
+test("Finlife keeps denial text out of positive eligibility", async () => {
+  const collector = new FinlifeCollector({
+    settings: settingsFromEnv({ NODE_ENV: "test", FINLIFE_API_KEY: "finlife-key" }),
+    retries: 0,
+    fetchImpl: async () => Response.json({
+      result: {
+        baseList: [{
+          fin_prdt_cd: "DENY-1",
+          fin_co_no: "001",
+          fin_prdt_nm: "가입제한 회귀 상품",
+          kor_co_nm: "테스트은행",
+          join_member: "",
+          join_deny: "만 19세 미만은 가입 불가",
+          spcl_cnd: "서울특별시 거주 고객 우대",
+        }],
+        optionList: [],
+      },
+    }),
+  });
+
+  const [program] = await collector.fetch({ maxPages: 1 });
+  assert.match(program.body_text, /가입제한/);
+  assert.match(program.body_text, /서울특별시 거주 고객 우대/);
+  assert.doesNotMatch(program.eligibility_text, /19세|서울특별시/);
+  const rules = parseProgram(program);
+  assert.deepEqual([rules.age_min, rules.age_max, rules.regions], [null, null, null]);
+});
+
 test("an empty malformed envelope is an error, not a successful last page", async () => {
   const collector = new SocialSecurityCollector({
     settings: {

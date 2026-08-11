@@ -27,9 +27,9 @@ test("K-Startup collector maps the official JSON announcement envelope", async (
             pbanc_ctnt: "예비창업자의 사업화를 지원합니다.",
             aply_trgt_ctnt: "예비창업자",
             aply_excl_trgt_ctnt: "금융기관 채무불이행자",
-            aply_trgt: "일반인",
+            aply_trgt: "대학생, 일반인",
             biz_enyy: "예비창업자",
-            biz_trgt_age: "만 20세 이상 ~ 만 39세 이하",
+            biz_trgt_age: "만 20세 이상 ~ 만 39세 이하,만 40세 이상",
             prfn_matr: "청년",
             supt_biz_clsfc: "사업화",
             supt_regin: "전국",
@@ -64,6 +64,12 @@ test("K-Startup collector maps the official JSON announcement envelope", async (
   assert.equal(program.ends_at, "2026-08-31");
   assert.match(program.body_text, /신청제외대상/);
   assert.doesNotMatch(program.eligibility_text, /신청제외대상/);
+  assert.match(program.body_text, /\[대상구분\] 대학생, 일반인/);
+  assert.doesNotMatch(program.eligibility_text, /대상구분|대학생|일반인/);
+  assert.match(program.body_text, /만 20세 이상 ~ 만 39세 이하,만 40세 이상/);
+  const rules = parseProgram(program);
+  assert.deepEqual([rules.age_min, rules.age_max], [20, null]);
+  assert.equal(rules.occupations, null);
   assert.equal(program.apply_url, "https://www.k-startup.go.kr/apply/123456");
   assert.equal(program.apply_method, "K-Startup에서 온라인 신청");
 });

@@ -3,6 +3,23 @@ import { Collector, firstOf, isRecord, type CollectorOptions } from "./base";
 
 const NO_ELIGIBILITY_INFO = "[자격요건 정보 없음]";
 
+function eligibilityAge(value: string): string {
+  const parts = value.split(/[,;\n]/u).map((part) => part.replace(/\s+/gu, " ").trim()).filter(Boolean);
+  if (parts.length <= 1) return value;
+  const under20 = parts.includes("만 20세 미만");
+  const age20to39 = parts.includes("만 20세 이상 ~ 만 39세 이하");
+  const age40plus = parts.includes("만 40세 이상");
+  if (parts.some((part) => ![
+    "만 20세 미만",
+    "만 20세 이상 ~ 만 39세 이하",
+    "만 40세 이상",
+  ].includes(part))) return "";
+  if (under20 && age20to39 && age40plus) return "";
+  if (under20 && age20to39) return "만 39세 이하";
+  if (age20to39 && age40plus) return "만 20세 이상";
+  return "";
+}
+
 function ymd(value: string): string | null {
   const digits = [...value]
     .filter((character) => /\d/.test(character))
@@ -55,14 +72,14 @@ export class KstartupCollector extends Collector {
     // 깨진다. 애초에 파서가 이 텍스트로 할 수 있는 일이 없으므로 - 조건을 만들지도,
     // 걸러내지도 못한다 - 하드 필터 입력에서 빼고 본문에만 원문 그대로 남긴다.
     const preference = firstOf(item, ["prfn_matr"]);
+    const targetType = firstOf(item, ["aply_trgt"]);
+    const targetAge = firstOf(item, ["biz_trgt_age"]);
+    const parsedAge = eligibilityAge(targetAge);
     const positives = [
       target && `[신청대상]\n${target}`,
-      firstOf(item, ["aply_trgt"]) &&
-        `[대상구분] ${firstOf(item, ["aply_trgt"])}`,
       firstOf(item, ["biz_enyy"]) &&
         `[창업기간] ${firstOf(item, ["biz_enyy"])}`,
-      firstOf(item, ["biz_trgt_age"]) &&
-        `[대상연령] ${firstOf(item, ["biz_trgt_age"])}`,
+      parsedAge && `[대상연령] ${parsedAge}`,
       // 구조화된 지원지역은 eligibility_text 에 있어야 한다. body_text 에만 두면
       // eligibilitySourceText() 가 body 를 통째로 무시해 지역 한정 사업이 전국구가 된다.
       firstOf(item, ["supt_regin"]) &&
@@ -76,6 +93,8 @@ export class KstartupCollector extends Collector {
       firstOf(item, ["pbanc_ctnt"]),
       firstOf(item, ["supt_biz_clsfc"]) &&
         `[지원분야] ${firstOf(item, ["supt_biz_clsfc"])}`,
+      targetType && `[대상구분] ${targetType}`,
+      targetAge && `[대상연령 원문] ${targetAge}`,
       firstOf(item, ["supt_regin"]) &&
         `[지원지역] ${firstOf(item, ["supt_regin"])}`,
       positives.join("\n\n"),

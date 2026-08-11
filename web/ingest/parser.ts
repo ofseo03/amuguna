@@ -37,8 +37,11 @@ const PREFIX_DEPENDENT_NOUNS = [
   "피부양자",
   "배우자",
   "부양가족",
+  "부모",
+  "조부모",
+  "직계존속",
 ];
-const DASH = "[~∼〜–—\\-]";
+const DASH = "[~∼〜～–—\\-]";
 
 const AGE: Pattern[] = [
   {
@@ -50,7 +53,7 @@ const AGE: Pattern[] = [
     handle: (match) => ({ age_min: Number(match[1]), age_max: Number(match[2]) - 1 }),
   },
   {
-    source: `만?\\s*(\\d{1,3})\\s*${DASH}\\s*(\\d{1,3})\\s*세(?!대)`,
+    source: `만?\\s*(\\d{1,3})\\s*세?\\s*${DASH}\\s*(?:만\\s*)?(\\d{1,3})\\s*세(?!대)`,
     handle: (match) => ({ age_min: Number(match[1]), age_max: Number(match[2]) }),
   },
   {
@@ -77,11 +80,11 @@ const INCOME: Pattern[] = [
     handle: (match) => ({ income_decile_max: midrateToDecile(Number(match[1])) }),
   },
   {
-    source: "소득\\s*(\\d{1,2})\\s*분위\\s*이하",
+    source: "소득\\s*(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*이하",
     handle: (match) => ({ income_decile_max: Number(match[1]) }),
   },
   {
-    source: "(\\d{1,2})\\s*분위\\s*이하",
+    source: "(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*이하",
     handle: (match) => ({ income_decile_max: Number(match[1]) }),
   },
   {
@@ -94,11 +97,11 @@ const PERSON_NOUNS =
   "(?:청년|어르신|노인|농업인|어업인|소상공인|자영업자|장애인|가장|한부모|근로자|구직자|가구주)";
 const GENDER: Pattern[] = [
   {
-    source: `여성만|여성에\\s*한(?:함|정)|여성으로\\s*한정|여성\\s*한정|여성\\s*${PERSON_NOUNS}`,
+    source: `여성만|여성\\s*(?:신청자|세대주|1인\\s*가구)?\\s*에\\s*한(?:함|정)|여성으로\\s*(?:실명의\\s*개인|한정)|여성\\s*한정|(?:^|[\\n·;,]|대상(?:은|:)?\\s*)여성\\s*${PERSON_NOUNS}`,
     handle: () => ({ gender: "F" }),
   },
   {
-    source: `남성만|남성에\\s*한(?:함|정)|남성으로\\s*한정|남성\\s*한정|남성\\s*${PERSON_NOUNS}`,
+    source: `남성만|남성\\s*(?:신청자|세대주|1인\\s*가구)?\\s*에\\s*한(?:함|정)|남성으로\\s*(?:실명의\\s*개인|한정)|남성\\s*한정|(?:^|[\\n·;,]|대상(?:은|:)?\\s*)남성\\s*${PERSON_NOUNS}`,
     handle: () => ({ gender: "M" }),
   },
 ];
@@ -157,8 +160,18 @@ function overlaps(span: Span, consumed: Span[]): boolean {
 }
 
 function prefixDependent(text: string, start: number): string | null {
-  const head = text.slice(Math.max(0, start - 10), start);
-  return PREFIX_DEPENDENT_NOUNS.find((noun) => head.includes(noun)) ?? null;
+  const head = text.slice(Math.max(0, start - 60), start);
+  let nearest: { noun: string; index: number } | null = null;
+  for (const noun of PREFIX_DEPENDENT_NOUNS) {
+    const match = [
+      ...head.matchAll(new RegExp(`${noun}(?:(?:가|이|의|는|에게)(?![가-힣])|(?=\\s))`, "gu")),
+    ].at(-1);
+    if (match && (!nearest || match.index > nearest.index)) nearest = { noun, index: match.index };
+  }
+  if (!nearest) return null;
+  return /(?:신청자|지원대상|본인)(?:가|이|은|는)/u.test(head.slice(nearest.index))
+    ? null
+    : nearest.noun;
 }
 
 function dependentReason(text: string, start: number, end: number): string | null {
@@ -215,10 +228,27 @@ function ambiguousScalarCandidate(
   patterns: Pattern[],
   field: keyof ParsedValues,
 ): string | null {
+  const paragraphStart = text.lastIndexOf("\n\n", span.start) + 2;
+  const listHead = text.slice(paragraphStart, span.start);
+  if (
+    /(?:어느\s*하나|다음\s*중\s*(?:하나|어느\s*하나))/u.test(listHead) &&
+    /(?:^|\n)\s*(?:[-·○]|\d+[.)])/u.test(listHead)
+  ) {
+    return clauseOf(text, span.start, span.end);
+  }
   const [left, right] = clauseBounds(text, span.start, span.end);
   const clause = text.slice(left, right);
   if (!/(?:또는|혹은)/u.test(clause)) return null;
+  const candidate = span.start - left;
   const branches = clause.split(/\s*(?:또는|혹은)\s*/u);
+  if (
+    /(?:또는|혹은).{0,80}(?:을|를)\s*(?:보유|소지|가입)(?:한|하는)/u.test(
+      clause.slice(0, candidate),
+    ) &&
+    lookupOccupations(branches[0])[0].length === 0
+  ) {
+    return null;
+  }
   const values = branches.map((branch) =>
     patterns.flatMap(({ source, handle }) =>
       matches(source, branch)
@@ -242,6 +272,14 @@ function ambiguousLookupCandidate(
   lookup: (branch: string) => string[],
   field: "regions" | "occupations",
 ): string | null {
+  const paragraphStart = text.lastIndexOf("\n\n", match.start) + 2;
+  const listHead = text.slice(paragraphStart, match.start);
+  if (
+    /(?:어느\s*하나|다음\s*중\s*(?:하나|어느\s*하나))/u.test(listHead) &&
+    /(?:^|\n)\s*(?:[-·○]|\d+[.)])/u.test(listHead)
+  ) {
+    return clauseOf(text, match.start, match.end);
+  }
   const [left, right] = clauseBounds(text, match.start, match.end);
   const clause = text.slice(left, right);
   if (!/(?:또는|혹은)/u.test(clause)) return null;
@@ -259,7 +297,7 @@ function applyPatterns(
   out: ParsedValues,
   evidence: ParseEvidence,
   consumed: Span[],
-  dependentGuard: boolean,
+  dependentGuard: "full" | "prefix" | false,
   rejected: ExtraCondition[],
   protectedFields: Set<string>,
   acceptedSpans: Partial<Record<keyof ParsedValues, Span>>,
@@ -282,7 +320,9 @@ function applyPatterns(
         continue;
       }
       if (dependentGuard) {
-        const reason = dependentReason(text, span.start, span.end);
+        const reason = dependentGuard === "full"
+          ? dependentReason(text, span.start, span.end)
+          : prefixDependent(text, span.start);
         if (reason) {
           for (const field of Object.keys(parsed)) protectField(protectedFields, field);
           addRejected(rejected, {
@@ -407,7 +447,7 @@ export function parseEligibility(rawText: string): EligibilityRules {
       out,
       evidence,
       consumed,
-      true,
+      "full",
       rejected,
       protectedFields,
       acceptedSpans,
@@ -419,7 +459,7 @@ export function parseEligibility(rawText: string): EligibilityRules {
       out,
       evidence,
       consumed,
-      false,
+      "prefix",
       rejected,
       protectedFields,
       acceptedSpans,
@@ -431,7 +471,7 @@ export function parseEligibility(rawText: string): EligibilityRules {
       out,
       evidence,
       consumed,
-      false,
+      "prefix",
       rejected,
       protectedFields,
       acceptedSpans,
@@ -440,6 +480,19 @@ export function parseEligibility(rawText: string): EligibilityRules {
     for (const field of unsafeSpans.keys()) {
       out[field] = null;
       delete evidence[field];
+    }
+  }
+
+  for (const [field, low, high] of [
+    ["age_min", 0, 120],
+    ["age_max", 0, 120],
+    ["income_decile_max", 1, 10],
+  ] as const) {
+    const value = out[field];
+    if (value != null && (value < low || value > high)) {
+      out[field] = null;
+      delete evidence[field];
+      protectField(protectedFields, field);
     }
   }
 
