@@ -6,7 +6,11 @@ function applicationPeriod(value: string): [string | null, string | null, boolea
     ([, year, month, day]) => `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`,
   );
   if (dates.length >= 2) return [dates[0], dates[1], false];
-  if (dates.length === 1) return [dates[0], null, false];
+  // 이 값은 `신청기한` 필드라, 날짜가 하나면 마감일로 보는 쪽이 기본이다.
+  // 시작일로 저장하면 ends_at 이 비어 마감 후에도 만료되지 않고 계속 추천된다.
+  if (dates.length === 1) {
+    return /부터|시작|개시/u.test(value) ? [dates[0], null, false] : [null, dates[0], false];
+  }
   return [null, null, /상시|연중|예산\s*소진/u.test(value)];
 }
 

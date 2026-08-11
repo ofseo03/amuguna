@@ -23,11 +23,17 @@ export interface CollectorOptions {
   pageSize?: number;
   retries?: number;
   timeoutMs?: number;
+  maxDetailCalls?: number;
 }
 
 export interface FetchOptions {
   since?: string | null;
   maxPages?: number;
+  /**
+   * 이미 적재된 external_id. 건당 상세 조회가 필요한 소스만 참고해, 일일 호출
+   * 한도를 신규 건에 몰아준다. 상세 호출이 없는 소스는 그대로 무시한다.
+   */
+  knownIds?: ReadonlySet<string>;
 }
 
 export type CollectorConstructor = new (options?: CollectorOptions) => Collector;

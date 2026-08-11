@@ -100,8 +100,12 @@ export class LocalWelfareCollector extends Collector {
     const target = firstOf(item, ["sprtTrgtCn"]);
     const criteria = firstOf(item, ["slctCritCn"]);
     const benefit = firstOf(item, ["alwServCn"]);
-    const eligibility = [target, criteria].filter(Boolean).join("\n");
     const region = [firstOf(item, ["ctpvNm"]), firstOf(item, ["sggNm"])].filter(Boolean).join(" ");
+    // 구조화된 시도·시군구는 eligibility_text 에 있어야 한다. body_text 에만 두면
+    // eligibilitySourceText() 가 body 를 통째로 무시해 지역 한정 사업이 전국구가 된다.
+    const eligibility = [region && `[지역] ${region}`, target, criteria]
+      .filter(Boolean)
+      .join("\n");
     const bodyText = [
       firstOf(item, ["servDgst"]),
       region && `[지역] ${region}`,

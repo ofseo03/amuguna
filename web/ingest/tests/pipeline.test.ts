@@ -8,7 +8,7 @@ import { COLLECTORS } from "../collectors";
 import { Collector, CollectorError } from "../collectors/base";
 import { settingsFromEnv } from "../config";
 import { InMemoryDatabase } from "../db";
-import { Embedder } from "../embedder";
+import { Embedder, OPENAI_MODEL } from "../embedder";
 import { CollectedProgram } from "../models";
 import { Pipeline } from "../pipeline";
 
@@ -141,7 +141,8 @@ test("changing embedding provider reindexes once and never mixes vector spaces",
     await reindex.run([collector], { reconcile: true });
     const stats = reindex.report.totals;
     assert.equal(stats.unchanged, 1);
-    assert.equal(await db.embeddingProvider(1), "openai");
+    // provider 가 아니라 provider:model 로 저장돼야 같은 provider 안의 모델 교체도 재색인된다.
+    assert.equal(await db.embeddingProvider(1), `openai:${OPENAI_MODEL}`);
     assert.equal(db.rawDocuments.length, 1);
 
     await reindex.runSource(collector);
@@ -150,6 +151,60 @@ test("changing embedding provider reindexes once and never mixes vector spaces",
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("a vector-space change reindexes every stored program, not just the collected ones", async () => {
+  const db = new InMemoryDatabase();
+  // 두 소스를 적재해 둔다.
+  await pipeline(db).runSource(new FakeCollector([program()]));
+  await pipeline(db).runSource(
+    new FakeCollector([program({ external_id: "other:001", source_key: "other" })]),
+  );
+  assert.equal((await db.programIds()).length, 2);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ data: [{ embedding: [1, ...new Array(1023).fill(0)] }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  try {
+    const embedder = new Embedder({
+      embedding_provider: "openai",
+      embedding_api_key: "test",
+      mock_embeddings: false,
+    });
+    // 한 소스만 골라 돌려도(--source 상당) 나머지 소스가 임베딩 없이 남으면 안 된다.
+    await pipeline(db, embedder).run([new FakeCollector([program()])], { reconcile: true });
+    for (const programId of await db.programIds()) {
+      assert.equal(await db.embeddingProvider(programId), `openai:${OPENAI_MODEL}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("an interrupted reindex is resumed on the next run", async () => {
+  const db = new InMemoryDatabase();
+  await pipeline(db).runSource(new FakeCollector([program()]));
+  await pipeline(db).runSource(
+    new FakeCollector([program({ external_id: "other:001", source_key: "other" })]),
+  );
+  // 재색인이 중간에 죽어 한 건만 벡터가 없는 상태를 만든다. 남은 행은 전부 현재
+  // 벡터 공간이라 provider 불일치로는 잡히지 않는다.
+  await db.deleteEmbeddings(2);
+  assert.deepEqual(await db.programIdsWithoutEmbeddings(), [2]);
+
+  await pipeline(db).run([new FakeCollector([program()])]);
+  assert.deepEqual(await db.programIdsWithoutEmbeddings(), []);
+});
+
+test("expired programs are not resurrected by a reindex", async () => {
+  const db = new InMemoryDatabase();
+  await pipeline(db).runSource(new FakeCollector([program()]));
+  await db.expirePrograms(["fake:001"]);
+  assert.deepEqual(await db.programIds(), []);
+  assert.deepEqual(await db.programIdsWithoutEmbeddings(), []);
 });
 
 test("CLI exits non-zero when every fetched record rolls back", () => {

@@ -93,8 +93,15 @@ export class SocialSecurityCollector extends Collector {
   readonly idListEndpoint = this.endpoint;
   override readonly defaultForm = "subsidy";
 
+  /**
+   * 상세조회 개발계정 한도는 100회/일 (SPEC §3.2). 목록 호출분과 재시도 여유를
+   * 남기고 그 아래에서 끊는다. 초과하면 429 가 나면서 그 회차 전체가 버려진다.
+   */
+  readonly maxDetailCalls: number;
+
   constructor(options: CollectorOptions = {}) {
     super({ pageSize: 500, ...options });
+    this.maxDetailCalls = options.maxDetailCalls ?? 90;
   }
 
   protected queryParams({ page }: { since: string | null; page: number }) {
@@ -224,22 +231,64 @@ export class SocialSecurityCollector extends Collector {
     return item;
   }
 
-  override async fetch({ maxPages = 5 }: FetchOptions = {}): Promise<CollectedProgram[]> {
+  /**
+   * 건당 상세 조회가 필요한데 개발계정 한도가 100회/일이라, 전량(수백 건)을 한 번에
+   * 받을 수 없다. 세 가지로 나눠 처리한다.
+   *   1. 이미 적재된 건은 상세를 건너뛴다 — 한도를 신규 건에 몰아준다
+   *   2. 한 회차의 상세 호출을 maxDetailCalls 로 끊는다
+   *   3. 그래도 실패하면 던지지 않고 여기까지 모은 것을 반환한다
+   * 3이 핵심이다. 예전에는 중간에 429가 나면 CollectorError 로 그 회차 전체가
+   * 버려져, 매일 처음부터 다시 시작하며 초기 적재가 영영 끝나지 않았다.
+   *
+   * ponytail: 적재된 건은 다시 안 보므로 원본 수정(마감 연장·자격 완화)을 놓친다.
+   * 한도가 풀리면(운영계정) knownIds 스킵을 빼고 content_hash 비교로 되돌린다.
+   */
+  override async fetch({ maxPages = 5, knownIds }: FetchOptions = {}): Promise<CollectedProgram[]> {
     if (this.useFixtures) return super.fetch({ maxPages });
 
     const collected: CollectedProgram[] = [];
     const seen = new Set<string>();
+    let budget = this.maxDetailCalls;
+    let skipped = 0;
     for (let page = 1; page <= maxPages; page++) {
       const { items, totalCount } = await this.listPage(page);
       for (const item of items) {
         const nativeId = firstOf(item, ["servId"]);
         if (!nativeId || seen.has(nativeId)) continue;
-        const program = this.mapItem({ ...item, ...(await this.detail(nativeId)) });
+        if (knownIds?.has(this.externalId(nativeId))) continue;
+        // 포털은 논리적 호출이 아니라 HTTP 요청 수로 한도를 센다. detail() 한 번이
+        // 재시도까지 최대 retries+1 회 나갈 수 있으므로, 그만큼 남아 있을 때만
+        // 시작하고 실제 나간 요청 수만큼 깎는다. 남은 예산만 보고 시작하면
+        // 마지막 한 건이 재시도로 한도를 넘겨버린다.
+        if (budget < this.retries + 1) {
+          skipped++;
+          continue;
+        }
+
+        const httpBefore = this.httpCalls;
+        let detail: Record<string, unknown>;
+        try {
+          detail = await this.detail(nativeId);
+          budget -= this.httpCalls - httpBefore;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `${this.sourceKey}: 상세 조회 중단 (${message}) — ${collected.length}건까지 저장하고 다음 회차에 이어받습니다`,
+          );
+          return collected;
+        }
+
+        const program = this.mapItem({ ...item, ...detail });
         if (!program) continue;
         seen.add(nativeId);
         collected.push(program);
       }
       if (items.length < this.pageSize || (totalCount !== null && page * this.pageSize >= totalCount)) break;
+    }
+    if (skipped) {
+      console.warn(
+        `${this.sourceKey}: 일일 상세 호출 한도(${this.maxDetailCalls})로 ${skipped}건을 다음 회차로 미룹니다`,
+      );
     }
     return collected;
   }

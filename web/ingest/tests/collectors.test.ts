@@ -68,6 +68,88 @@ test("central welfare XML joins detail eligibility before regex parsing", async 
   assert(["income_amount", "employment_period", "business_history"].every((kind) => kinds.has(kind)));
 });
 
+test("central welfare detail calls stay inside the daily quota and checkpoint on failure", async () => {
+  const ids = ["WLF00000001", "WLF00000002", "WLF00000003"];
+  const list = `<?xml version="1.0" encoding="UTF-8"?><wantedList>${ids
+    .map(
+      (id) =>
+        `<servList><servId>${id}</servId><servNm>서비스 ${id}</servNm><servDgst>요약</servDgst></servList>`,
+    )
+    .join("")}<totalCount>${ids.length}</totalCount><resultCode>0</resultCode><resultMessage>SUCCESS</resultMessage></wantedList>`;
+  const detailOf = (id: string) =>
+    `<?xml version="1.0" encoding="UTF-8"?><wantedDtl><servId>${id}</servId><servNm>서비스 ${id}</servNm>` +
+    `<tgtrDtlCn>만 19세 이상</tgtrDtlCn><resultCode>0</resultCode><resultMessage>SUCCESS</resultMessage></wantedDtl>`;
+
+  const build = (options: { failOn?: string; maxDetailCalls?: number }) => {
+    const detailIds: string[] = [];
+    const collector = new SocialSecurityCollector({
+      settings: settingsFromEnv({ NODE_ENV: "test", DATA_GO_KR_API_KEY: "test-key" }),
+      pageSize: ids.length,
+      retries: 0,
+      maxDetailCalls: options.maxDetailCalls ?? 90,
+      fetchImpl: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (!url.pathname.endsWith("NationalWelfaredetailedV001")) {
+          return new Response(list, { headers: { "Content-Type": "application/xml" } });
+        }
+        const id = url.searchParams.get("servId")!;
+        detailIds.push(id);
+        // 한도 초과 시 포털이 실제로 돌려주는 응답.
+        if (id === options.failOn) return new Response("", { status: 429 });
+        return new Response(detailOf(id), { headers: { "Content-Type": "application/xml" } });
+      },
+    });
+    return { collector, detailIds };
+  };
+
+  // 한도를 넘겨 통째로 실패하는 대신, 남은 건은 다음 회차로 미룬다.
+  const capped = build({ maxDetailCalls: 2 });
+  assert.equal((await capped.collector.fetch({ maxPages: 1 })).length, 2);
+  assert.equal(capped.detailIds.length, 2);
+
+  // 이미 적재된 건은 상세를 쓰지 않는다 — 한도가 신규 건으로 간다.
+  const known = build({ maxDetailCalls: 2 });
+  const collected = await known.collector.fetch({
+    maxPages: 1,
+    knownIds: new Set([`social_security:${ids[0]}`]),
+  });
+  assert.deepEqual(known.detailIds, [ids[1], ids[2]]);
+  assert.equal(collected.length, 2);
+
+  // 중간에 429가 나도 던지지 않고 여기까지 모은 것을 반환한다(체크포인트).
+  const failing = build({ failOn: ids[1] });
+  const partial = await failing.collector.fetch({ maxPages: 1 });
+  assert.equal(partial.length, 1);
+  assert.equal(partial[0].external_id, `social_security:${ids[0]}`);
+
+  // 포털은 논리적 호출이 아니라 HTTP 요청 수로 한도를 센다. 각 건이 1회 재시도 후
+  // 성공하면 건당 2요청이므로, 예산 3으로는 두 건이 아니라 한 건만 처리해야 한다.
+  let detailRequests = 0;
+  const attempts = new Map<string, number>();
+  const retrying = new SocialSecurityCollector({
+    settings: settingsFromEnv({ NODE_ENV: "test", DATA_GO_KR_API_KEY: "test-key" }),
+    pageSize: ids.length,
+    retries: 1,
+    maxDetailCalls: 3,
+    fetchImpl: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (!url.pathname.endsWith("NationalWelfaredetailedV001")) {
+        return new Response(list, { headers: { "Content-Type": "application/xml" } });
+      }
+      detailRequests++;
+      const id = url.searchParams.get("servId")!;
+      const seen = (attempts.get(id) ?? 0) + 1;
+      attempts.set(id, seen);
+      if (seen === 1) return new Response("", { status: 503 }); // 재시도 대상
+      return new Response(detailOf(id), { headers: { "Content-Type": "application/xml" } });
+    },
+  });
+  const throttled = await retrying.fetch({ maxPages: 1 });
+  assert.equal(detailRequests, 2, "재시도까지 포함해 예산 안에서만 요청해야 한다");
+  assert.ok(detailRequests <= 3, "어떤 경우에도 maxDetailCalls 를 넘으면 안 된다");
+  assert.equal(throttled.length, 1);
+});
+
 test("six fixture envelopes map all 30 unique records", async () => {
   const collectors = [
     new SocialSecurityCollector({ useFixtures: true }),

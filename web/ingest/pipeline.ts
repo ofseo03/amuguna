@@ -115,7 +115,7 @@ export class Pipeline {
     },
   ) {
     this.options.summarizer ??= new Summarizer();
-    this.report = new RunReport(options.embedder.provider, options.dryRun ?? false);
+    this.report = new RunReport(options.embedder.vectorSpace, options.dryRun ?? false);
   }
 
   private async process(
@@ -133,18 +133,18 @@ export class Pipeline {
       if (restored) {
         const [title, summary, body] = restored;
         const result = await this.options.embedder.embedProgram({ title, summary, body });
-        await db.replaceEmbeddings(existingId, result.vectors, this.options.embedder.provider);
+        await db.replaceEmbeddings(existingId, result.vectors, this.options.embedder.vectorSpace);
         this.report.embeddingsWritten++;
         this.report.chunksWritten += result.vectors.length;
         stats.unchanged++;
         return;
       }
-      if ((await db.embeddingProvider(existingId)) !== this.options.embedder.provider) {
+      if ((await db.embeddingProvider(existingId)) !== this.options.embedder.vectorSpace) {
         const input = await db.embeddingInput(existingId);
         if (!input) throw new Error(`program not found: ${existingId}`);
         const [title, summary, body] = input;
         const result = await this.options.embedder.embedProgram({ title, summary, body });
-        await db.replaceEmbeddings(existingId, result.vectors, this.options.embedder.provider);
+        await db.replaceEmbeddings(existingId, result.vectors, this.options.embedder.vectorSpace);
         this.report.embeddingsWritten++;
         this.report.chunksWritten += result.vectors.length;
       }
@@ -214,7 +214,7 @@ export class Pipeline {
       summary: card.summary,
       body: bodyText,
     });
-    await db.replaceEmbeddings(programId, result.vectors, this.options.embedder.provider);
+    await db.replaceEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
     this.report.embeddingsWritten++;
     this.report.chunksWritten += result.vectors.length;
     if (previousHash === null) stats.created++;
@@ -252,7 +252,10 @@ export class Pipeline {
     }
     let programs: CollectedProgram[];
     try {
-      programs = await collector.fetch({ since });
+      programs = await collector.fetch({
+        since,
+        knownIds: await this.db.knownExternalIds(collector.sourceKey),
+      });
     } catch (error) {
       if (!(error instanceof CollectorError)) throw error;
       console.error(`${collector.sourceKey} 수집 실패, 기존 데이터 유지: ${error.message}`);
@@ -277,16 +280,55 @@ export class Pipeline {
     return stats;
   }
 
+  /**
+   * 벡터 공간이 바뀌었을 때 DB에 있는 전 공고를 다시 임베딩한다.
+   *
+   * 수집기를 거치지 않는 것이 핵심이다. 예전처럼 전량 삭제만 하고 재생성을 수집
+   * 결과에 맡기면, 이번 회차에 수집기가 돌려주지 않은 공고는 임베딩이 사라진 채
+   * 남는다 — `--source` 로 일부만 돌린 경우, 그리고 일일 한도 때문에 이미 적재된
+   * 건을 건너뛰는 중앙부처복지가 정확히 그 경우다.
+   */
+  private async embedPrograms(programIds: readonly number[]): Promise<void> {
+    for (const programId of programIds) {
+      const input = await this.db.embeddingInput(programId);
+      if (!input) continue;
+      const [title, summary, body] = input;
+      const result = await this.options.embedder.embedProgram({ title, summary, body });
+      await this.db.replaceEmbeddings(
+        programId,
+        result.vectors,
+        this.options.embedder.vectorSpace,
+      );
+      this.report.embeddingsWritten++;
+      this.report.chunksWritten += result.vectors.length;
+    }
+  }
+
+  private async reindexAll(): Promise<void> {
+    await this.db.deleteAllEmbeddings();
+    await this.embedPrograms(await this.db.programIds());
+  }
+
   async run(
     collectors: readonly Collector[],
     options: { since?: string; reconcile?: boolean } = {},
   ): Promise<RunReport> {
     const providers = await this.db.embeddingProviders();
-    if ([...providers].some((provider) => provider !== this.options.embedder.provider)) {
+    if ([...providers].some((provider) => provider !== this.options.embedder.vectorSpace)) {
       if (!options.reconcile) {
-        throw new Error("임베딩 provider 변경은 --weekly-reconcile로 전량 재색인해야 합니다");
+        throw new Error("임베딩 provider·모델 변경은 --weekly-reconcile로 전량 재색인해야 합니다");
       }
-      await this.db.deleteAllEmbeddings();
+      await this.reindexAll();
+    } else {
+      // 재색인은 전량 삭제 후 다시 채우는 구조라 트랜잭션으로 묶이지 않는다. 중간에
+      // 임베딩 API 가 죽으면 남은 공고는 벡터가 없는 채로 끝나고, 다음 회차는 남아
+      // 있는 행이 전부 현재 벡터 공간이라 provider 불일치를 못 본다 — 그대로 두면
+      // 영영 복구되지 않는다. 그래서 벡터가 빠진 공고를 매 회차 이어서 채운다.
+      const missing = await this.db.programIdsWithoutEmbeddings();
+      if (missing.length) {
+        console.warn(`임베딩이 없는 공고 ${missing.length}건을 이어서 색인합니다`);
+        await this.embedPrograms(missing);
+      }
     }
     for (const collector of collectors) await this.runSource(collector, options);
     await this.db.commit();
