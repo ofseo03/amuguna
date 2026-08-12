@@ -46,8 +46,8 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
-      BIZINFO_KEY: ${{ secrets.BIZINFO_KEY }}
-      FINLIFE_KEY: ${{ secrets.FINLIFE_KEY }}
+      BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
+      FINLIFE_API_KEY: ${{ secrets.FINLIFE_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
@@ -115,8 +115,8 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
-      BIZINFO_KEY: ${{ secrets.BIZINFO_KEY }}
-      FINLIFE_KEY: ${{ secrets.FINLIFE_KEY }}
+      BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
+      FINLIFE_API_KEY: ${{ secrets.FINLIFE_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}

@@ -121,7 +121,7 @@ data.go.kr은 **계정당 인증키 1개**, API는 데이터셋별 활용신청 
 
 ### 포털 밖 (변동 없음)
 
-`BIZINFO_KEY`(기업마당) · `FINLIFE_KEY`(금감원 8종) · `SEOUL_OPENAPI_KEY`(서울 열린데이터광장)
+`BIZINFO_API_KEY`(기업마당) · `FINLIFE_API_KEY`(금감원 8종) · `SEOUL_OPENAPI_KEY`(서울 열린데이터광장)
 
 ---
 

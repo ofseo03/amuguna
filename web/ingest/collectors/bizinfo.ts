@@ -19,10 +19,10 @@ export class BizinfoCollector extends Collector {
   override readonly defaultForm = "loan";
 
   // 기업마당은 공공데이터포털 경유가 아니라 bizinfo.go.kr 자체 발급 키를 쓴다 (SPEC §3.5).
-  protected override readonly apiKeyEnvName = "BIZINFO_KEY";
+  protected override readonly apiKeyEnvName = "BIZINFO_API_KEY";
 
   protected override get apiKey(): string {
-    return this.settings.bizinfo_key;
+    return this.settings.bizinfo_api_key;
   }
 
   protected queryParams({ since, page }: { since: string | null; page: number }) {

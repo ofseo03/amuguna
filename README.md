@@ -45,7 +45,7 @@ Next.js는 `web/.env.local`, 독립 배치는 실행 셸 환경변수, GitHub Ac
 |---|---|
 | `DATABASE_URL` | Supabase Postgres (`db/migrations/` 순서대로 적용) |
 | `DATA_GO_KR_API_KEY` | 공공데이터포털 — 복지·지원금 소스. **Decoding 키**를 넣는다 (수집기가 `searchParams` 로 한 번 인코딩한다) |
-| `BIZINFO_KEY` | 기업마당 (bizinfo.go.kr 자체 발급) |
-| `FINLIFE_KEY` | 금감원 금융상품통합비교공시 (finlife.fss.or.kr 자체 발급) |
+| `BIZINFO_API_KEY` | 기업마당 (bizinfo.go.kr 자체 발급) |
+| `FINLIFE_API_KEY` | 금감원 금융상품통합비교공시 (finlife.fss.or.kr 자체 발급) |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | voyage \| openai \| mock (차원 1024 고정) |
 | `ANTHROPIC_API_KEY` | 배치 전용 — 공식 Anthropic TypeScript SDK로 파싱 보완 + 요약 생성 (`claude-sonnet-5`) |

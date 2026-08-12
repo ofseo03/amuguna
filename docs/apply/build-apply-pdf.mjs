@@ -15,9 +15,20 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..");
 const FONTS = resolve(HERE, ".fonts");
+const KR_FONT_FILES = [
+  "package/files/noto-sans-kr-latin-400-normal.woff2",
+  "package/files/noto-sans-kr-latin-700-normal.woff2",
+  "package/files/noto-sans-kr-korean-400-normal.woff2",
+  "package/files/noto-sans-kr-korean-700-normal.woff2",
+];
+const MONO_FONT_FILES = ["mono/package/files/noto-sans-mono-latin-400-normal.woff2"];
+
+const hasFonts = (files) => files.every((path) => existsSync(resolve(FONTS, path)));
 
 function ensureFonts() {
-  if (existsSync(resolve(FONTS, "package/files/noto-sans-kr-korean-400-normal.woff2"))) return;
+  const hasKrFonts = hasFonts(KR_FONT_FILES);
+  const hasMonoFonts = hasFonts(MONO_FONT_FILES);
+  if (hasKrFonts && hasMonoFonts) return;
   mkdirSync(FONTS, { recursive: true });
   const pack = (pkg, into) => {
     const tgz = execFileSync("npm", ["pack", pkg, "--silent"], { cwd: FONTS, encoding: "utf8" })
@@ -27,8 +38,8 @@ function ensureFonts() {
     mkdirSync(resolve(FONTS, into), { recursive: true });
     execFileSync("tar", ["xzf", tgz, "-C", into], { cwd: FONTS });
   };
-  pack("@fontsource/noto-sans-kr@5.3.0", ".");
-  pack("@fontsource/noto-sans-mono@5.3.0", "mono");
+  if (!hasKrFonts) pack("@fontsource/noto-sans-kr@5.3.0", ".");
+  if (!hasMonoFonts) pack("@fontsource/noto-sans-mono@5.3.0", "mono");
 }
 
 ensureFonts();
@@ -118,7 +129,7 @@ sections.push(`
   <table class="grid api">
     <tr><th>데이터셋 ID</th><th>명칭</th><th>활용 내용</th></tr>
     <tr><td>15113968</td><td>행정안전부_대한민국 공공서비스(혜택) 정보</td><td>중앙부처·지자체·공공기관·교육청 혜택 전체의 목록과 상세를 수집해 매칭 대상 모집단을 구성</td></tr>
-    <tr><td>15090532</td><td>한국사회보장정보원_중앙부처복지서비스</td><td>상세조회의 지원대상·선정기준·신청방법 텍스트에서 자격요건을 추출</td></tr>
+    <tr><td>15090532</td><td>한국사회보장정보원_중앙부처복지서비스</td><td>현재 목록조회 응답의 지원대상·선정기준·신청방법 텍스트에서 자격요건을 추출 (건별 상세조회는 미구현)</td></tr>
     <tr><td>15108347</td><td>한국사회보장정보원_지자체복지서비스</td><td>지자체 단위 복지서비스. 거주지 기준 필터링의 원천</td></tr>
   </table>
 
@@ -199,15 +210,14 @@ sections.push(`
     <tr><th>구분</th><th>산정</th></tr>
     <tr><td>수집 주기</td><td>1일 1회 (심야 배치, GitHub Actions cron)</td></tr>
     <tr><td>목록 조회</td><td>1회 100건 · 페이지네이션 — 소스당 일 5~50회</td></tr>
-    <tr><td>상세 조회</td><td>신규·수정 건에 한해 건당 1회</td></tr>
-    <tr><td>주 1회 전량 대조</td><td>ID 목록만 조회 (상세 호출 없음)</td></tr>
-    <tr><td>요청 간 간격</td><td>동일 도메인 1초 1요청, 동시 연결 1개</td></tr>
+    <tr><td>상세 조회</td><td>현재 구현하지 않음 (목록조회 응답만 수집)</td></tr>
+    <tr><td>주 1회 전량 대조</td><td>목록조회로 external ID를 비교 (건별 상세 호출 없음)</td></tr>
+    <tr><td>요청 간 간격</td><td>별도 1초 throttle은 현재 구현하지 않음; 페이지 요청은 순차 실행</td></tr>
     <tr><td>재시도</td><td>408/429/5xx에 한해 최대 2회, 지수 백오프 (250ms → 500ms)</td></tr>
   </table>
-  <p><b>중앙부처복지서비스(15090532) 운영계정 전환을 요청드리는 사유:</b>
-  개발계정 한도 100회/일에서 상세조회를 건당 1회 사용하면 <b>하루 100건이 상한</b>이 되어,
-  초기 전량 적재에만 수십 일이 소요됩니다. 대회 심사 구간(2026-09-07 ~ 09-11)에
-  서비스가 정상 동작하려면 초기 적재가 그 전에 완료되어야 합니다.</p>
+  <p>현재 수집기는 목록조회만 사용하며, 일일 수집은 워크플로가 전일을 <code>--since</code>로 전달할 때만
+  <code>srchModDt</code>를 요청에 포함합니다. 개발계정 한도와 운영계정 전환 필요성은 실제 API 한도·응답을
+  확인한 뒤 별도로 산정합니다.</p>
 </section>`);
 
 // ── 4. 수집기 코드 ─────────────────────────────────────────────
@@ -223,9 +233,9 @@ sections.push(`
   ${codeBlock("web/ingest/collectors/base.ts", "TypeScript")}
 
   <h3>4.2 한국사회보장정보원 복지서비스 수집기</h3>
-  <p>목록조회(<code>NationalWelfarelistV001</code>)를 호출하고, 응답 항목을 서비스 내부 모델로 변환합니다.
-  <code>srchModDt</code>(수정일) 파라미터로 증분 수집하며, 응답 필드명이 케이스별로 다를 수 있어
-  후보 키를 순서대로 시도합니다(<code>firstOf</code>).</p>
+  <p>현재는 목록조회(<code>NationalWelfarelistV001</code>)만 호출해 응답 항목을 서비스 내부 모델로 변환합니다.
+  <code>--since</code>가 전달된 경우에만 <code>srchModDt</code>(수정일) 파라미터를 붙이며, 건별 상세조회는
+  호출하지 않습니다. 응답 필드명이 케이스별로 다를 수 있어 후보 키를 순서대로 시도합니다(<code>firstOf</code>).</p>
   ${codeBlock("web/ingest/collectors/social-security.ts", "TypeScript")}
 
   <h3>4.3 지원사업 공고 수집기</h3>
@@ -242,7 +252,7 @@ sections.push(`
   <p>인증키는 <b>소스코드에 포함하지 않고</b> 환경변수로만 주입합니다. 저장소에는 키가 커밋되지 않으며,
   실행 환경(GitHub Actions Secrets)에서 공급합니다. 공공데이터포털 경유 소스는
   <code>DATA_GO_KR_API_KEY</code> 하나를 공유하고, 자체 창구에서 키를 발급하는 소스는
-  각자의 환경변수(<code>BIZINFO_KEY</code>, <code>FINLIFE_KEY</code>)를 사용하여
+  각자의 환경변수(<code>BIZINFO_API_KEY</code>, <code>FINLIFE_API_KEY</code>)를 사용하여
   <b>포털 인증키가 포털 외부로 전송되지 않도록</b> 분리했습니다.</p>
   ${codeBlock("web/ingest/config.ts", "TypeScript")}
 </section>`);
@@ -291,7 +301,7 @@ sections.push(`
   <table class="grid">
     <tr><th>항목</th><th>준수 내용</th></tr>
     <tr><td>출처 표시</td><td>모든 결과 화면에 데이터 출처 기관명, 원문 URL, 수집 시각을 표시합니다. 별도의 출처 안내 페이지를 운영합니다.</td></tr>
-    <tr><td>호출 부하</td><td>1일 1회 심야 배치. 이용자 요청 시점에는 API를 호출하지 않습니다. 도메인당 1초 1요청, 동시 연결 1개.</td></tr>
+    <tr><td>호출 부하</td><td>1일 1회 심야 배치. 이용자 요청 시점에는 API를 호출하지 않습니다. 현재 페이지 요청은 순차 실행하며 별도 1초 throttle은 두지 않습니다.</td></tr>
     <tr><td>재시도</td><td>408/429/5xx에 한해 최대 2회, 지수 백오프. 4xx는 즉시 중단하여 무효 요청을 반복하지 않습니다.</td></tr>
     <tr><td>인증키 관리</td><td>소스코드·저장소에 키를 포함하지 않습니다. 환경변수로만 주입하며 공개 저장소에 커밋되지 않습니다.</td></tr>
     <tr><td>데이터 가공</td><td>원문을 임의로 수정하지 않습니다. 요약을 생성하는 경우에도 원문 링크를 항상 병기하여 이용자가 원본을 확인할 수 있게 합니다.</td></tr>

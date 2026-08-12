@@ -196,8 +196,8 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 | # | 키 | 발급처 | 활용신청 대상 | 건수 |
 |---|---|---|---|---|
 | 1 | `DATA_GO_KR_KEY` | [data.go.kr](https://www.data.go.kr/) (자동승인) | 보조금24 [`15113968`](https://www.data.go.kr/data/15113968/openapi.do) / 중앙부처복지 [`15090532`](https://www.data.go.kr/data/15090532/openapi.do) / 지자체복지 [`15108347`](https://www.data.go.kr/data/15108347/openapi.do) / 온통청년 [`15143273`](https://www.data.go.kr/data/15143273/openapi.do) / K-Startup [`15125364`](https://www.data.go.kr/data/15125364/openapi.do) / 청약홈 [`15098547`](https://www.data.go.kr/data/15098547/openapi.do) / 법제처 [`15000115`](https://www.data.go.kr/data/15000115/openapi.do) | **7** |
-| 2 | `BIZINFO_KEY` | [bizinfo.go.kr](https://www.bizinfo.go.kr/apiDetail.do?id=bizinfoApi) (상세 페이지 하단 폼) | 지원사업정보 | 1 |
-| 3 | `FINLIFE_KEY` | [finlife.fss.or.kr](https://finlife.fss.or.kr/finlife/main/contents.do?menuNo=700029) | 금융상품 8종 — **1키로 8종 전부** | 1 |
+| 2 | `BIZINFO_API_KEY` | [bizinfo.go.kr](https://www.bizinfo.go.kr/apiDetail.do?id=bizinfoApi) (상세 페이지 하단 폼) | 지원사업정보 | 1 |
+| 3 | `FINLIFE_API_KEY` | [finlife.fss.or.kr](https://finlife.fss.or.kr/finlife/main/contents.do?menuNo=700029) | 금융상품 8종 — **1키로 8종 전부** | 1 |
 | 4 | `SEOUL_OPENAPI_KEY` | [data.seoul.go.kr](https://data.seoul.go.kr/together/mypage/actKey.do) (가입 즉시) | 서울 열린데이터광장 | 1 |
 | 5 | `EMBEDDING_API_KEY` | [Voyage](https://dashboard.voyageai.com/organization/api-keys) / [OpenAI](https://platform.openai.com/api-keys) (§4 W1 확정) | — | 1 |
 | 6 | `ANTHROPIC_API_KEY` | [Anthropic](https://platform.claude.com/settings/keys) | — | 1 |

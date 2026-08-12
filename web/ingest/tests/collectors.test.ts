@@ -8,7 +8,7 @@ import {
   FinlifeCollector,
   SocialSecurityCollector,
 } from "../collectors";
-import type { Settings } from "../config";
+import { settingsFromEnv, type Settings } from "../config";
 
 test("three fixture envelopes map all 27 unique records", async () => {
   const collectors = [
@@ -31,8 +31,8 @@ function settings(overrides: Partial<Settings> = {}): Settings {
   return {
     database_url: "",
     data_go_kr_api_key: "",
-    bizinfo_key: "",
-    finlife_key: "",
+    bizinfo_api_key: "",
+    finlife_api_key: "",
     anthropic_api_key: "",
     embedding_provider: "mock",
     embedding_api_key: "",
@@ -40,6 +40,17 @@ function settings(overrides: Partial<Settings> = {}): Settings {
     ...overrides,
   };
 }
+
+test("settings read canonical issuer-key environment variables", () => {
+  const configured = settingsFromEnv({
+    NODE_ENV: "test",
+    BIZINFO_API_KEY: "bizinfo-test-key",
+    FINLIFE_API_KEY: "finlife-test-key",
+  });
+
+  assert.equal(configured.bizinfo_api_key, "bizinfo-test-key");
+  assert.equal(configured.finlife_api_key, "finlife-test-key");
+});
 
 test("an empty malformed envelope is an error, not a successful last page", async () => {
   const collector = new SocialSecurityCollector({
@@ -60,8 +71,8 @@ test("each collector demands the key from its own issuer", async () => {
   };
 
   for (const [Collector, envName] of [
-    [BizinfoCollector, "BIZINFO_KEY"],
-    [FinlifeCollector, "FINLIFE_KEY"],
+    [BizinfoCollector, "BIZINFO_API_KEY"],
+    [FinlifeCollector, "FINLIFE_API_KEY"],
   ] as const) {
     await assert.rejects(
       new Collector({ settings: portalOnly, fetchImpl: notCalled }).fetch(),
@@ -74,7 +85,7 @@ test("each collector demands the key from its own issuer", async () => {
   // 반대 방향 — 자체 창구 키만 있고 포털 키가 없으면 포털 소스가 멈춘다
   await assert.rejects(
     new SocialSecurityCollector({
-      settings: settings({ bizinfo_key: "b", finlife_key: "f" }),
+      settings: settings({ bizinfo_api_key: "b", finlife_api_key: "f" }),
       fetchImpl: notCalled,
     }).fetch(),
     /DATA_GO_KR_API_KEY 미설정/,

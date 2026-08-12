@@ -14,10 +14,10 @@ export class FinlifeCollector extends Collector {
   override readonly defaultForm = "product";
 
   // 금감원 금융상품통합비교공시는 finlife.fss.or.kr 자체 발급 키를 쓴다 (SPEC §3.5).
-  protected override readonly apiKeyEnvName = "FINLIFE_KEY";
+  protected override readonly apiKeyEnvName = "FINLIFE_API_KEY";
 
   protected override get apiKey(): string {
-    return this.settings.finlife_key;
+    return this.settings.finlife_api_key;
   }
 
   protected queryParams({ page }: { since: string | null; page: number }) {
