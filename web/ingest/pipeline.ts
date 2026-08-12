@@ -27,6 +27,7 @@ export class SourceStats {
   unchanged = 0;
   expired = 0;
   errors: string[] = [];
+  incrementalStrategy: string | null = null;
 
   constructor(readonly sourceKey: string) {}
 
@@ -248,6 +249,7 @@ export class Pipeline {
     let stats = this.report.sources.get(collector.sourceKey);
     if (!stats) {
       stats = new SourceStats(collector.sourceKey);
+      stats.incrementalStrategy = collector.incrementalStrategy;
       this.report.sources.set(collector.sourceKey, stats);
     }
     let programs: CollectedProgram[];
@@ -367,6 +369,7 @@ export function reportToJson(report: RunReport): Record<string, unknown> {
           unchanged: stats.unchanged,
           expired: stats.expired,
           errors: stats.errors,
+          incremental_strategy: stats.incrementalStrategy,
         },
       ]),
     ),

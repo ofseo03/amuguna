@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import postgres from "postgres";
+
 import { InMemoryDatabase, postgresOptions, type ProgramValues, type RuleValues } from "../db";
 import { chunkText, Embedder } from "../embedder";
 import { EMBEDDING_DIM, embedQuery, VOYAGE_MODEL } from "../../src/lib/embedding";
@@ -31,6 +33,31 @@ test("batch database verifies TLS with PGSSLROOTCERT", () => {
       ca: "TEST_CA",
       rejectUnauthorized: true,
     });
+  } finally {
+    if (original === undefined) delete process.env.PGSSLROOTCERT;
+    else process.env.PGSSLROOTCERT = original;
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("explicit sslmode in URL and keyword DSNs wins over PGSSLROOTCERT", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "amuguna-ca-"));
+  const certificate = join(directory, "ca.crt");
+  const original = process.env.PGSSLROOTCERT;
+  writeFileSync(certificate, "TEST_CA", "utf8");
+  try {
+    process.env.PGSSLROOTCERT = certificate;
+    for (const mode of ["disable", "allow", "prefer", "require", "verify-full"]) {
+      const dsn = `postgresql://example.test/postgres?sslmode=${mode}`;
+      assert.equal(postgresOptions(dsn).ssl, undefined);
+      const sql = postgres(dsn, postgresOptions(dsn));
+      assert.equal(sql.options.ssl, mode === "disable" ? false : mode);
+      await sql.end();
+    }
+    assert.equal(
+      postgresOptions("host=example.test dbname=postgres sslmode=disable").ssl,
+      undefined,
+    );
   } finally {
     if (original === undefined) delete process.env.PGSSLROOTCERT;
     else process.env.PGSSLROOTCERT = original;

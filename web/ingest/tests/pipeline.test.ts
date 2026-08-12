@@ -10,7 +10,7 @@ import { settingsFromEnv } from "../config";
 import { InMemoryDatabase } from "../db";
 import { Embedder, OPENAI_MODEL } from "../embedder";
 import { CollectedProgram } from "../models";
-import { Pipeline } from "../pipeline";
+import { Pipeline, reportToJson, SourceStats } from "../pipeline";
 
 const settings = settingsFromEnv({ NODE_ENV: "test" });
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -94,6 +94,15 @@ test("new, unchanged, update, and reconciliation preserve the state-machine cont
   await ingest.runSource(new FakeCollector([], new Set(["fake:other"])), { reconcile: true });
   assert.equal(db.programs.get(1)?.status, "expired");
   assert.equal(db.embeddings.has(1), false);
+});
+
+test("JSON report records a source incremental strategy", () => {
+  const ingest = pipeline(new InMemoryDatabase());
+  const stats = new SourceStats("social_security");
+  stats.incrementalStrategy = "full_list_known_ids_detail_budget";
+  ingest.report.sources.set(stats.sourceKey, stats);
+  const sources = reportToJson(ingest.report).sources as Record<string, Record<string, unknown>>;
+  assert.equal(sources.social_security?.incremental_strategy, "full_list_known_ids_detail_budget");
 });
 
 test("source and real-embedding failures keep the previous snapshot or roll back the record", async () => {

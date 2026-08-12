@@ -2,6 +2,9 @@
   "name": "amuguna-web",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.9.0"
+  },
   "scripts": {
     "predev": "node scripts/copy-shared.mjs",
     "dev": "next dev",

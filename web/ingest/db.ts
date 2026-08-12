@@ -357,24 +357,37 @@ export class InMemoryDatabase implements Database {
 type RootSql = ReturnType<typeof postgres>;
 type QuerySql = RootSql | postgres.TransactionSql;
 
-export function postgresOptions(dsn: string): postgres.Options<Record<string, never>> {
-  let local = false;
-  let hasSslMode = false;
+function dsnSslMode(dsn: string): string | null {
   try {
-    const url = new URL(dsn);
-    local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    hasSslMode = url.searchParams.has("sslmode");
+    return new URL(dsn).searchParams.get("sslmode");
   } catch {
-    // postgres accepts keyword DSNs too; let the driver validate those.
+    // Do not try to fully parse libpq keyword DSNs here.  This is only enough
+    // to avoid overriding an explicit sslmode before the driver validates it.
+    const match = /(?:^|\s)sslmode\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
+    return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
   }
+}
+
+function isLocalDsn(dsn: string): boolean {
+  try {
+    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(dsn).hostname);
+  } catch {
+    const match = /(?:^|\s)host\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
+    const host = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+    return ["localhost", "127.0.0.1", "::1"].includes(host) || host.startsWith("/");
+  }
+}
+
+export function postgresOptions(dsn: string): postgres.Options<Record<string, never>> {
+  const sslMode = dsnSslMode(dsn);
   return {
     max: 1,
     connect_timeout: 10,
     idle_timeout: 20,
     prepare: false,
-    ...(process.env.PGSSLROOTCERT
+    ...(sslMode === null && process.env.PGSSLROOTCERT
       ? { ssl: sslOption() }
-      : !local && !hasSslMode
+      : sslMode === null && !isLocalDsn(dsn)
         ? { ssl: "verify-full" as const }
         : {}),
   };
