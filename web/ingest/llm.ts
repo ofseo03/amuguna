@@ -43,7 +43,8 @@ export type FallbackRules = {
 
 const FIELD_KEYWORDS: Record<string, readonly string[]> = {
   age: ["세", "연령", "나이", "청년", "어르신", "노인", "청소년"],
-  income: ["소득", "중위", "분위", "수급", "차상위", "재산"],
+  income_decile: ["소득", "분위"],
+  median_income: ["소득", "중위", "기준"],
   gender: ["여성", "남성", "성별"],
   region: ["거주", "소재", "관내", "지역", "시", "도", "군", "구"],
   occupation: ["직업", "종사", "사업자", "근로", "재직", "창업", "무직", "학생"],
@@ -51,7 +52,8 @@ const FIELD_KEYWORDS: Record<string, readonly string[]> = {
 
 const FIELD_COLUMNS = {
   age: ["age_min", "age_max"],
-  income: ["income_decile_max", "median_income_percent_max"],
+  income_decile: ["income_decile_max"],
+  median_income: ["median_income_percent_max"],
   gender: ["gender"],
   region: ["regions"],
   occupation: ["occupations"],

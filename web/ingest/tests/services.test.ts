@@ -10,6 +10,7 @@ import { EMBEDDING_DIM, embedQuery, VOYAGE_MODEL } from "../../src/lib/embedding
 import {
   applyFallback,
   LLMFallback,
+  missingFieldGroups,
   mockCardCopy,
   revalidate,
   Summarizer,
@@ -278,6 +279,27 @@ test("LLM fields are server-revalidated and regex values are not overwritten", a
   assert.equal(rules.age_min, 19);
   assert.equal(rules.median_income_percent_max, 100);
   assert.equal(rules.parse_method, "llm");
+});
+
+test("LLM fills the missing income axis without replacing the parsed one", async () => {
+  const rules = emptyRules();
+  rules.income_decile_max = 3;
+  assert.deepEqual(missingFieldGroups(rules), ["age", "median_income", "gender", "region", "occupation"]);
+
+  await applyFallback(
+    rules,
+    "소득 3분위 이하이며 기준 중위소득 120% 이하",
+    new LLMFallback(
+      { openrouterApiKey: "test", model: "test-model" },
+      stubFetch({
+        median_income_percent_max: 120,
+        evidence: { median_income_percent_max: "기준 중위소득 120% 이하" },
+      }),
+    ),
+  );
+
+  assert.equal(rules.income_decile_max, 3);
+  assert.equal(rules.median_income_percent_max, 120);
 });
 
 test("LLM cannot restore parser-rejected hard filters", async () => {

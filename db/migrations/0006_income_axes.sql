@@ -16,6 +16,27 @@ COMMENT ON COLUMN eligibility_rules.income_decile_max IS
 COMMENT ON COLUMN profiles.median_income_percent IS
   '공식 가구원별 기준액으로 브라우저에서 계산한 정수 비율. 원 월소득은 전송·저장하지 않는다.';
 
+-- 이 열을 도입하기 전 파서는 "기준 중위소득 150% 이하"의 숫자를
+-- income_decile_max 에 저장했다. evidence 원문이 명확한 행만 옮긴다.
+-- `미만`은 과거 값의 경계를 복원할 수 없으므로 자동 보정하지 않는다.
+UPDATE eligibility_rules
+SET
+  median_income_percent_max = substring(
+    parse_evidence -> 'income_decile_max' ->> 'text'
+    FROM '(?:기준[[:space:]]*)?중위소득[[:space:]]*([0-9]{1,3})[[:space:]]*%[[:space:]]*(?:이하|이내|까지)'
+  )::smallint,
+  income_decile_max = NULL
+WHERE median_income_percent_max IS NULL
+  AND parse_evidence -> 'income_decile_max' ->> 'text' ~
+    '(?:기준[[:space:]]*)?중위소득[[:space:]]*[0-9]{1,3}[[:space:]]*%[[:space:]]*(?:이하|이내|까지)';
+
+-- 차상위·기초생활·의료급여는 분위와 동치가 아니다. 과거 추정치는 제거한다.
+UPDATE eligibility_rules
+SET income_decile_max = NULL
+WHERE income_decile_max IS NOT NULL
+  AND parse_evidence -> 'income_decile_max' ->> 'text' ~
+    '(차상위|기초생활|의료급여)';
+
 -- 기존 7인자 함수의 검증된 자격/벡터 결과에 기준중위소득 위반만 합성한다.
 -- 기존 함수도 유지해 배포 전환 중인 호출을 깨지 않는다.
 CREATE FUNCTION match_programs(

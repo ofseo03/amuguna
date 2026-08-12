@@ -48,7 +48,7 @@ export function medianIncomeAmount(householdSize: number): number {
 export function medianIncomePercent(householdSize: number, monthlyIncome: number): number | null {
   const standard = medianIncomeAmount(householdSize);
   if (!standard || !Number.isFinite(monthlyIncome) || monthlyIncome < 0) return null;
-  return Math.ceil((monthlyIncome / standard) * 100);
+  return Math.ceil((Math.round(monthlyIncome) * 100) / standard);
 }
 
 const SIDO_BY_CODE = new Map(SIDO.map((s) => [s.code, s]));
