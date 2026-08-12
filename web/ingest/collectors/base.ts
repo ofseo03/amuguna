@@ -43,6 +43,7 @@ export abstract class Collector {
   abstract readonly endpoint: string;
   abstract readonly idListEndpoint: string;
   readonly defaultForm: string = "subsidy";
+  readonly incrementalStrategy: string | null = null;
 
   readonly settings: Settings;
   readonly useFixtures: boolean;

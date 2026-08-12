@@ -50,14 +50,16 @@ test("central welfare XML joins detail eligibility before regex parsing", async 
     },
   });
 
-  const [program] = await collector.fetch({ maxPages: 1 });
+  const [program] = await collector.fetch({ since: "2026-08-01", maxPages: 1 });
   assert.equal(requests.length, 2);
   assert.match(requests[0].pathname, /NationalWelfarelistV001$/);
+  assert.equal(requests[0].searchParams.has("since"), false);
   assert.match(requests[1].pathname, /NationalWelfaredetailedV001$/);
   assert.equal(requests[1].searchParams.get("servId"), "WLF00001076");
   assert.equal(program.source_url, "https://example.test/detail?a=1&b=2");
   assert.equal(program.apply_url, "");
   assert.match(program.eligibility_text, /추가 심사를 진행합니다\./);
+  assert.equal(collector.incrementalStrategy, "full_list_known_ids_detail_budget");
   assert.doesNotMatch(program.eligibility_text, /&#13;/);
 
   const rules = parseProgram(program);

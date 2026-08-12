@@ -92,6 +92,7 @@ export class SocialSecurityCollector extends Collector {
     "https://apis.data.go.kr/B554287/NationalWelfareInformationsV001/NationalWelfaredetailedV001";
   readonly idListEndpoint = this.endpoint;
   override readonly defaultForm = "subsidy";
+  override readonly incrementalStrategy = "full_list_known_ids_detail_budget";
 
   /**
    * 상세조회 개발계정 한도는 100회/일 (SPEC §3.2). 목록 호출분과 재시도 여유를
@@ -243,7 +244,10 @@ export class SocialSecurityCollector extends Collector {
    * ponytail: 적재된 건은 다시 안 보므로 원본 수정(마감 연장·자격 완화)을 놓친다.
    * 한도가 풀리면(운영계정) knownIds 스킵을 빼고 content_hash 비교로 되돌린다.
    */
-  override async fetch({ maxPages = 5, knownIds }: FetchOptions = {}): Promise<CollectedProgram[]> {
+  override async fetch({ since, maxPages = 5, knownIds }: FetchOptions = {}): Promise<CollectedProgram[]> {
+    // 이 공식 목록 API에는 날짜 필터가 없다. --since 는 요청 파라미터로 보내지 않고,
+    // 전체 목록을 훑은 뒤 knownIds 로 기존 건을 건너뛰고 상세조회 예산을 신규 건에 쓴다.
+    void since;
     if (this.useFixtures) return super.fetch({ maxPages });
 
     const collected: CollectedProgram[] = [];

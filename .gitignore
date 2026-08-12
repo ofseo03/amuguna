@@ -19,3 +19,7 @@ __pycache__/
 # Env
 .env
 .env.local
+
+# 활용신청 PDF 생성 중간산출물
+docs/apply/.fonts/
+docs/apply/apply.html

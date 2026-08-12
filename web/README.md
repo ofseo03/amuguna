@@ -119,7 +119,10 @@ curl -s -b jar localhost:3000/api/programs/1
 
 수집기의 공통층은 HTTP·재시도만 담당한다. 응답 형식과 필드 매핑은 소스별 수집기가
 소유하며, 중앙부처 복지서비스는 XML 목록을 받은 뒤 각 `servId`의 XML 상세를 조회해
-`tgtrDtlCn`과 `slctCritCn`을 자격 파서에 전달한다.
+`tgtrDtlCn`과 `slctCritCn`을 자격 파서에 전달한다. 이 공식 목록 API에는 날짜 필터가
+없으므로 중앙부처 복지서비스의 `--since`는 API 요청으로 보내지 않는다. 매 회차 전체
+목록을 스캔하고, 이미 적재한 ID의 상세 조회를 건너뛰며 `maxDetailCalls` 예산 안에서 신규
+건만 상세 적재한다. JSON report의 `incremental_strategy`가 이 동작을 표시한다.
 
 공공데이터포털 전용 어댑터는 `gov24`(보조금24 JSON), `local_welfare`(지자체복지 XML
 목록·상세), `kstartup`(K-Startup JSON)이다. 세 소스는 공식 명세 fixture와 테스트에는
@@ -162,7 +165,9 @@ OpenRouter API를 호출하는 독립 Node 배치(`ingest/`)에서만 읽는다.
 ## 환경변수
 
 Next.js와 독립 배치의 로컬 실연동 값은 `web/.env.local`에 둔다. `npm run ingest`도
-이 파일을 자동으로 읽으며, GitHub Actions에서는 Secrets/Variables로 주입한다.
+이 파일을 자동으로 읽으며, GitHub Actions에서는 Secrets/Variables로 주입한다. Node.js
+**22.9.0 이상**이 필요하다. 배치 스크립트는 이 버전부터 제공되는 Node 내장
+`--env-file-if-exists`를 사용하므로 별도 wrapper는 두지 않는다.
 
 ```bash
 cp .env.example .env.local
