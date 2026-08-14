@@ -86,12 +86,20 @@ const INCOME: Pattern[] = [
     handle: (match) => ({ median_income_percent_max: Number(match[1]) - 1 }),
   },
   {
-    source: "소득\\s*(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*이하",
+    source: "소득\\s*(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*(?:이하|이내|까지)",
     handle: (match) => ({ income_decile_max: Number(match[1]) }),
   },
   {
-    source: "(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*이하",
+    source: "(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*(?:이하|이내|까지)",
     handle: (match) => ({ income_decile_max: Number(match[1]) }),
+  },
+  {
+    source: "소득\\s*(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*미만",
+    handle: (match) => ({ income_decile_max: Number(match[1]) - 1 }),
+  },
+  {
+    source: "(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*미만",
+    handle: (match) => ({ income_decile_max: Number(match[1]) - 1 }),
   },
 ];
 

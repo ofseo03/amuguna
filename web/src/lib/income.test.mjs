@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { checklist, evaluate } from "./eligibility.ts";
+import { checklist, evaluate, nearMissMessage } from "./eligibility.ts";
 import { deserializeProfile, serializeProfile } from "./session.ts";
 import { medianIncomeAmount, medianIncomePercent } from "./shared-data.ts";
 import { validateProfile } from "./validation.ts";
@@ -54,6 +55,19 @@ test("income axes are validated and compared independently", () => {
   const unknown = { ...profile, incomeDecile: null, medianIncomePercent: null };
   assert.deepEqual(evaluate(rules, unknown).unknownDimensions, ["income"]);
   assert.equal(checklist(rules, unknown).find(({ dimension }) => dimension === "income")?.unknown, true);
+  const bothExceeded = { ...profile, incomeDecile: 5, medianIncomePercent: 101 };
+  assert.match(nearMissMessage("income", rules, bothExceeded), /현재 5분위.*현재 약 101%/);
+});
+
+test("income migration preserves legacy evidence and an unambiguous RPC", async () => {
+  const sql = await readFile(
+    new URL("../../../db/migrations/0006_income_axes.sql", import.meta.url),
+    "utf8",
+  );
+  assert.match(sql, /parse_evidence = \(parse_evidence - 'income_decile_max'\)/);
+  assert.match(sql, /중위소득[^']*미만/);
+  assert.doesNotMatch(sql, /p_qvec\s+vector\(1024\)\s+DEFAULT/);
+  assert.doesNotMatch(sql, /p_topk\s+int\s+DEFAULT/);
 });
 
 test("signed profile cookies keep derived percent and accept legacy cookies", () => {

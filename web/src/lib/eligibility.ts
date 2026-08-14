@@ -246,15 +246,28 @@ export function nearMissMessage(
   p: Profile,
 ): string {
   switch (d) {
-    case "income":
+    case "income": {
+      const messages: string[] = [];
       if (
         r.income_decile_max !== null &&
         p.incomeDecile !== null &&
         p.incomeDecile > r.income_decile_max
       ) {
-        return `소득 ${r.income_decile_max}분위 이하면 대상입니다 (현재 ${p.incomeDecile}분위)`;
+        messages.push(
+          `소득 ${r.income_decile_max}분위 이하면 대상입니다 (현재 ${p.incomeDecile}분위)`,
+        );
       }
-      return `기준중위소득 ${r.median_income_percent_max}% 이하면 대상입니다 (현재 약 ${p.medianIncomePercent}%)`;
+      if (
+        r.median_income_percent_max !== null &&
+        p.medianIncomePercent !== null &&
+        p.medianIncomePercent > r.median_income_percent_max
+      ) {
+        messages.push(
+          `기준중위소득 ${r.median_income_percent_max}% 이하면 대상입니다 (현재 약 ${p.medianIncomePercent}%)`,
+        );
+      }
+      return messages.join(" · ");
+    }
     case "age": {
       // "이상" 뒤에는 조사 '이'가 붙어야 자연스럽다 ("만 65세 이상이면")
       let range: string;

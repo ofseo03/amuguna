@@ -128,6 +128,10 @@ test("live notation variants and invalid scalar values stay inside the schema", 
   }
   assert.equal(parseEligibility("소득 1분위 이하").income_decile_max, 1);
   assert.equal(parseEligibility("소득 10분위 이하").income_decile_max, 10);
+  assert.equal(parseEligibility("소득 3분위 이내").income_decile_max, 3);
+  assert.equal(parseEligibility("소득 3분위 까지").income_decile_max, 3);
+  assert.equal(parseEligibility("소득 3분위 미만").income_decile_max, 2);
+  assert.equal(parseEligibility("소득 1분위 미만").income_decile_max, null);
   assert.equal(parseEligibility("소득 0분위 이하").income_decile_max, null);
   assert.equal(parseEligibility("소득 11분위 이하").income_decile_max, null);
   assert.equal(parseEligibility("만 999세 이상").age_min, null);
@@ -387,6 +391,7 @@ test("CollectedProgram hashes stable fields and builds the embedding source", ()
     eligibility_text: "만 19세 이상",
   });
   const volatile = new CollectedProgram({ ...base.toDict(), source_url: "https://example.test/2", raw_body: { views: 9 } });
+  assert.equal(PARSER_HASH_PREFIX, "parser-v3:");
   assert.equal(base.contentHash(), volatile.contentHash());
   assert.equal(
     base.contentHash(),

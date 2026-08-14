@@ -72,8 +72,8 @@ match_programs(
   p_occupation     text,          -- shared/occupations.json 의 code
   p_income_decile  int,           -- 1..10, 모르면 NULL
   p_median_income_percent int,    -- 기준중위소득 대비 %, 모르면 NULL
-  p_qvec           vector(1024) DEFAULT NULL,   -- NULL = 의도 입력 건너뜀
-  p_topk           int          DEFAULT 200     -- 청크 단위 top-k
+  p_qvec           vector(1024),          -- NULL = 의도 입력 건너뜀
+  p_topk           int                    -- 청크 단위 top-k
 ) RETURNS TABLE (
   program_id     bigint,
   sim            real,   -- 코사인 유사도. p_qvec IS NULL 이면 NULL
@@ -113,8 +113,8 @@ ORDER BY violations, sim DESC;
 ```
 
 ```sql
--- 의도 입력을 건너뛴 경로 (P3). p_qvec 을 생략하면 sim 은 NULL 이고 자격 축만으로 동작한다.
-SELECT * FROM match_programs(67, 'F', region_prefixes('46150'), 'retired', 1, 70);
+-- 의도 입력을 건너뛴 경로 (P3). p_qvec 에 NULL 을 넘기면 sim 은 NULL 이고 자격 축만으로 동작한다.
+SELECT * FROM match_programs(67, 'F', region_prefixes('46150'), 'retired', 1, 70, NULL::vector, 200);
 
 -- §7.7 1단계 완화: top-k 200 → 500
 SELECT * FROM match_programs(28,'F',region_prefixes('11620'),'employee_office',3,80,$1::vector,500);
