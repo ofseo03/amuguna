@@ -84,11 +84,14 @@ export async function POST(req: Request) {
     const sql = getSql();
     if (!sql) throw new Error("DB 미연결");
     await sql`
-      INSERT INTO profiles (id, age, gender, occupation, region_code, income_decile, email, unsubscribe_token, created_at)
+      INSERT INTO profiles (
+        id, age, gender, occupation, region_code,
+        income_decile, median_income_percent, email, unsubscribe_token, created_at
+      )
       VALUES (
         ${sessionId}::uuid,
         ${profile.age}, ${profile.gender}, ${profile.occupation},
-        ${profile.sigunguCode}, ${profile.incomeDecile},
+        ${profile.sigunguCode}, ${profile.incomeDecile}, ${profile.medianIncomePercent},
         ${email.value}, ${token}, now()
       )
       ON CONFLICT (id) DO UPDATE SET
@@ -97,6 +100,7 @@ export async function POST(req: Request) {
         occupation = EXCLUDED.occupation,
         region_code = EXCLUDED.region_code,
         income_decile = EXCLUDED.income_decile,
+        median_income_percent = EXCLUDED.median_income_percent,
         email = EXCLUDED.email,
         unsubscribe_token = EXCLUDED.unsubscribe_token`;
   } catch (e) {

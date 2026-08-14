@@ -5,7 +5,7 @@
 import regionsJson from "@/data/regions.json";
 import occupationsJson from "@/data/occupations.json";
 import incomeDecilesJson from "@/data/income_deciles.json";
-import midincomeJson from "@/data/midincome_to_decile.json";
+import medianIncomeJson from "@/data/median_income_2026.json";
 
 export interface Sido {
   code: string;
@@ -31,8 +31,25 @@ export const SIDO: Sido[] = regionsJson.sido;
 export const SIGUNGU: Sigungu[] = regionsJson.sigungu;
 export const OCCUPATIONS: Occupation[] = occupationsJson.categories;
 export const DECILES: DecileLabel[] = incomeDecilesJson.deciles;
-export const MIDINCOME_TO_DECILE: { max_percent: number | null; decile: number }[] =
-  midincomeJson.mapping;
+export const MEDIAN_INCOME_YEAR = medianIncomeJson.year;
+export const MEDIAN_INCOME_SOURCE_URL = medianIncomeJson.source.url;
+
+/** 보건복지부 고시 기준 월 기준중위소득. 8인 이상은 고시의 1인 증가액을 적용한다. */
+export function medianIncomeAmount(householdSize: number): number {
+  if (!Number.isInteger(householdSize) || householdSize < 1 || householdSize > 20) return 0;
+  if (householdSize <= 7) {
+    return medianIncomeJson.amounts[String(householdSize) as keyof typeof medianIncomeJson.amounts];
+  }
+  return medianIncomeJson.amounts["7"] +
+    (householdSize - 7) * medianIncomeJson.additional_member_amount;
+}
+
+/** 경계에서 자격을 과대 판정하지 않도록 소수점은 올림한다. */
+export function medianIncomePercent(householdSize: number, monthlyIncome: number): number | null {
+  const standard = medianIncomeAmount(householdSize);
+  if (!standard || !Number.isFinite(monthlyIncome) || monthlyIncome < 0) return null;
+  return Math.ceil((monthlyIncome / standard) * 100);
+}
 
 const SIDO_BY_CODE = new Map(SIDO.map((s) => [s.code, s]));
 const SIGUNGU_BY_CODE = new Map(SIGUNGU.map((s) => [s.code, s]));

@@ -135,6 +135,7 @@ const rule: RuleValues = {
   regions: ["11"],
   occupations: null,
   income_decile_max: null,
+  median_income_percent_max: null,
   extra_conditions: [],
   parse_method: "regex",
   parse_evidence: {},
@@ -278,6 +279,7 @@ function emptyRules(): FallbackRules {
     regions: null,
     occupations: null,
     income_decile_max: null,
+    median_income_percent_max: null,
     parse_method: "regex",
     parse_evidence: {},
     confidence: 0,
@@ -333,13 +335,13 @@ test("LLM fields are server-revalidated and regex values are not overwritten", a
       { openrouterApiKey: "test", model: "test-model" },
       stubFetch({
         age_min: 99,
-        income_decile_max: 5,
-        evidence: { income_decile_max: "중위소득 100% 이하" },
+        median_income_percent_max: 100,
+        evidence: { median_income_percent_max: "중위소득 100% 이하" },
       }),
     ),
   );
   assert.equal(rules.age_min, 19);
-  assert.equal(rules.income_decile_max, 5);
+  assert.equal(rules.median_income_percent_max, 100);
   assert.equal(rules.parse_method, "llm");
 });
 
@@ -353,10 +355,15 @@ test("LLM cannot restore parser-rejected hard filters", async () => {
     "일반 농업인 또는 기초생활수급자 등 저소득 농업인 단체",
     new LLMFallback(
       { openrouterApiKey: "test", model: "test-model" },
-      stubFetch({ income_decile_max: 2, evidence: { income_decile_max: "기초생활수급자" } }),
+      stubFetch({
+        income_decile_max: 2,
+        median_income_percent_max: 50,
+        evidence: { income_decile_max: "기초생활수급자" },
+      }),
     ),
   );
   assert.equal(rules.income_decile_max, null);
+  assert.equal(rules.median_income_percent_max, null);
 });
 
 test("missing LLM key is deterministic and does not block the whole service", async () => {

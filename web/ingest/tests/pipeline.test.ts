@@ -282,10 +282,10 @@ test("all 30 fixtures match the established coverage baseline and are idempotent
     age_max: 9,
     regions: 5,
     occupations: 8,
-    income_decile_max: 11,
+    median_income_percent_max: 10,
   });
-  assert.equal(ingest.report.parse.withExtraConditions, 13);
-  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.707);
+  assert.equal(ingest.report.parse.withExtraConditions, 14);
+  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.689);
 
   await ingest.run(collectors);
   assert.equal(ingest.report.totals.updated, 0);

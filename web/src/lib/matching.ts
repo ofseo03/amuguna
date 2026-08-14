@@ -69,6 +69,7 @@ interface Candidate {
   violations: number;
   violatedDimensions: RuleDimension[];
   matchedDimensions: RuleDimension[];
+  unknownDimensions: RuleDimension[];
 }
 
 /* ================================================================== */
@@ -104,6 +105,7 @@ function demoCandidates(
       violations: ev.violations,
       violatedDimensions: ev.violatedDimensions,
       matchedDimensions: ev.matchedDimensions,
+      unknownDimensions: ev.unknownDimensions,
     });
   }
 
@@ -161,6 +163,7 @@ function rowToProgram(r: any): Program {
       regions: r.regions ?? null,
       occupations: r.occupations ?? null,
       income_decile_max: r.income_decile_max ?? null,
+      median_income_percent_max: r.median_income_percent_max ?? null,
       extra_conditions: normalizeExtraConditions(r.extra_conditions),
       parse_method: (r.parse_method ?? "regex") as Program["rules"]["parse_method"],
       confidence: r.confidence === null || r.confidence === undefined ? 0 : Number(r.confidence),
@@ -183,7 +186,7 @@ function normalizeExtraConditions(v: any): Program["rules"]["extra_conditions"] 
   return [];
 }
 
-/** DB 계약: SELECT * FROM match_programs(age, gender, region_codes, occupation, decile, qvec, topk) */
+/** DB 계약: 두 소득 축을 별도 인자로 받는 서버 전용 match_programs RPC */
 async function dbCandidates(
   profile: Profile,
   qvec: Float64Array | null,
@@ -204,6 +207,7 @@ async function dbCandidates(
           ${regionPrefixes(profile)}::text[],
           ${profile.occupation}::text,
           ${profile.incomeDecile}::int,
+          ${profile.medianIncomePercent}::int,
           ${vecLiteral}::vector,
           ${topk}::int
         )`
@@ -215,6 +219,7 @@ async function dbCandidates(
           ${regionPrefixes(profile)}::text[],
           ${profile.occupation}::text,
           ${profile.incomeDecile}::int,
+          ${profile.medianIncomePercent}::int,
           NULL::vector,
           ${topk}::int
         )`;
@@ -225,7 +230,8 @@ async function dbCandidates(
   const rows = await sql`
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
-           e.income_decile_max, e.extra_conditions, e.parse_method, e.confidence
+           e.income_decile_max, e.median_income_percent_max,
+           e.extra_conditions, e.parse_method, e.confidence
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
     WHERE p.id = ANY(${ids}::bigint[])`;
@@ -247,6 +253,7 @@ async function dbCandidates(
       violations: Number(m.violations),
       violatedDimensions: ev.violatedDimensions,
       matchedDimensions: ev.matchedDimensions,
+      unknownDimensions: ev.unknownDimensions,
     };
     if (cand.violations === 0) eligible.push(cand);
     else if (cand.violations === 1) nearMiss.push(cand);
@@ -277,8 +284,8 @@ function toCard(
     score: breakdown.total,
     breakdown,
     sim: c.sim,
-    reason: buildReason(c.matchedDimensions, c.program.rules, profile),
-    badges: buildBadges(c.matchedDimensions, c.program.rules, profile),
+    reason: buildReason(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
+    badges: buildBadges(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
     dDay: dDay(c.program, now),
   };
 }
@@ -427,7 +434,8 @@ export async function getProgram(id: number): Promise<Program | null> {
   const rows = await sql`
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
-           e.income_decile_max, e.extra_conditions, e.parse_method, e.confidence
+           e.income_decile_max, e.median_income_percent_max,
+           e.extra_conditions, e.parse_method, e.confidence
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
     WHERE p.id = ${id}::bigint

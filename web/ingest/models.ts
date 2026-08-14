@@ -128,6 +128,7 @@ export interface EligibilityRulesInput {
   regions?: string[] | null;
   occupations?: string[] | null;
   income_decile_max?: number | null;
+  median_income_percent_max?: number | null;
   extra_conditions?: ExtraCondition[];
   parse_method?: ParseMethod;
   parse_evidence?: ParseEvidence;
@@ -148,6 +149,7 @@ export class EligibilityRules {
   regions: string[] | null;
   occupations: string[] | null;
   income_decile_max: number | null;
+  median_income_percent_max: number | null;
   extra_conditions: ExtraCondition[];
   parse_method: ParseMethod;
   parse_evidence: ParseEvidence;
@@ -162,6 +164,7 @@ export class EligibilityRules {
     this.regions = input.regions ?? null;
     this.occupations = input.occupations ?? null;
     this.income_decile_max = input.income_decile_max ?? null;
+    this.median_income_percent_max = input.median_income_percent_max ?? null;
     this.extra_conditions = input.extra_conditions ?? [];
     this.parse_method = input.parse_method ?? "regex";
     this.parse_evidence = input.parse_evidence ?? {};
@@ -182,6 +185,7 @@ export class EligibilityRules {
       regions: this.regions,
       occupations: this.occupations,
       income_decile_max: this.income_decile_max,
+      median_income_percent_max: this.median_income_percent_max,
       extra_conditions: this.extra_conditions,
       parse_method: this.parse_method,
       parse_evidence: this.parse_evidence,
@@ -197,6 +201,7 @@ export class EligibilityRules {
       "regions",
       "occupations",
       "income_decile_max",
+      "median_income_percent_max",
     ].filter((name) => {
       const value = this[name as keyof EligibilityRules];
       return value !== null && value !== "" && (!Array.isArray(value) || value.length > 0);
