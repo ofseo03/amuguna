@@ -96,6 +96,34 @@ test("new, unchanged, update, and reconciliation preserve the state-machine cont
   assert.equal(db.embeddings.has(1), false);
 });
 
+test("a parser version bump reparses identical stored content once", async () => {
+  const db = new InMemoryDatabase();
+  const original = program();
+  await pipeline(db).runSource(new FakeCollector([original]));
+  const programId = await db.getProgramId(original.external_id);
+  assert.notEqual(programId, null);
+
+  // 배포 전 해시에는 parser-vN 접두사가 없다. 호출 제한 수집기도 이 ID를 다시
+  // 상세 조회할 수 있어야 하고, 동일 원문이어도 규칙을 새 파서로 교체해야 한다.
+  db.rawDocuments[0].content_hash = db.rawDocuments[0].content_hash.split(":").at(-1)!;
+  db.rules.get(programId!)!.age_min = 99;
+  assert.deepEqual(await db.knownExternalIds("fake"), new Set());
+
+  const ingest = pipeline(db);
+  await ingest.runSource(new FakeCollector([original]));
+  assert.equal(db.rawDocuments.length, 2);
+  assert.equal(db.rules.get(programId!)?.age_min, 19);
+  assert.deepEqual(
+    [ingest.report.totals.created, ingest.report.totals.updated, ingest.report.totals.unchanged],
+    [0, 1, 0],
+  );
+  assert.deepEqual(await db.knownExternalIds("fake"), new Set([original.external_id]));
+
+  await ingest.runSource(new FakeCollector([original]));
+  assert.equal(db.rawDocuments.length, 2);
+  assert.equal(ingest.report.totals.unchanged, 1);
+});
+
 test("JSON report records a source incremental strategy", () => {
   const ingest = pipeline(new InMemoryDatabase());
   const stats = new SourceStats("social_security");

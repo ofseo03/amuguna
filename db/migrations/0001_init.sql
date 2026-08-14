@@ -81,7 +81,7 @@ COMMENT ON COLUMN raw_documents.external_id IS
 COMMENT ON COLUMN raw_documents.source_key IS
   '소스 식별자 (예: bokjiro, bizinfo, finlife). SPEC §3.3';
 COMMENT ON COLUMN raw_documents.content_hash IS
-  '정규화한 비교 대상 필드(제목·본문·기간·금액)만으로 계산. 조회수·응답생성시각 등 매 호출 바뀌는 필드를 넣으면 전 건이 매일 "수정"으로 판정돼 증분 수집의 이점이 통째로 사라진다. SPEC §3.2';
+  '파서 버전 접두사 + 정규화한 비교 대상 필드(제목·본문·기간·금액)로 계산. 파서 의미가 바뀌면 버전을 올려 기존 공고를 한 번 재처리한다. 조회수·응답생성시각 등 변동 필드는 제외한다. SPEC §3.2';
 COMMENT ON COLUMN raw_documents.raw_body IS
   '수집 응답 원문(JSON/HTML). TOAST 로 압축 저장된다.';
 

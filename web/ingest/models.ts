@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 
 import { normalizeText } from "./dictionaries";
 
+// 파서 의미가 바뀌면 올린다. content_hash 접두사가 달라져 기존 공고도 다음
+// 수집에서 한 번 일반 수정 경로를 타며 새 eligibility_rules 로 교체된다.
+export const PARSER_VERSION = 2;
+export const PARSER_HASH_PREFIX = `parser-v${PARSER_VERSION}:`;
+
 export const HASHED_FIELDS = [
   "title",
   "body_text",
@@ -95,7 +100,8 @@ export class CollectedProgram {
     const sorted = Object.fromEntries(
       Object.entries(fields).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
     );
-    return createHash("sha256").update(JSON.stringify(sorted), "utf8").digest("hex");
+    const digest = createHash("sha256").update(JSON.stringify(sorted), "utf8").digest("hex");
+    return `${PARSER_HASH_PREFIX}${digest}`;
   }
 
   embeddingSource(): string {

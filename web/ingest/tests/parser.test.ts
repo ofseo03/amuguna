@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { midrateToDecile, normalizeText } from "../dictionaries";
-import { CollectedProgram, EligibilityRules, HASHED_FIELDS } from "../models";
+import {
+  CollectedProgram,
+  EligibilityRules,
+  HASHED_FIELDS,
+  PARSER_HASH_PREFIX,
+} from "../models";
 import {
   computeConfidence,
   eligibilitySourceText,
@@ -340,6 +345,11 @@ test("non-requirements and partial alternatives never become hard filters", () =
     parseEligibility("만 19세 이상인 근로자 또는 연령 제한 없는 자영업자").age_min,
     null,
   );
+  const qualifiedAlternatives = parseEligibility(
+    "만 19세 이상인 근로자 또는 소득 3분위 이하인 자영업자",
+  );
+  assert.equal(qualifiedAlternatives.age_min, null);
+  assert.equal(qualifiedAlternatives.income_decile_max, null);
   assert.equal(
     parseEligibility("서울특별시에 거주하는 농업인 또는 전국 어업인").regions,
     null,
@@ -379,7 +389,10 @@ test("CollectedProgram hashes stable fields and builds the embedding source", ()
   });
   const volatile = new CollectedProgram({ ...base.toDict(), source_url: "https://example.test/2", raw_body: { views: 9 } });
   assert.equal(base.contentHash(), volatile.contentHash());
-  assert.equal(base.contentHash(), "82648b39f34a915a4b8e10fb5e8c9484b3c1b3e0d5d5e03533d814b974aaccd3");
+  assert.equal(
+    base.contentHash(),
+    `${PARSER_HASH_PREFIX}82648b39f34a915a4b8e10fb5e8c9484b3c1b3e0d5d5e03533d814b974aaccd3`,
+  );
   assert.equal(base.embeddingSource(), "본문\n\n[자격요건]\n만 19세 이상");
 
   const embedded = new CollectedProgram({ ...base.toDict(), body_text: "본문\n만 19세 이상" });

@@ -199,6 +199,15 @@ function addRejected(rejected: ExtraCondition[], condition: ExtraCondition): voi
   }
 }
 
+function hasIndependentQualifier(branch: string): boolean {
+  return (
+    [AGE, INCOME, GENDER].some((patterns) =>
+      patterns.some(({ source }) => matches(source, branch).length > 0),
+    ) ||
+    lookupRegions(branch)[0].length > 0
+  );
+}
+
 function sharedAlternativePrefix(
   span: Span,
   left: number,
@@ -218,7 +227,8 @@ function sharedAlternativePrefix(
   return (
     !contradiction.test(clause) &&
     /(?:인|하는)\s+\S+\s*$/u.test(between) &&
-    branches.every((branch) => lookupOccupations(branch)[0].length > 0)
+    branches.every((branch) => lookupOccupations(branch)[0].length > 0) &&
+    branches.slice(1).every((branch) => !hasIndependentQualifier(branch))
   );
 }
 

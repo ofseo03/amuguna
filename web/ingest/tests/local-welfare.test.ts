@@ -74,3 +74,60 @@ test("local welfare XML joins detail, preserves region, and sends required param
   assert.equal(requests.length, 3);
   assert.match(requests[2].pathname, /LcgvWelfarelist$/);
 });
+
+test("local welfare skips missing details but aborts on transient failures", async () => {
+  const ids = ["LOCAL-1", "LOCAL-2", "LOCAL-3"];
+  const list = `<?xml version="1.0" encoding="UTF-8"?><wantedList>${ids
+    .map((id) => `<servList><servId>${id}</servId><servNm>서비스 ${id}</servNm></servList>`)
+    .join("")}<totalCount>3</totalCount><resultCode>00</resultCode></wantedList>`;
+  const detailOf = (id: string) =>
+    `<?xml version="1.0" encoding="UTF-8"?><wantedDtl><servId>${id}</servId>` +
+    `<servNm>서비스 ${id}</servNm><sprtTrgtCn>만 19세 이상</sprtTrgtCn>` +
+    `<resultCode>0</resultCode><resultMessage>SUCCESS</resultMessage></wantedDtl>`;
+
+  const build = (failure: number | "no-data") => {
+    const detailIds: string[] = [];
+    const collector = new LocalWelfareCollector({
+      settings: settingsFromEnv({ NODE_ENV: "test", DATA_GO_KR_API_KEY: "local-key" }),
+      pageSize: 3,
+      retries: 0,
+      fetchImpl: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (!url.pathname.endsWith("LcgvWelfaredetailed")) {
+          return new Response(list, { headers: { "Content-Type": "application/xml" } });
+        }
+        const id = url.searchParams.get("servId")!;
+        detailIds.push(id);
+        if (id === ids[1]) {
+          if (failure === "no-data") {
+            return new Response(
+              `<?xml version="1.0"?><wantedDtl><resultCode>03</resultCode>` +
+                `<resultMessage>NO_DATA</resultMessage></wantedDtl>`,
+              { headers: { "Content-Type": "application/xml" } },
+            );
+          }
+          return new Response("", { status: failure });
+        }
+        return new Response(detailOf(id), { headers: { "Content-Type": "application/xml" } });
+      },
+    });
+    return { collector, detailIds };
+  };
+
+  const missing = build(404);
+  assert.deepEqual(
+    (await missing.collector.fetch({ maxPages: 1 })).map(({ external_id }) => external_id),
+    ["local_welfare:LOCAL-1", "local_welfare:LOCAL-3"],
+  );
+  assert.deepEqual(missing.detailIds, ids);
+
+  const missingEnvelope = build("no-data");
+  assert.deepEqual(
+    (await missingEnvelope.collector.fetch({ maxPages: 1 })).map(({ external_id }) => external_id),
+    ["local_welfare:LOCAL-1", "local_welfare:LOCAL-3"],
+  );
+
+  const transient = build(503);
+  await assert.rejects(transient.collector.fetch({ maxPages: 1 }), /HTTP 503/);
+  assert.deepEqual(transient.detailIds, ids.slice(0, 2));
+});

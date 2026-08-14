@@ -2,6 +2,7 @@ import postgres from "postgres";
 
 import { sslOption } from "../src/lib/db";
 import { toPgVectorLiteral } from "../src/lib/embedding";
+import { PARSER_HASH_PREFIX } from "./models";
 
 export const PROGRAM_COLUMNS = [
   "external_id",
@@ -136,6 +137,7 @@ export interface Database {
   activeExternalIds(sourceKey: string): Promise<Set<string>>;
   /**
    * 이미 적재되어 다시 상세를 받을 필요가 없는 external_id.
+   * 현재 파서 버전으로 처리된 행만 포함해, 버전 변경 시 호출 한도 안에서 재수집한다.
    * `expired` 는 제외한다 — 원본에 다시 올라오면 재조회해 되살려야 하기 때문이다.
    * 만료 판정용 `activeExternalIds` 와 목적이 다르므로 분리해 둔다.
    */
@@ -318,9 +320,19 @@ export class InMemoryDatabase implements Database {
 
   async knownExternalIds(sourceKey: string): Promise<Set<string>> {
     const prefix = `${sourceKey}:`;
+    const currentRawIds = new Set(
+      this.rawDocuments
+        .filter(({ content_hash }) => content_hash.startsWith(PARSER_HASH_PREFIX))
+        .map(({ id }) => id),
+    );
     return new Set(
       [...this.programs.values()]
-        .filter((row) => row.status !== "expired" && row.external_id.startsWith(prefix))
+        .filter(
+          (row) =>
+            row.status !== "expired" &&
+            row.external_id.startsWith(prefix) &&
+            currentRawIds.has(row.raw_document_id),
+        )
         .map((row) => row.external_id),
     );
   }
@@ -605,8 +617,12 @@ export class PostgresDatabase implements Database {
   // local_welfare 같은 키가 다른 소스와 겹칠 수 있고, InMemory 의 startsWith 와도 어긋난다.
   async knownExternalIds(sourceKey: string): Promise<Set<string>> {
     const rows = await this.sql<{ external_id: string }[]>`
-      SELECT external_id FROM programs
-      WHERE status <> 'expired' AND starts_with(external_id, ${`${sourceKey}:`})
+      SELECT p.external_id
+      FROM programs p
+      JOIN raw_documents d ON d.id = p.raw_document_id
+      WHERE p.status <> 'expired'
+        AND starts_with(p.external_id, ${`${sourceKey}:`})
+        AND starts_with(d.content_hash, ${PARSER_HASH_PREFIX})
     `;
     return new Set(rows.map((row) => row.external_id));
   }

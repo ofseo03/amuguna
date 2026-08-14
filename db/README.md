@@ -10,6 +10,7 @@ Postgres (Supabase) + `pgvector`. SPEC.md §5(데이터 모델) / §7.3(교차 �
 | `migrations/0004_embedding_provider.sql` | 벡터 공간 혼합을 막는 provider 식별자 |
 | `migrations/0005_revoke_api_function_access.sql` | Supabase의 `anon` / `authenticated` 함수 실행 권한 회수 |
 | `migrations/0007_embedding_vector_space.sql` | provider 식별자에 모델명 포함 — 같은 provider 안의 모델 교체도 재색인 |
+| `migrations/0008_application_window.sql` | 접수 시작 전 공고를 매칭·상세에서 제외하도록 RPC 갱신 |
 
 ---
 

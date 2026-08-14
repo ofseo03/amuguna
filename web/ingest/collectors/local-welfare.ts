@@ -175,8 +175,11 @@ export class LocalWelfareCollector extends Collector {
       },
       this.detailEndpoint,
     );
-    if (!/^0+$/u.test(xmlText(xml, "resultCode"))) {
-      throw new CollectorError(`${this.sourceKey}: ${xmlText(xml, "resultMessage") || "잘못된 XML 응답"}`);
+    const code = xmlText(xml, "resultCode");
+    if (!/^0+$/u.test(code)) {
+      throw new CollectorError(`${this.sourceKey}: ${xmlText(xml, "resultMessage") || "잘못된 XML 응답"}`, {
+        code,
+      });
     }
     const item = xmlRecord(xml, DETAIL_FIELDS);
     item.relatedUrl = xmlRecords(xml, "inqplHmpgReldList", ["wlfareInfoReldCn"])
@@ -195,7 +198,21 @@ export class LocalWelfareCollector extends Collector {
       for (const item of items) {
         const nativeId = firstOf(item, ["servId"]);
         if (!nativeId || seen.has(nativeId)) continue;
-        const program = this.mapItem({ ...item, ...(await this.detail(nativeId)) });
+        let detail: Record<string, unknown>;
+        try {
+          detail = await this.detail(nativeId);
+        } catch (error) {
+          const missing =
+            error instanceof CollectorError &&
+            (error.status === 404 ||
+              error.status === 410 ||
+              (error.code !== undefined && Number(error.code) === 3));
+          if (!missing) throw error;
+          seen.add(nativeId);
+          console.warn(`${this.sourceKey}: 상세 조회 건너뜀 (${nativeId}: ${error.message})`);
+          continue;
+        }
+        const program = this.mapItem({ ...item, ...detail });
         if (!program) continue;
         seen.add(nativeId);
         collected.push(program);

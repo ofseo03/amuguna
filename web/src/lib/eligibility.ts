@@ -123,11 +123,18 @@ export function evaluate(r: EligibilityRules, p: Profile): EligibilityResult {
   };
 }
 
-/** 기간 조건 — status='active' AND (ends_at IS NULL OR ends_at >= now()) */
+function seoulDate(now: Date): string {
+  // 한국은 DST가 없으므로 UTC+9로 옮긴 뒤 ISO 날짜 부분만 비교하면 DB의
+  // `(now() AT TIME ZONE 'Asia/Seoul')::date`와 같은 경계가 된다.
+  return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/** 기간 조건 — status='active' AND starts_at <= KST today <= ends_at */
 export function isOpen(prog: Program, now = new Date()): boolean {
   if (prog.status !== "active") return false;
-  if (!prog.ends_at) return true;
-  return new Date(prog.ends_at).getTime() >= now.getTime();
+  const today = seoulDate(now);
+  if (prog.starts_at && prog.starts_at.slice(0, 10) > today) return false;
+  return !prog.ends_at || prog.ends_at.slice(0, 10) >= today;
 }
 
 /** 마감 D-n. 상시/무기한이면 null */
