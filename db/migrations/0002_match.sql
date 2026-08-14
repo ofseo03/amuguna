@@ -23,11 +23,11 @@
 --      아래 벡터 경로에서 set_config('hnsw.ef_search', k) 로 요청한 k 에 맞춰 올린다.
 --      그래도 자격 통과분이 top-k 안에 부족하면 §7.7 1단계(p_topk 500)를 쓰고,
 --      다음 수단이 pgvector 0.8+ 의 hnsw.iterative_scan 이다 (SPEC §7.3 주석).
---   2) ends_at 비교 — SPEC 은 `ends_at >= now()` 로 적혀 있으나 ends_at 은 date 이고
+--   2) 신청 기간 비교 — starts_at / ends_at 은 date 이고
 --      DB 타임존은 UTC 다. date 를 now() 와 직접 비교하면 자정 기준으로 캐스팅돼
 --      '오늘 마감'인 공고가 마감일 당일 내내 결과에서 빠진다. "누락이 오탐보다
 --      비싸다"(§7.3)는 원칙에 정면으로 어긋나므로 KST 기준 날짜와 비교한다:
---        p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
+--        p.starts_at <= (now() AT TIME ZONE 'Asia/Seoul')::date <= p.ends_at
 --      웹/배치에서 직접 쿼리를 쓸 때도 같은 식을 쓸 것. (db/README.md 참고)
 -- =============================================================================
 
@@ -114,6 +114,7 @@ BEGIN
       FROM programs p
       JOIN eligibility_rules e ON e.program_id = p.id
       WHERE p.status = 'active'
+        AND (p.starts_at IS NULL OR p.starts_at <= (now() AT TIME ZONE 'Asia/Seoul')::date)
         -- 마감일 당일까지 유효. now() 대신 KST 기준 날짜와 비교한다 (0002 헤더 아래 주석 참고)
         AND (p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date)
     ),
@@ -170,6 +171,7 @@ BEGIN
       FROM programs p
       JOIN eligibility_rules e ON e.program_id = p.id
       WHERE p.status = 'active'
+        AND (p.starts_at IS NULL OR p.starts_at <= (now() AT TIME ZONE 'Asia/Seoul')::date)
         AND (p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date)
     ),
     candidates AS (

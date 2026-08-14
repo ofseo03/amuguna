@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { parseArgs } from "node:util";
 
-import { COLLECTORS } from "./collectors";
+import { COLLECTORS, DEFAULT_SOURCE_KEYS } from "./collectors";
 import { settingsFromEnv } from "./config";
 import { InMemoryDatabase, PostgresDatabase } from "./db";
 import { Embedder } from "./embedder";
@@ -18,7 +18,7 @@ const HELP = `amuguna 공공 금융정보 수집·파싱 배치
 옵션:
   --fixtures            실 API 대신 ingest/fixtures/*.json 사용
   --dry-run             Postgres 대신 메모리 DB 사용
-  --source NAME         특정 소스만 실행 (반복 가능)
+  --source NAME         특정 소스만 실행 (반복 가능, 오류 시 유효 이름 표시)
   --since YYYY-MM-DD    증분 수집 기준일
   --weekly-reconcile    원본에서 사라진 공고를 expired 처리
   --no-llm              LLM 보완·요약 비활성화
@@ -51,7 +51,8 @@ async function main(): Promise<number> {
     throw new Error("--since는 YYYY-MM-DD 형식이어야 합니다");
   }
 
-  const keys = values.source ?? Object.keys(COLLECTORS).sort();
+  const keys =
+    values.source ?? (values.fixtures ? Object.keys(COLLECTORS).sort() : [...DEFAULT_SOURCE_KEYS]);
   for (const key of keys) {
     if (!Object.hasOwn(COLLECTORS, key)) {
       throw new Error(`알 수 없는 --source: ${key} (${Object.keys(COLLECTORS).sort().join(", ")})`);
@@ -69,7 +70,7 @@ async function main(): Promise<number> {
   const noLlm = values["no-llm"];
   const pipeline = new Pipeline(db, {
     embedder: new Embedder(settings),
-    summarizer: new Summarizer(noLlm ? { anthropic_api_key: "" } : settings),
+    summarizer: new Summarizer(noLlm ? { openrouter_api_key: "" } : settings),
     llm: noLlm ? null : new LLMFallback(settings),
     dryRun: values["dry-run"],
   });

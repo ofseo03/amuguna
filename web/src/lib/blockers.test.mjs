@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { EMBEDDING_DIM, embedQuery, mockEmbed } from "./embedding.ts";
+import { isOpen } from "./eligibility.ts";
 
 test("email conflict cannot update another profile", async () => {
   const route = await readFile(
@@ -14,6 +15,29 @@ test("email conflict cannot update another profile", async () => {
 test("matching drops every degraded query vector", async () => {
   const matching = await readFile(new URL("./matching.ts", import.meta.url), "utf8");
   assert.match(matching, /qvec = r\.degraded \? null : r\.vector/);
+});
+
+test("application windows use the Korean calendar date in every matching path", async () => {
+  const now = new Date("2026-08-14T15:30:00Z"); // 2026-08-15 00:30 KST
+  const program = { status: "active", starts_at: "2026-08-15", ends_at: "2026-08-15" };
+  assert.equal(isOpen(program, now), true);
+  assert.equal(isOpen({ ...program, starts_at: "2026-08-16" }, now), false);
+  assert.equal(isOpen({ ...program, starts_at: null, ends_at: "2026-08-14" }, now), false);
+  assert.equal(isOpen({ ...program, status: "expired" }, now), false);
+
+  const baseMigration = await readFile(
+    new URL("../../../db/migrations/0002_match.sql", import.meta.url),
+    "utf8",
+  );
+  const upgradeMigration = await readFile(
+    new URL("../../../db/migrations/0008_application_window.sql", import.meta.url),
+    "utf8",
+  );
+  const matching = await readFile(new URL("./matching.ts", import.meta.url), "utf8");
+  const predicate = /p\.starts_at IS NULL OR p\.starts_at <= \(now\(\) AT TIME ZONE 'Asia\/Seoul'\)::date/g;
+  assert.equal(baseMigration.match(predicate)?.length, 2);
+  assert.equal(upgradeMigration.match(predicate)?.length, 2);
+  assert.equal(matching.match(predicate)?.length, 1);
 });
 
 test("mock stays usable and real-provider failures cannot produce a mock query vector", async () => {

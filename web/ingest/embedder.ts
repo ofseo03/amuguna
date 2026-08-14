@@ -1,8 +1,11 @@
 import {
   EMBEDDING_DIM,
   mockEmbed,
+  VOYAGE_MODEL,
   type EmbeddingProvider,
 } from "../src/lib/embedding";
+
+export const OPENAI_MODEL = "text-embedding-3-small";
 
 export const TARGET_CHUNK_CHARS = 500;
 export const MAX_CHUNK_CHARS = 900;
@@ -96,6 +99,12 @@ function settingsFromEnv(): {
 
 export class Embedder {
   readonly provider: EmbeddingProvider;
+  /**
+   * 저장·비교에 쓰는 벡터 공간 식별자. provider 만으로는 같은 provider 안에서의
+   * 모델 교체(voyage-3 → voyage-4-large)를 구분하지 못해, 옛 벡터가 새 질의 벡터와
+   * 비교되며 유사도가 조용히 망가진다. 모델명을 포함해 재색인이 트리거되게 한다.
+   */
+  readonly vectorSpace: string;
   readonly apiKey: string;
   apiCalls = 0;
 
@@ -111,6 +120,10 @@ export class Embedder {
       throw new Error(`unknown EMBEDDING_PROVIDER: ${requested}`);
     }
     this.provider = forceMock ? "mock" : (requested as EmbeddingProvider);
+    this.vectorSpace =
+      this.provider === "mock"
+        ? "mock"
+        : `${this.provider}:${this.provider === "voyage" ? VOYAGE_MODEL : OPENAI_MODEL}`;
     this.apiKey = settings.embeddingApiKey ?? settings.embedding_api_key ?? env.embeddingApiKey;
   }
 
@@ -129,9 +142,14 @@ export class Embedder {
         },
         body: JSON.stringify(
           this.provider === "voyage"
-            ? { model: "voyage-3", input: texts, input_type: "document" }
+            ? {
+                model: VOYAGE_MODEL,
+                input: texts,
+                input_type: "document",
+                output_dimension: EMBEDDING_DIM,
+              }
             : {
-                model: "text-embedding-3-small",
+                model: OPENAI_MODEL,
                 input: texts,
                 dimensions: EMBEDDING_DIM,
               },

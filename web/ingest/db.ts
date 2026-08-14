@@ -1,6 +1,8 @@
 import postgres from "postgres";
 
+import { sslOption } from "../src/lib/db";
 import { toPgVectorLiteral } from "../src/lib/embedding";
+import { PARSER_HASH_PREFIX } from "./models";
 
 export const PROGRAM_COLUMNS = [
   "external_id",
@@ -124,7 +126,22 @@ export interface Database {
   ): Promise<void>;
   deleteEmbeddings(programId: number): Promise<void>;
   deleteAllEmbeddings(): Promise<void>;
+  /**
+   * 재색인 대상. 수집기와 무관하게 DB 에 있는 공고를 다시 임베딩할 때 쓴다.
+   * `expired` 는 만료 시 임베딩을 지우므로 되살리지 않는다 — 되살리면 만료 공고가
+   * 벡터 top-k 자리를 잡아먹는다.
+   */
+  programIds(): Promise<number[]>;
+  /** 임베딩이 없는 공고. 중단된 재색인을 다음 회차가 이어받는 데 쓴다. */
+  programIdsWithoutEmbeddings(): Promise<number[]>;
   activeExternalIds(sourceKey: string): Promise<Set<string>>;
+  /**
+   * 이미 적재되어 다시 상세를 받을 필요가 없는 external_id.
+   * 현재 파서 버전으로 처리된 행만 포함해, 버전 변경 시 호출 한도 안에서 재수집한다.
+   * `expired` 는 제외한다 — 원본에 다시 올라오면 재조회해 되살려야 하기 때문이다.
+   * 만료 판정용 `activeExternalIds` 와 목적이 다르므로 분리해 둔다.
+   */
+  knownExternalIds(sourceKey: string): Promise<Set<string>>;
   expirePrograms(externalIds: Iterable<string>): Promise<number>;
   commit(): Promise<void>;
   close(): Promise<void>;
@@ -290,6 +307,36 @@ export class InMemoryDatabase implements Database {
     this.embeddings.clear();
   }
 
+  async programIds(): Promise<number[]> {
+    return [...this.programs.values()]
+      .filter((row) => row.status !== "expired")
+      .map((row) => row.id)
+      .sort((a, b) => a - b);
+  }
+
+  async programIdsWithoutEmbeddings(): Promise<number[]> {
+    return (await this.programIds()).filter((id) => !this.embeddings.get(id)?.length);
+  }
+
+  async knownExternalIds(sourceKey: string): Promise<Set<string>> {
+    const prefix = `${sourceKey}:`;
+    const currentRawIds = new Set(
+      this.rawDocuments
+        .filter(({ content_hash }) => content_hash.startsWith(PARSER_HASH_PREFIX))
+        .map(({ id }) => id),
+    );
+    return new Set(
+      [...this.programs.values()]
+        .filter(
+          (row) =>
+            row.status !== "expired" &&
+            row.external_id.startsWith(prefix) &&
+            currentRawIds.has(row.raw_document_id),
+        )
+        .map((row) => row.external_id),
+    );
+  }
+
   async activeExternalIds(sourceKey: string): Promise<Set<string>> {
     const prefix = `${sourceKey}:`;
     return new Set(
@@ -322,22 +369,39 @@ export class InMemoryDatabase implements Database {
 type RootSql = ReturnType<typeof postgres>;
 type QuerySql = RootSql | postgres.TransactionSql;
 
-function postgresOptions(dsn: string): postgres.Options<Record<string, never>> {
-  let local = false;
-  let hasSslMode = false;
+function dsnSslMode(dsn: string): string | null {
   try {
-    const url = new URL(dsn);
-    local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-    hasSslMode = url.searchParams.has("sslmode");
+    return new URL(dsn).searchParams.get("sslmode");
   } catch {
-    // postgres accepts keyword DSNs too; let the driver validate those.
+    // Do not try to fully parse libpq keyword DSNs here.  This is only enough
+    // to avoid overriding an explicit sslmode before the driver validates it.
+    const match = /(?:^|\s)sslmode\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
+    return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
   }
+}
+
+function isLocalDsn(dsn: string): boolean {
+  try {
+    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(dsn).hostname);
+  } catch {
+    const match = /(?:^|\s)host\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
+    const host = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+    return ["localhost", "127.0.0.1", "::1"].includes(host) || host.startsWith("/");
+  }
+}
+
+export function postgresOptions(dsn: string): postgres.Options<Record<string, never>> {
+  const sslMode = dsnSslMode(dsn);
   return {
     max: 1,
     connect_timeout: 10,
     idle_timeout: 20,
     prepare: false,
-    ...(!local && !hasSslMode ? { ssl: "verify-full" as const } : {}),
+    ...(sslMode === null && process.env.PGSSLROOTCERT
+      ? { ssl: sslOption() }
+      : sslMode === null && !isLocalDsn(dsn)
+        ? { ssl: "verify-full" as const }
+        : {}),
   };
 }
 
@@ -497,14 +561,17 @@ export class PostgresDatabase implements Database {
     vectors: readonly (readonly number[])[],
     provider: string,
   ): Promise<void> {
-    await this.deleteEmbeddings(programId);
-    for (let chunkIdx = 0; chunkIdx < vectors.length; chunkIdx++) {
-      const literal = toPgVectorLiteral([...vectors[chunkIdx]]);
-      await this.sql`
-        INSERT INTO program_embeddings (program_id, chunk_idx, embedding, provider, embedded_at)
-        VALUES (${programId}, ${chunkIdx}, ${literal}::vector, ${provider}, now())
-      `;
-    }
+    await this.transaction(async (db) => {
+      const sql = (db as PostgresDatabase).sql;
+      await sql`DELETE FROM program_embeddings WHERE program_id = ${programId}`;
+      for (let chunkIdx = 0; chunkIdx < vectors.length; chunkIdx++) {
+        const literal = toPgVectorLiteral([...vectors[chunkIdx]]);
+        await sql`
+          INSERT INTO program_embeddings (program_id, chunk_idx, embedding, provider, embedded_at)
+          VALUES (${programId}, ${chunkIdx}, ${literal}::vector, ${provider}, now())
+        `;
+      }
+    });
   }
 
   async embeddingProvider(programId: number): Promise<string | null> {
@@ -529,10 +596,41 @@ export class PostgresDatabase implements Database {
     await this.sql`DELETE FROM program_embeddings`;
   }
 
+  async programIds(): Promise<number[]> {
+    const rows = await this.sql<{ id: number }[]>`
+      SELECT id FROM programs WHERE status <> 'expired' ORDER BY id
+    `;
+    return rows.map((row) => row.id);
+  }
+
+  async programIdsWithoutEmbeddings(): Promise<number[]> {
+    const rows = await this.sql<{ id: number }[]>`
+      SELECT p.id FROM programs p
+      WHERE p.status <> 'expired'
+        AND NOT EXISTS (SELECT 1 FROM program_embeddings e WHERE e.program_id = p.id)
+      ORDER BY p.id
+    `;
+    return rows.map((row) => row.id);
+  }
+
+  // starts_with 를 쓴다. LIKE 는 `_` 를 와일드카드로 보므로 social_security /
+  // local_welfare 같은 키가 다른 소스와 겹칠 수 있고, InMemory 의 startsWith 와도 어긋난다.
+  async knownExternalIds(sourceKey: string): Promise<Set<string>> {
+    const rows = await this.sql<{ external_id: string }[]>`
+      SELECT p.external_id
+      FROM programs p
+      JOIN raw_documents d ON d.id = p.raw_document_id
+      WHERE p.status <> 'expired'
+        AND starts_with(p.external_id, ${`${sourceKey}:`})
+        AND starts_with(d.content_hash, ${PARSER_HASH_PREFIX})
+    `;
+    return new Set(rows.map((row) => row.external_id));
+  }
+
   async activeExternalIds(sourceKey: string): Promise<Set<string>> {
     const rows = await this.sql<{ external_id: string }[]>`
       SELECT external_id FROM programs
-      WHERE status = 'active' AND external_id LIKE ${`${sourceKey}:%`}
+      WHERE status = 'active' AND starts_with(external_id, ${`${sourceKey}:`})
     `;
     return new Set(rows.map((row) => row.external_id));
   }

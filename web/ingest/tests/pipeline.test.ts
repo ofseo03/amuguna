@@ -8,9 +8,9 @@ import { COLLECTORS } from "../collectors";
 import { Collector, CollectorError } from "../collectors/base";
 import { settingsFromEnv } from "../config";
 import { InMemoryDatabase } from "../db";
-import { Embedder } from "../embedder";
+import { Embedder, OPENAI_MODEL } from "../embedder";
 import { CollectedProgram } from "../models";
-import { Pipeline } from "../pipeline";
+import { Pipeline, reportToJson, SourceStats } from "../pipeline";
 
 const settings = settingsFromEnv({ NODE_ENV: "test" });
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -96,6 +96,43 @@ test("new, unchanged, update, and reconciliation preserve the state-machine cont
   assert.equal(db.embeddings.has(1), false);
 });
 
+test("a parser version bump reparses identical stored content once", async () => {
+  const db = new InMemoryDatabase();
+  const original = program();
+  await pipeline(db).runSource(new FakeCollector([original]));
+  const programId = await db.getProgramId(original.external_id);
+  assert.notEqual(programId, null);
+
+  // 배포 전 해시에는 parser-vN 접두사가 없다. 호출 제한 수집기도 이 ID를 다시
+  // 상세 조회할 수 있어야 하고, 동일 원문이어도 규칙을 새 파서로 교체해야 한다.
+  db.rawDocuments[0].content_hash = db.rawDocuments[0].content_hash.split(":").at(-1)!;
+  db.rules.get(programId!)!.age_min = 99;
+  assert.deepEqual(await db.knownExternalIds("fake"), new Set());
+
+  const ingest = pipeline(db);
+  await ingest.runSource(new FakeCollector([original]));
+  assert.equal(db.rawDocuments.length, 2);
+  assert.equal(db.rules.get(programId!)?.age_min, 19);
+  assert.deepEqual(
+    [ingest.report.totals.created, ingest.report.totals.updated, ingest.report.totals.unchanged],
+    [0, 1, 0],
+  );
+  assert.deepEqual(await db.knownExternalIds("fake"), new Set([original.external_id]));
+
+  await ingest.runSource(new FakeCollector([original]));
+  assert.equal(db.rawDocuments.length, 2);
+  assert.equal(ingest.report.totals.unchanged, 1);
+});
+
+test("JSON report records a source incremental strategy", () => {
+  const ingest = pipeline(new InMemoryDatabase());
+  const stats = new SourceStats("social_security");
+  stats.incrementalStrategy = "full_list_known_ids_detail_budget";
+  ingest.report.sources.set(stats.sourceKey, stats);
+  const sources = reportToJson(ingest.report).sources as Record<string, Record<string, unknown>>;
+  assert.equal(sources.social_security?.incremental_strategy, "full_list_known_ids_detail_budget");
+});
+
 test("source and real-embedding failures keep the previous snapshot or roll back the record", async () => {
   const db = new InMemoryDatabase();
   const ingest = pipeline(db);
@@ -141,7 +178,8 @@ test("changing embedding provider reindexes once and never mixes vector spaces",
     await reindex.run([collector], { reconcile: true });
     const stats = reindex.report.totals;
     assert.equal(stats.unchanged, 1);
-    assert.equal(await db.embeddingProvider(1), "openai");
+    // provider 가 아니라 provider:model 로 저장돼야 같은 provider 안의 모델 교체도 재색인된다.
+    assert.equal(await db.embeddingProvider(1), `openai:${OPENAI_MODEL}`);
     assert.equal(db.rawDocuments.length, 1);
 
     await reindex.runSource(collector);
@@ -150,6 +188,60 @@ test("changing embedding provider reindexes once and never mixes vector spaces",
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("a vector-space change reindexes every stored program, not just the collected ones", async () => {
+  const db = new InMemoryDatabase();
+  // 두 소스를 적재해 둔다.
+  await pipeline(db).runSource(new FakeCollector([program()]));
+  await pipeline(db).runSource(
+    new FakeCollector([program({ external_id: "other:001", source_key: "other" })]),
+  );
+  assert.equal((await db.programIds()).length, 2);
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response(JSON.stringify({ data: [{ embedding: [1, ...new Array(1023).fill(0)] }] }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  try {
+    const embedder = new Embedder({
+      embedding_provider: "openai",
+      embedding_api_key: "test",
+      mock_embeddings: false,
+    });
+    // 한 소스만 골라 돌려도(--source 상당) 나머지 소스가 임베딩 없이 남으면 안 된다.
+    await pipeline(db, embedder).run([new FakeCollector([program()])], { reconcile: true });
+    for (const programId of await db.programIds()) {
+      assert.equal(await db.embeddingProvider(programId), `openai:${OPENAI_MODEL}`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("an interrupted reindex is resumed on the next run", async () => {
+  const db = new InMemoryDatabase();
+  await pipeline(db).runSource(new FakeCollector([program()]));
+  await pipeline(db).runSource(
+    new FakeCollector([program({ external_id: "other:001", source_key: "other" })]),
+  );
+  // 재색인이 중간에 죽어 한 건만 벡터가 없는 상태를 만든다. 남은 행은 전부 현재
+  // 벡터 공간이라 provider 불일치로는 잡히지 않는다.
+  await db.deleteEmbeddings(2);
+  assert.deepEqual(await db.programIdsWithoutEmbeddings(), [2]);
+
+  await pipeline(db).run([new FakeCollector([program()])]);
+  assert.deepEqual(await db.programIdsWithoutEmbeddings(), []);
+});
+
+test("expired programs are not resurrected by a reindex", async () => {
+  const db = new InMemoryDatabase();
+  await pipeline(db).runSource(new FakeCollector([program()]));
+  await db.expirePrograms(["fake:001"]);
+  assert.deepEqual(await db.programIds(), []);
+  assert.deepEqual(await db.programIdsWithoutEmbeddings(), []);
 });
 
 test("CLI exits non-zero when every fetched record rolls back", () => {
@@ -163,7 +255,7 @@ test("CLI exits non-zero when every fetched record rolls back", () => {
         EMBEDDING_PROVIDER: "openai",
         EMBEDDING_API_KEY: "",
         MOCK_EMBEDDINGS: "",
-        ANTHROPIC_API_KEY: "",
+        OPENROUTER_API_KEY: "",
         DATABASE_URL: "",
       },
       encoding: "utf8",
@@ -172,7 +264,7 @@ test("CLI exits non-zero when every fetched record rolls back", () => {
   assert.equal(result.status, 1, result.stdout + result.stderr);
 });
 
-test("all 27 fixtures match the established coverage baseline and are idempotent", async () => {
+test("all 30 fixtures match the established coverage baseline and are idempotent", async () => {
   const db = new InMemoryDatabase();
   const ingest = pipeline(db);
   const collectors = Object.keys(COLLECTORS)
@@ -182,21 +274,21 @@ test("all 27 fixtures match the established coverage baseline and are idempotent
   await ingest.run(collectors);
   assert.deepEqual(
     Object.fromEntries([...ingest.report.sources].map(([key, value]) => [key, value.fetched])),
-    { bizinfo: 8, finlife: 7, social_security: 12 },
+    { bizinfo: 8, finlife: 7, gov24: 1, kstartup: 1, local_welfare: 1, social_security: 12 },
   );
-  assert.equal(ingest.report.totals.created, 27);
+  assert.equal(ingest.report.totals.created, 30);
   assert.deepEqual(ingest.report.parse.fieldHits, {
-    age_min: 9,
-    age_max: 7,
-    regions: 4,
+    age_min: 12,
+    age_max: 9,
+    regions: 5,
     occupations: 8,
-    income_decile_max: 10,
+    income_decile_max: 11,
   });
-  assert.equal(ingest.report.parse.withExtraConditions, 12);
-  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.704);
+  assert.equal(ingest.report.parse.withExtraConditions, 13);
+  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.707);
 
   await ingest.run(collectors);
   assert.equal(ingest.report.totals.updated, 0);
-  assert.equal(ingest.report.totals.unchanged, 27);
-  assert.equal(db.rawDocuments.length, 27);
+  assert.equal(ingest.report.totals.unchanged, 30);
+  assert.equal(db.rawDocuments.length, 30);
 });

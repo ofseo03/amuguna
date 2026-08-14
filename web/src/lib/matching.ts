@@ -86,7 +86,7 @@ function demoCandidates(
   const rows: Candidate[] = [];
 
   for (const program of demoPrograms()) {
-    if (!isOpen(program, now)) continue; // status='active' AND ends_at >= now()
+    if (!isOpen(program, now)) continue;
 
     // 프로그램 단위 최대 유사도 (§7.1 — 청크별 계산 후 MAX)
     let sim = 0;
@@ -418,7 +418,8 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
 export async function getProgram(id: number): Promise<Program | null> {
   if (!isDbConfigured()) {
     const { demoProgram } = await import("./demo-store");
-    return demoProgram(id);
+    const program = demoProgram(id);
+    return program && isOpen(program) ? program : null;
   }
   const sql = getSql();
   if (!sql) return null;
@@ -431,6 +432,7 @@ export async function getProgram(id: number): Promise<Program | null> {
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
     WHERE p.id = ${id}::bigint
       AND p.status = 'active'
+      AND (p.starts_at IS NULL OR p.starts_at <= (now() AT TIME ZONE 'Asia/Seoul')::date)
       AND (p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date)
     LIMIT 1`;
   if (rows.length === 0) return null;

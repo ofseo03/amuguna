@@ -1,8 +1,8 @@
 {
   "_note": "직업 대분류 12종 (SPEC §5 입력 필드 3). code는 DB·파서·화면 공통. synonyms는 파서 사전 룩업용 (§6.1).",
   "categories": [
-    { "code": "employee_office", "name": "사무직·전문직", "synonyms": ["사무직", "회사원", "직장인", "근로자", "전문직"] },
-    { "code": "employee_field", "name": "현장·생산·서비스직", "synonyms": ["생산직", "현장직", "서비스직", "기능공"] },
+    { "code": "employee_office", "name": "사무직·전문직", "synonyms": ["사무직", "회사원", "직장인", "근로자", "노동자", "전문직"] },
+    { "code": "employee_field", "name": "현장·생산·서비스직", "synonyms": ["생산직", "현장직", "서비스직", "기능공", "근로자", "노동자"] },
     { "code": "self_employed", "name": "자영업·소상공인", "synonyms": ["자영업자", "소상공인", "개인사업자", "사업자", "소기업"] },
     { "code": "farmer_fisher", "name": "농림어업인", "synonyms": ["농업인", "어업인", "임업인", "농어민", "농가"] },
     { "code": "freelancer", "name": "프리랜서·특수고용", "synonyms": ["프리랜서", "특수형태근로종사자", "특고", "플랫폼노동자"] },

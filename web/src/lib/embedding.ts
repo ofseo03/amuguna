@@ -10,6 +10,7 @@
  */
 
 export const EMBEDDING_DIM = 1024;
+export const VOYAGE_MODEL = "voyage-4-large";
 
 /**
  * 웹 질의와 TypeScript 수집 배치가 공유하는 mock 임베딩 알고리즘:
@@ -100,7 +101,12 @@ export async function embedQuery(
         },
         body: JSON.stringify(
           provider === "voyage"
-            ? { model: "voyage-3", input: [text], input_type: "query" }
+            ? {
+                model: VOYAGE_MODEL,
+                input: [text],
+                input_type: "query",
+                output_dimension: EMBEDDING_DIM,
+              }
             : {
                 model: "text-embedding-3-small",
                 input: [text],

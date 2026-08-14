@@ -22,7 +22,7 @@ on:
         default: incremental
         options: [incremental, reconcile, fixtures-dry-run]
       source:
-        description: "특정 소스만 (social_security | bizinfo | finlife). 비우면 전체"
+        description: "특정 소스명. 비우면 검증된 기본 3종만 실행"
         type: string
         default: ""
 
@@ -46,7 +46,9 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
+      FINLIFE_API_KEY: ${{ secrets.FINLIFE_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:
@@ -54,7 +56,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.9.0"
           cache: npm
           cache-dependency-path: web/package-lock.json
 
@@ -113,7 +115,9 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
+      FINLIFE_API_KEY: ${{ secrets.FINLIFE_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:
@@ -121,7 +125,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "22.9.0"
           cache: npm
           cache-dependency-path: web/package-lock.json
 

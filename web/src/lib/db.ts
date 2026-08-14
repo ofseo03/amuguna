@@ -20,7 +20,7 @@ export function isDbConfigured(): boolean {
  * `PGSSLROOTCERT` 에 CA 번들 경로를 주어 우회한다 — libpq 와 같은 변수명이라
  * TypeScript 배치(web/ingest/db.ts)와 한 값으로 맞출 수 있다. 없으면 시스템 CA 로 검증한다.
  */
-function sslOption() {
+export function sslOption() {
   const caPath = process.env.PGSSLROOTCERT;
   if (!caPath) return "verify-full" as const;
   return { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true };

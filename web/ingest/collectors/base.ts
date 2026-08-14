@@ -5,12 +5,19 @@ import { FIXTURES_DIR, settingsFromEnv, type Settings } from "../config";
 import type { CollectedProgram } from "../models";
 
 export const USER_AGENT =
-  "amuguna-ingest/0.1 (2026 금융 AI Challenge; contact: ofseo03@gmail.com)";
+  "amuguna-ingest/0.1 (contact: ofseo03@gmail.com)";
+
+type CollectorErrorOptions = ErrorOptions & { status?: number; code?: string };
 
 export class CollectorError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly status?: number;
+  readonly code?: string;
+
+  constructor(message: string, options?: CollectorErrorOptions) {
     super(message, options);
     this.name = "CollectorError";
+    this.status = options?.status;
+    this.code = options?.code;
   }
 }
 
@@ -23,11 +30,17 @@ export interface CollectorOptions {
   pageSize?: number;
   retries?: number;
   timeoutMs?: number;
+  maxDetailCalls?: number;
 }
 
 export interface FetchOptions {
   since?: string | null;
   maxPages?: number;
+  /**
+   * 이미 적재된 external_id. 건당 상세 조회가 필요한 소스만 참고해, 일일 호출
+   * 한도를 신규 건에 몰아준다. 상세 호출이 없는 소스는 그대로 무시한다.
+   */
+  knownIds?: ReadonlySet<string>;
 }
 
 export type CollectorConstructor = new (options?: CollectorOptions) => Collector;
@@ -37,6 +50,7 @@ export abstract class Collector {
   abstract readonly endpoint: string;
   abstract readonly idListEndpoint: string;
   readonly defaultForm: string = "subsidy";
+  readonly incrementalStrategy: string | null = null;
 
   readonly settings: Settings;
   readonly useFixtures: boolean;
@@ -77,12 +91,17 @@ export abstract class Collector {
     }
   }
 
-  private async get(params: Record<string, string | number>): Promise<unknown> {
-    if (!this.settings.data_go_kr_api_key) {
-      throw new CollectorError(`${this.sourceKey}: DATA_GO_KR_API_KEY 미설정`);
-    }
+  protected requireApiKey(name: string, value: string): string {
+    if (!value) throw new CollectorError(`${this.sourceKey}: ${name} 미설정`);
+    return value;
+  }
 
-    const url = new URL(this.endpoint);
+  protected async request<T>(
+    params: Record<string, string | number>,
+    parse: (response: Response) => Promise<T>,
+    endpoint = this.endpoint,
+  ): Promise<T> {
+    const url = new URL(endpoint);
     for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
 
     let lastError: unknown;
@@ -97,11 +116,13 @@ export abstract class Collector {
         if (!response.ok) {
           const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
           if (!retryable || attempt === this.retries) {
-            throw new CollectorError(`${this.sourceKey} 호출 실패: HTTP ${response.status}`);
+            throw new CollectorError(`${this.sourceKey} 호출 실패: HTTP ${response.status}`, {
+              status: response.status,
+            });
           }
           lastError = new Error(`HTTP ${response.status}`);
         } else {
-          return (await response.json()) as unknown;
+          return await parse(response);
         }
       } catch (error) {
         if (error instanceof CollectorError) throw error;
@@ -113,6 +134,10 @@ export abstract class Collector {
     }
 
     throw new CollectorError(`${this.sourceKey} 호출 실패`, { cause: lastError });
+  }
+
+  private async getJson(params: Record<string, string | number>): Promise<unknown> {
+    return this.request(params, async (response) => (await response.json()) as unknown);
   }
 
   externalId(nativeId: string): string {
@@ -151,6 +176,10 @@ export abstract class Collector {
       const result = recordOrUndefined(payload.result);
       valid = result !== undefined && String(result.err_cd) === "000" && Array.isArray(result.baseList);
       message = result ? String(result.err_msg || "") : "";
+    } else if (this.sourceKey === "gov24") {
+      valid = Array.isArray(payload.data);
+    } else if (this.sourceKey === "kstartup") {
+      valid = Array.isArray(payload.data);
     } else {
       return;
     }
@@ -168,7 +197,7 @@ export abstract class Collector {
       payloads.push(await this.loadJson(this.fixturePath));
     } else {
       for (let page = 1; page <= maxPages; page += 1) {
-        const payload = await this.get(this.queryParams({ since, page }));
+        const payload = await this.getJson(this.queryParams({ since, page }));
         const pageItems = this.items(payload);
         if (pageItems.length === 0) this.validateEmptyPage(payload);
         payloads.push(payload);

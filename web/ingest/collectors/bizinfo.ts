@@ -20,7 +20,7 @@ export class BizinfoCollector extends Collector {
 
   protected queryParams({ since, page }: { since: string | null; page: number }) {
     const params: Record<string, string | number> = {
-      crtfcKey: this.settings.data_go_kr_api_key,
+      crtfcKey: this.requireApiKey("BIZINFO_API_KEY", this.settings.bizinfo_api_key),
       dataType: "json",
       pageUnit: this.pageSize,
       pageIndex: page,

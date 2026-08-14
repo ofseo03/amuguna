@@ -2,6 +2,7 @@ import { CollectedProgram } from "../models";
 import { Collector, firstOf, isRecord, parseAmount, recordOrUndefined } from "./base";
 
 export const TOP_FIN_GRP_NO = "020000";
+const NO_ELIGIBILITY_INFO = "[자격요건 정보 없음]";
 
 function formatRate(value: unknown): string {
   return typeof value === "number" && Number.isInteger(value) ? value.toFixed(1) : String(value ?? "");
@@ -15,7 +16,7 @@ export class FinlifeCollector extends Collector {
 
   protected queryParams({ page }: { since: string | null; page: number }) {
     return {
-      auth: this.settings.data_go_kr_api_key,
+      auth: this.requireApiKey("FINLIFE_API_KEY", this.settings.finlife_api_key),
       topFinGrpNo: TOP_FIN_GRP_NO,
       pageNo: page,
     };
@@ -62,6 +63,7 @@ export class FinlifeCollector extends Collector {
       special && `[우대조건]\n${special}`,
       note && `[유의사항]\n${note}`,
       joinMember && `[가입대상]\n${joinMember}`,
+      deny && `[가입제한]\n${deny}`,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -78,7 +80,7 @@ export class FinlifeCollector extends Collector {
       source_url: "https://finlife.fss.or.kr/finlife/svings/fdrmDpst/list.do?menuId=2000100",
       title: `[${company}] ${productName}`,
       body_text: bodyText,
-      eligibility_text: joinMember || deny,
+      eligibility_text: joinMember || NO_ELIGIBILITY_INFO,
       form: this.defaultForm,
       issuer: company,
       issuer_level: "central",

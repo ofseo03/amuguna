@@ -92,9 +92,12 @@
 - **1일 1회, 심야 배치.** T1~T3 모두 동일. GitHub Actions cron
 - 사용자 요청은 **항상 DB만 조회**한다. 요청 시점의 외부 호출 없음 — 응답 속도와 외부 장애 격리를 동시에 얻는다
 - **증분 수집**: 소스가 수정일·등록일 파라미터를 지원하면 전일 이후 변경분만 조회한다. 지원하지 않는 소스는 `content_hash` 비교로 변경분만 재파싱·재임베딩한다 (LLM·임베딩 비용 절감)
-- **일일 호출 한도는 소스별로 100배 차이가 난다** (§3.3 표). 특히 **중앙부처복지서비스 개발계정은 100회/일**로, 상세조회를 건당 1회 쓰면 하루 100건이 상한이다 — 초기 전량 적재만 수십 일이 걸린다. 대응은 두 가지를 병행한다:
-  - **운영계정 신청을 W1 Day 1에 처리**한다 (심사에 수일 소요)
-  - 승인 전까지 초기 적재는 커버 영역이 겹치면서 한도가 100배 넉넉한 **행안부 보조금24(10,000회/일)** 쪽으로 돌린다
+- **일일 호출 한도는 소스별로 100배 차이가 난다** (§3.3 표). 특히 **중앙부처복지서비스 개발계정은 상세조회 100회/일**로, 건당 1회를 쓰면 하루 100건이 상한이다 — 실측 461건 기준 초기 전량 적재에 5~6일이 걸린다. **운영계정은 신청하지 않는다** (활용사례 등록과 심사가 선행되어 대회 일정에 맞지 않는다). 개발계정 한도 안에서 **회차를 나눠 누적**하는 것으로 대신하며, 수집기가 세 가지를 함께 지킨다:
+  - **이미 적재된 `external_id`는 상세를 건너뛴다.** 그 회차의 한도를 신규 건에 몰아준다
+  - **회차당 상세 호출을 `maxDetailCalls`(기본 90)에서 끊는다.** 목록 호출분과 재시도 여유를 남긴다
+  - **한도를 넘겨 429가 나면 예외를 던지지 않고 그때까지 모은 건을 반환한다.** 이것이 없으면 회차 전체가 롤백되어 매일 처음부터 다시 시작하고, 초기 적재가 영영 완료되지 않는다
+  - 대가: 적재된 건을 다시 조회하지 않으므로 **원본 수정(마감 연장·자격 완화)을 놓친다.** 한도가 풀리면 스킵을 제거해 `content_hash` 비교로 되돌린다
+  - 커버 영역이 겹치면서 한도가 100배 넉넉한 **행안부 보조금24(10,000회/일)**를 초기 적재의 주력으로 삼는다
 - 실패 시 직전 성공 스냅샷 유지 (빈 결과 노출 금지)
 - **주 1회 전량 대조 (일요일).** 증분 수집만으로는 원본에서 조용히 내려간 공고를 잡지 못한다. 마감일이 있으면 `ends_at`으로 자동 만료되지만, 상시 공고(`is_always_open`)가 원본에서 사라지면 DB에 영원히 남아 죽은 링크를 계속 추천하게 된다. 전량 목록을 받아 우리 DB에만 있는 건을 `expired` 처리한다. 이때는 **ID 목록만** 대조하므로 상세 조회 호출이 들지 않는다
 
@@ -110,7 +113,7 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 
 매 건마다 `external_id` 조회 후 `content_hash`를 비교해 분기한다.
 
-`content_hash`는 응답 원문 전체가 아니라 **정규화한 비교 대상 필드만**(제목·본문·기간·금액 등)으로 계산한다. API 응답에는 조회수·응답 생성 시각처럼 매 호출 바뀌는 필드가 섞여 있는 경우가 많은데, 이를 해시에 포함하면 전 건이 매일 "수정"으로 판정돼 재파싱·재임베딩이 전량 발생한다 — 증분 수집의 비용 이점이 통째로 사라지는 조용한 실패 모드다.
+`content_hash`는 파서 버전 접두사와 **정규화한 비교 대상 필드만**(제목·본문·기간·금액 등)으로 계산한다. API 응답에는 조회수·응답 생성 시각처럼 매 호출 바뀌는 필드가 섞여 있는 경우가 많은데, 이를 해시에 포함하면 전 건이 매일 "수정"으로 판정돼 재파싱·재임베딩이 전량 발생한다 — 증분 수집의 비용 이점이 통째로 사라지는 조용한 실패 모드다. 반대로 파서 의미가 바뀌면 접두사 버전을 올려 원문이 같은 기존 공고도 다음 수집에서 한 번 재파싱한다. 상세 호출 한도가 있는 소스의 `knownIds`는 현재 파서 버전으로 처리된 ID만 건너뛰므로, 재파싱도 호출 한도 안에서 여러 회차에 걸쳐 이어진다.
 
 | 상황 | 판정 | 처리 |
 |---|---|---|
@@ -125,7 +128,7 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 
 ### 3.3 소스 목록
 
-> **API 존재 여부·신청 창구·트래픽 한도는 2026-08-08 문서 조사로 확인했다.** 다만 **응답 필드 명세는 확인하지 못했다** — 복지 API 3종 모두 명세가 로그인 뒤 Swagger/활용가이드 PDF에만 있다. 엔드포인트 경로와 파라미터는 키 발급 후 실호출로 확정한다 (§12 W1).
+> **API 존재 여부·신청 창구·트래픽 한도와 공개 응답 명세는 2026-08-10 공식 문서로 재확인했다.** 보조금24·중앙부처복지·지자체복지·K-Startup은 공개 Swagger를 기준으로 전용 어댑터를 둔다. 명세만으로 확정할 수 없는 반복 노드 형태와 실제 값 표기는 키 발급 후 성공 응답 fixture로 검증한다 (§12 W1).
 
 | 티어 | 소스 | 신청 창구 | 개발계정 한도 | 커버 영역 |
 |---|---|---|---|---|
@@ -142,6 +145,21 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 | T2 | **서울 열린데이터광장** 등 광역 포털 | data.seoul.go.kr | 1,000/일 (1회 1,000건) | 지자체 자체 사업 |
 | **T3** | **주택도시기금** (디딤돌·버팀목 등) | — (API 없음) | — | P1 페르소나의 전세자금대출. T1/T2 누락분 |
 
+**공식 명세·예시 링크 (2026-08-10 확인):**
+
+- 보조금24: [data.go.kr `15113968`](https://www.data.go.kr/data/15113968/openapi.do) / [공개 Swagger JSON](https://infuser.odcloud.kr/api/stages/44436/api-docs)
+- 중앙부처복지: [data.go.kr `15090532`](https://www.data.go.kr/data/15090532/openapi.do)
+- 지자체복지: [data.go.kr `15108347`](https://www.data.go.kr/data/15108347/openapi.do) — 페이지 내 Swagger와 코드표 제공
+- K-Startup: [data.go.kr `15125364`](https://www.data.go.kr/data/15125364/openapi.do) — 페이지 내 Swagger와 공식 가이드 ZIP 제공
+- 온통청년: [data.go.kr `15143273`](https://www.data.go.kr/data/15143273/openapi.do) / [API 문서](https://www.youthcenter.go.kr/cmnFooter/openapiIntro/oaiDoc) / [이용방법](https://www.youthcenter.go.kr/cmnFooter/openapiIntro/oaiGuide)
+- 청약홈: [data.go.kr `15098547`](https://www.data.go.kr/data/15098547/openapi.do) / [한국부동산원 기술문서](https://www.reb.or.kr/reb/na/ntt/selectNttInfo.do?mi=10251&bbsId=1268&nttSn=79889)
+- 국가법령정보: [data.go.kr `15000115`](https://www.data.go.kr/data/15000115/openapi.do) / [법제처 OpenAPI 활용가이드](https://open.law.go.kr/LSO/openApi/guideList.do)
+- 서울 열린데이터광장: [OpenAPI 이용방법·샘플](https://data.seoul.go.kr/together/guide/useGuide.do) / [인증키 발급](https://data.seoul.go.kr/together/mypage/actKey.do)
+
+전용 어댑터는 API의 인증·페이지·응답 봉투·필드 매핑만 담당한다. 서술형 `지원대상`·`선정기준`은 공통 자격 파서로 넘기고, 구조화 조건을 별도 호출할 때는 어댑터에서 정규화해 우선 사용한다. 온통청년은 성공 응답 fixture 확보 뒤, 청약홈은 공고문 원문 확보 경로가 정해진 뒤 추가한다. 법제처는 지원사업 수집기가 아니라 근거 법령 보강용이며, 서울은 구체적인 정책 데이터셋을 먼저 선정해야 한다.
+
+현재 전용 어댑터는 `gov24`, `local_welfare`, `kstartup`까지 구현한다. 공식 명세를 재현한 오프라인 fixture는 기본 테스트에 포함하되, 데이터셋별 활용승인과 첫 성공 응답 대조 전에는 운영 스케줄 기본 소스에서 제외하고 `--source`로만 실행한다. 보조금24는 일괄 목록이 이미 지원대상·선정기준을 제공하므로 현재 배치는 페이지당 1회만 호출하며, 건별 `supportConditions` 조회는 호출량과 실효성을 표본 검증한 뒤 추가한다.
+
 **확정된 엔드포인트 (문서 공개분):**
 
 ```
@@ -150,9 +168,21 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
             → 공고명 / 공고URL / 공고ID / 소관기관명 / 사업개요 / 지원분야 / 등록일자 / 신청기간 / 지원대상
             ※ 공고ID가 있으므로 external_id를 sha1 대체 없이 그대로 쓴다 (§3.2)
 
-정부24      GET http://api.korea.go.kr/openapi/svc/list
-            serviceKey lrgAstCd mdmAstCd smallAstCd jrsdOrgCd srhQuery pageIndex pageSize format
-            ※ 분류·소관기관 필터가 있어 분할 수집에 쓸 수 있다
+보조금24    GET https://api.odcloud.kr/api/gov24/v3/serviceList
+                 https://api.odcloud.kr/api/gov24/v3/serviceDetail
+                 https://api.odcloud.kr/api/gov24/v3/supportConditions
+            serviceKey page perPage returnType cond[수정일시::GTE] cond[서비스ID::EQ]
+            → JSON { page, perPage, totalCount, currentCount, matchCount, data[] }
+            → supportConditions: 연령·중위소득·성별·가구·직업·장애 등 구조화 조건
+
+지자체복지  GET https://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfarelist
+                 https://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfaredetailed
+            serviceKey pageNo numOfRows / 상세 servId
+            → XML 목록 servList, 상세 sprtTrgtCn·slctCritCn·alwServCn·aplyMtdCn
+
+K-Startup   GET https://apis.data.go.kr/B552735/kisedKstartupService01/getAnnouncementInformation01
+            serviceKey page perPage returnType=json
+            → 공고ID·지원대상·제외대상·연령·창업기간·지역·우대사항·접수기간
 
 행정표준코드 GET http://apis.data.go.kr/1741000/StanReginCd/getStanReginCdList
 온통청년     GET https://www.youthcenter.go.kr/opi/youthPlcyList.do
@@ -177,7 +207,7 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 
 **라이선스:** data.go.kr 경유 소스는 "이용허락범위 제한 없음"이 명시돼 있다. **포털 밖에서 직접 신청하는 3종(기업마당·금감원·온통청년)은 각자 이용약관을 따르므로 키 발급 시 재배포·가공 조건을 확인**하고 그 결과를 부록 체크리스트의 외부 데이터 공개 항목에 반영한다.
 
-**신청 창구가 6곳으로 갈린다.** data.go.kr(자동승인, 계정 1개로 복지·법령·청약·K-Startup·행정표준코드 전부) / bizinfo / finlife / youthcenter(**담당자 심사 — 리드타임 최장**) / open.law.go.kr(OC 발급) / data.seoul.go.kr. 순차 진행하면 W1을 넘기므로 **Day 1에 전부 병렬 신청한다.**
+**신청 창구가 갈린다.** MVP는 data.go.kr / bizinfo / finlife를 사용한다. T2 확장 시 온통청년 자체 API와 서울 열린데이터광장을 별도 신청하고, 법제처 직접 API는 근거 법령 보강을 실제로 구현할 때만 신청한다. 순차 진행하면 W1을 넘기므로 필요한 창구는 **Day 1에 병렬 신청한다.**
 
 **W1에서 결정할 것 — 온통청년의 T1 승격 여부.** 대회 세부주제가 "청년층 자산 형성"(§0)이고, 청년정책은 등록 단계에서 연령·소득·취업상태를 코드로 받는 구조라 **자격요건이 정형 필드로 올 가능성이 가장 높은 소스**다. 실호출로 확인되면 §12-1 리스크의 헤지가 되므로 T1으로 올리고, 서술형이면 T2에 둔다.
 
@@ -193,28 +223,30 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 
 | # | 키 | 발급처 | 활용신청 대상 | 건수 |
 |---|---|---|---|---|
-| 1 | `DATA_GO_KR_KEY` | [data.go.kr](https://www.data.go.kr/) (자동승인) | 보조금24 [`15113968`](https://www.data.go.kr/data/15113968/openapi.do) / 중앙부처복지 [`15090532`](https://www.data.go.kr/data/15090532/openapi.do) / 지자체복지 [`15108347`](https://www.data.go.kr/data/15108347/openapi.do) / 온통청년 [`15143273`](https://www.data.go.kr/data/15143273/openapi.do) / K-Startup [`15125364`](https://www.data.go.kr/data/15125364/openapi.do) / 청약홈 [`15098547`](https://www.data.go.kr/data/15098547/openapi.do) / 법제처 [`15000115`](https://www.data.go.kr/data/15000115/openapi.do) | **7** |
-| 2 | `BIZINFO_KEY` | [bizinfo.go.kr](https://www.bizinfo.go.kr/apiDetail.do?id=bizinfoApi) (상세 페이지 하단 폼) | 지원사업정보 | 1 |
-| 3 | `FINLIFE_KEY` | [finlife.fss.or.kr](https://finlife.fss.or.kr/finlife/main/contents.do?menuNo=700029) | 금융상품 8종 — **1키로 8종 전부** | 1 |
-| 4 | `SEOUL_OPENAPI_KEY` | [data.seoul.go.kr](https://data.seoul.go.kr/together/mypage/actKey.do) (가입 즉시) | 서울 열린데이터광장 | 1 |
-| 5 | `EMBEDDING_API_KEY` | [Voyage](https://dashboard.voyageai.com/organization/api-keys) / [OpenAI](https://platform.openai.com/api-keys) (§4 W1 확정) | — | 1 |
-| 6 | `ANTHROPIC_API_KEY` | [Anthropic](https://platform.claude.com/settings/keys) | — | 1 |
-| | | | **합계** | **키 6 / 신청 12** |
+| 1 | `DATA_GO_KR_API_KEY` | [data.go.kr](https://www.data.go.kr/) (자동승인) | 보조금24 [`15113968`](https://www.data.go.kr/data/15113968/openapi.do) / 중앙부처복지 [`15090532`](https://www.data.go.kr/data/15090532/openapi.do) / 지자체복지 [`15108347`](https://www.data.go.kr/data/15108347/openapi.do) / K-Startup [`15125364`](https://www.data.go.kr/data/15125364/openapi.do) / 청약홈 [`15098547`](https://www.data.go.kr/data/15098547/openapi.do) | **5** |
+| 2 | `BIZINFO_API_KEY` | [bizinfo.go.kr](https://www.bizinfo.go.kr/apiDetail.do?id=bizinfoApi) (상세 페이지 하단 폼) | 지원사업정보 | 1 |
+| 3 | `FINLIFE_API_KEY` | [finlife.fss.or.kr](https://finlife.fss.or.kr/finlife/main/contents.do?menuNo=700029) | 금융상품 8종 — **1키로 8종 전부** | 1 |
+| 4 | `YOUTHCENTER_API_KEY` | [온통청년](https://www.youthcenter.go.kr/cmnFooter/openapiIntro/oaiGuide) (심사 승인) | 청년정책 | 1 |
+| 5 | `LAW_OPEN_API_OC` | [법제처](https://open.law.go.kr/LSO/openApi/guideList.do) | 국가법령정보 | 1 |
+| 6 | `SEOUL_OPENAPI_KEY` | [data.seoul.go.kr](https://data.seoul.go.kr/together/mypage/actKey.do) (가입 즉시) | 서울 열린데이터광장 | 1 |
+| 7 | `EMBEDDING_API_KEY` | [Voyage](https://dashboard.voyageai.com/organization/api-keys) / [OpenAI](https://platform.openai.com/api-keys) (§4 W1 확정) | — | 1 |
+| 8 | `OPENROUTER_API_KEY` | [OpenRouter](https://openrouter.ai/settings/keys) | — | 1 |
+| | | | **합계** | **키 8 / 신청 12** |
 
-**MVP(§11 범위)만이면 키 5 / 신청 7이다** — data.go.kr 3건(보조금24·중앙부처·지자체) + 기업마당 + 금감원 + 임베딩 + Anthropic. 나머지는 T2 확장분이다.
+**MVP(§11 범위)만이면 키 5 / 신청 7이다** — data.go.kr 3건(보조금24·중앙부처·지자체) + 기업마당 + 금감원 + 임베딩 + OpenRouter. 나머지는 T2 확장분이다.
 
-**링크 검증 상태 (2026-08-09 조회).** 실물 확인된 것은 중앙부처복지 `15090532`, 기업마당 상세 페이지, Anthropic·Voyage·OpenAI 키 페이지다. data.go.kr 나머지 6건은 `https://www.data.go.kr/data/{데이터셋ID}/openapi.do` 패턴으로 생성한 주소이며 **개별 확인 전이다.** finlife는 사이트 응답이 없어 진입 페이지만 적었고 **신청 폼 직접 URL은 미확인**, data.seoul.go.kr 인증키 페이지도 **미확인**이다.
+**링크 검증 상태 (2026-08-10 조회).** 위 data.go.kr 7개 데이터셋, 보조금24 공개 Swagger, 온통청년 문서, 청약홈 기술문서, 법제처 가이드, 서울 OpenAPI 가이드를 개별 확인했다. 공개 명세는 어댑터 구현 근거로 사용하되, 실제 성공 응답이 없는 소스는 키 발급 후 fixture를 확보하기 전까지 운영 검증 완료로 보지 않는다.
 
-**data.go.kr 서비스키는 Decoding / Encoding 두 형태로 발급된다.** 수집기는 httpx `params=`로 넘기므로 **Decoding 키**를 넣어 라이브러리가 한 번만 인코딩하게 한다. URL에 직접 문자열로 붙일 때만 Encoding 키다. 이중 인코딩(`%`→`%25`)과 디코딩 키의 `+`가 공백으로 바뀌는 것이 인증 실패의 대표 원인이다 ([게이트웨이 가이드](https://www.data.go.kr/images/biz/swagger-guide/gw/gateway_swagger_guide.pdf)).
+**data.go.kr 서비스키는 Decoding / Encoding 두 형태로 발급된다.** 수집기는 `URLSearchParams`로 넘기므로 **Decoding 키**를 넣어 한 번만 인코딩하게 한다. URL에 직접 문자열로 붙일 때만 Encoding 키다. 이중 인코딩(`%`→`%25`)과 디코딩 키의 `+`가 공백으로 바뀌는 것이 인증 실패의 대표 원인이다 ([게이트웨이 가이드](https://www.data.go.kr/images/biz/swagger-guide/gw/gateway_swagger_guide.pdf)).
 
-**별도 신청 없이 해결되는 것 (중복 신청 주의):**
+**중복 신청·추가 신청 주의:**
 
 - **행정표준코드 — 키 불필요.** code.go.kr 전체 다운로드로 CSV 1회 받아 정적 파일로 둔다. API로 붙일 이유가 없다 (연 단위로만 바뀐다)
-- **온통청년 — youthcenter.go.kr 회원가입·심사 불필요.** 자체 창구는 담당자 심사 승인제라 리드타임이 가장 길다. data.go.kr `15143273` 경유로 받으면 자동승인이다. **단 두 창구의 응답 필드가 동일한지 W1에 확인** — 다르면 자체 창구를 신청한다
-- **법제처 — OC 발급 불필요.** data.go.kr 경유로 통일해 키를 1개 줄인다
+- **온통청년 — 자체 키가 필요하다.** data.go.kr `15143273`은 LINK형 카탈로그이며, 성공 fixture는 youthcenter 로그인·API 신청·심사 승인 후 확보한다
+- **법제처 — 구현할 때 OC를 별도 발급한다.** data.go.kr `15000115`는 카탈로그 링크로만 사용하고, 실제 `lawService.do` 호출은 법제처 OC를 사용한다
 - **Supabase / Vercel** — 신청이 아니라 프로젝트 생성 시 자동 발급 (`SUPABASE_URL`, `SERVICE_ROLE_KEY` 등). 위 6종에 포함하지 않음
 
-**추가 신청 1건 (키 아님):** 중앙부처복지서비스 **운영계정 전환** — 개발계정 100/일로는 초기 적재가 불가능하다 (§3.2). 심사에 수일 걸리므로 W1 Day 1.
+**추가 신청은 없다.** 중앙부처복지서비스 운영계정 전환은 활용사례 등록과 심사가 선행되어 대회 일정에 맞지 않으므로 신청하지 않는다. 개발계정 100회/일 안에서 회차를 나눠 누적 적재한다 (§3.2).
 
 ---
 
@@ -261,8 +293,8 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 | 프론트+API | Next.js (App Router) + TypeScript / Vercel | 한 저장소, 배포 URL 즉시 확보 |
 | SQL DB + 벡터 DB | **Supabase Postgres + `pgvector`**, `postgres`(postgres.js) | 별도 벡터 DB 불필요. 교집합을 한 쿼리로 처리 |
 | 수집·파싱 | 독립 TypeScript Node 배치 (`web/ingest`) + native `fetch` | 웹과 언어·의존성을 공유하고 GitHub Actions cron 실행 |
-| 임베딩 | 다국어 임베딩 API (후보: Voyage / OpenAI) — **W1에 한국어 성능 실측 후 확정** | 한국어 공고문 도메인 특성상 사전 검증 필수 |
-| LLM | Claude (`claude-sonnet-5`) + 공식 Anthropic TypeScript SDK | 파싱 보완 + 요약·절차 생성 — **배치 전용, 요청 경로 미사용** (§7.5) |
+| 임베딩 | Voyage AI `voyage-4-large` (1024차원) | 문서 `document` / 질의 `query` 입력 타입 분리, W1 한국어 성능 실측 |
+| LLM | OpenRouter (`google/gemma-4-31b-it:free`) | 파싱 보완 + 요약·절차 생성 — **배치 전용, 요청 경로 미사용** (§7.5) |
 | 인증 | 없음 (익명 세션), 알림 시 이메일만 | 개인정보 최소화 (§8) |
 
 **벡터 DB를 따로 두지 않는 이유:** 교집합 연산이 이 설계의 핵심인데, DB가 둘로 나뉘면 A와 B를 애플리케이션 메모리로 끌어와 맞춰야 한다. pgvector면 한 쿼리로 끝난다. 데이터 규모(수천~수만 건)도 pgvector 범위 안이다.
@@ -320,7 +352,7 @@ program_embeddings (
   program_id,
   chunk_idx int,                   -- 짧은 문서는 0 하나
   embedding vector(1024),          -- 차원은 모델 확정 후
-  provider text,                   -- mock | voyage | openai. 변경 시 재색인
+  provider text,                   -- 벡터 공간: provider[:model] (voyage:voyage-4-large). 변경 시 재색인
   embedded_at,
   PRIMARY KEY (program_id, chunk_idx)
 )
@@ -543,7 +575,7 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 ### 보안
 
 - HTTPS 강제, CSP 헤더 설정
-- API 키는 서버 환경변수. 클라이언트 노출 금지. **키 6종 / 활용신청 12건** — 공공데이터포털 1키로 7개 API를 쓰므로 키 수와 신청 수가 다르다 (§3.5)
+- API 키(공공데이터포털, 임베딩, OpenRouter)는 서버 환경변수. 클라이언트 노출 금지. **키 6종 / 활용신청 12건** — 공공데이터포털 1키로 7개 API를 쓰므로 키 수와 신청 수가 다르다 (§3.5)
 - 입력값 서버 측 검증 (나이 0~120, 지역코드 화이트리스트, 분위 1~10, 자유입력 200자)
 - 크롤러 외부 요청 URL 화이트리스트 고정 (SSRF 방지)
 - **Rate limit**: 익명 세션 + IP 기준 검색 횟수 제한 (예: 10회/분). 검색 1회 = 임베딩 API 과금 1회이므로 abuse가 곧 비용이고, 인증이 없는 서비스라 이것이 유일한 방어선이다
@@ -649,7 +681,7 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 
 | 주차 | 기간 | 산출물 |
 |---|---|---|
-| W1 | 08-08 ~ 08-14 | **Day 1: 6개 창구 API 키 병렬 신청 + 중앙부처복지서비스 운영계정 신청** (§3.3 — 승인 리드타임이 임계 경로) → **소스 API 실물 검증 + 임베딩 모델 한국어 성능 실측** (여기서 스펙이 바뀔 수 있음), 스키마 확정, 저장소 셋업 |
+| W1 | 08-08 ~ 08-14 | **Day 1: 6개 창구 API 키 병렬 신청 + 데이터셋별 활용신청** (§3.3 — 승인 리드타임이 임계 경로) → **소스 API 실물 검증 + 임베딩 모델 한국어 성능 실측** (여기서 스펙이 바뀔 수 있음), 스키마 확정, 저장소 셋업 |
 | W2 | 08-15 ~ 08-21 | 수집기 + regex 파서 + LLM 보완, 첫 적재, 임베딩 색인, 파서 정확도 측정 |
 | W3 | 08-22 ~ 08-28 | 교차 검증 쿼리 + 스코어링 + 골든셋 검증, 온보딩·결과 화면 |
 | W4 | 08-29 ~ 09-04 | 상세 화면, 접근성, 개인정보처리방침, 배포 및 안정화 |
@@ -659,7 +691,7 @@ score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정�
 
 ### 최대 리스크 2개
 
-1. **자격요건이 정형이냐 서술형이냐 (W1).** 사회보장급여 API가 자격요건을 구조화 필드로 주면 정규식조차 거의 불필요하고, 서술형 텍스트 덩어리로 주면 §6이 프로젝트의 대부분이 된다. **문서 조사로는 판별되지 않았다** — 복지 API 3종 모두 응답 명세가 로그인 뒤 Swagger/PDF에만 있어, 키 발급 후 실호출 1회가 유일한 확인 수단이다. 그래서 키 신청이 W1의 임계 경로다. W1 종료 시 실제 응답을 보고 스코프를 재조정한다 (최악의 경우 소스를 T1 1종으로 줄이고 파싱 정확도에 집중). 헤지는 온통청년이다 — 정형 필드일 가능성이 가장 높은 소스이므로 서술형으로 판명되는 소스가 많으면 이쪽에 무게를 옮긴다 (§3.3).
+1. **구조화 조건과 서술형 조건의 혼합 (W1).** 보조금24는 `supportConditions`로 연령·소득·가구·직업 일부를 구조화해 주지만 상세 `지원대상`·`선정기준`도 함께 제공하고, 중앙·지자체복지는 상세 자격이 주로 서술형이다. 따라서 전용 어댑터가 구조화 조건과 원문을 보존하고 공통 파서가 남은 문장을 보완한다. 남은 위험은 명세 유무가 아니라 실제 값 표기·반복 노드·누락률이므로, 소스별 성공 응답 fixture와 표본 정확도로 스코프를 조정한다.
 
 2. **의도 문장 ↔ 공고문 임베딩 신호 강도 (W1).** 유사도가 무작위와 다를 바 없으면 교집합이 임의 절단이 된다. 대응은 단계적이다 — 먼저 top-k 확대와 청킹 전략 조정, 그래도 안 되면 벡터를 **필터가 아니라 정렬 가중치**로 강등한다(§7.3의 `JOIN` → `LEFT JOIN`, §7.4 가중치 조정). 이 경우 서비스는 "자격 통과분 전체를 의도 유사도로 정렬"이 되며, 이는 입력을 건너뛴 경로와 같은 동작이라 코드 경로가 이미 존재한다. 구조 변경 없이 흡수 가능하다.
 

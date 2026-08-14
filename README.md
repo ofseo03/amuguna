@@ -20,7 +20,7 @@
 | 디렉터리 | 내용 |
 |---|---|
 | `db/` | Postgres 마이그레이션 — 스키마(§5), `match_programs` 교차검증·근접탈락 RPC(§7.3/7.6), 프로필 90일 삭제(§8). [db/README.md](db/README.md) |
-| `ingest/` | T1 API 응답 봉투를 보존한 픽스처 JSON 3종 |
+| `ingest/` | API 응답 봉투·목록/상세 조인을 재현한 픽스처 JSON 6종 |
 | `web/` | Next.js + TypeScript 웹서비스와 독립 Node 배치(`web/ingest`) — 수집·파싱·임베딩·요약, 화면/API, 스코어링. [web/README.md](web/README.md) |
 | `shared/` | 공통 계약 데이터 — 지역코드, 직업분류(+파서 동의어), 소득분위 라벨, 중위소득% 환산표 |
 
@@ -32,18 +32,20 @@
 # 웹 — DB 없이 내장 데모 데이터로 전체 흐름 동작
 (cd web && npm install && npm run dev)
 
-# 테스트 + 수집 파이프라인 픽스처 27건 end-to-end
+# 테스트 + 수집 파이프라인 픽스처 30건 end-to-end
 (cd web && npm test)
 (cd web && npm run ingest -- --fixtures --dry-run)
 ```
 
 ## 실 연동 (키 준비 후)
 
-Next.js는 `web/.env.local`, 독립 배치는 실행 셸 환경변수, GitHub Actions는 Secrets에 값을 넣으면 실 API로 전환된다.
+Next.js와 독립 배치는 `web/.env.local`, GitHub Actions는 Secrets에 값을 넣으면 실 API로 전환된다.
 
 | 변수 | 용도 |
 |---|---|
 | `DATABASE_URL` | Supabase Postgres (`db/migrations/` 순서대로 적용) |
-| `DATA_GO_KR_API_KEY` | 공공데이터포털 (수집기 엔드포인트는 W1 실물 검증 필요) |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | voyage \| openai \| mock (차원 1024 고정) |
-| `ANTHROPIC_API_KEY` | 배치 전용 — 공식 Anthropic TypeScript SDK로 파싱 보완 + 요약 생성 (`claude-sonnet-5`) |
+| `DATA_GO_KR_API_KEY` | 공공데이터포털 — 중앙·지자체복지, 보조금24, K-Startup (각 데이터셋 활용신청 필요) |
+| `BIZINFO_API_KEY` | 기업마당 지원사업 API |
+| `FINLIFE_API_KEY` | 금융감독원 금융상품 한눈에 API |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | `voyage` \| `openai` \| `mock` (Voyage 모델: `voyage-4-large`, 차원 1024 고정) |
+| `OPENROUTER_API_KEY` | 배치 전용 — OpenRouter로 파싱 보완 + 요약 생성 (`google/gemma-4-31b-it:free`) |

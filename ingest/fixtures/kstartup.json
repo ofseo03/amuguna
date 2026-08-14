@@ -1,0 +1,29 @@
+{
+  "_fixture_note": "창업진흥원 K-Startup getAnnouncementInformation01 공개 Swagger 형식의 오프라인 픽스처.",
+  "currentCount": 1,
+  "data": [
+    {
+      "pbanc_sn": "KSTARTUP-DEMO-001",
+      "biz_pbanc_nm": "예비창업자 사업화 지원",
+      "pbanc_ctnt": "예비창업자의 사업화를 지원합니다.",
+      "aply_trgt_ctnt": "예비창업자",
+      "aply_excl_trgt_ctnt": "금융기관 채무불이행자는 제외합니다.",
+      "aply_trgt": "일반인",
+      "biz_enyy": "예비창업자",
+      "biz_trgt_age": "만 20세 이상 39세 이하",
+      "prfn_matr": "청년 우대",
+      "supt_biz_clsfc": "사업화",
+      "supt_regin": "전국",
+      "pbanc_rcpt_bgng_dt": "20260801",
+      "pbanc_rcpt_end_dt": "20260831",
+      "pbanc_ntrp_nm": "창업진흥원",
+      "detl_pg_url": "https://www.k-startup.go.kr/web/contents/bizPbanc-KSTARTUP-DEMO-001.do",
+      "biz_aply_url": "https://www.k-startup.go.kr/apply/KSTARTUP-DEMO-001",
+      "aply_mthd_onli_rcpt_istc": "K-Startup에서 온라인 신청"
+    }
+  ],
+  "matchCount": 1,
+  "page": 1,
+  "perPage": 100,
+  "totalCount": 1
+}

@@ -9,16 +9,18 @@ Postgres (Supabase) + `pgvector`. SPEC.md §5(데이터 모델) / §7.3(교차 �
 | `migrations/0003_privacy.sql` | `profiles` + `purge_stale_profiles()` (90일 정리) + 스케줄링 안내 |
 | `migrations/0004_embedding_provider.sql` | 벡터 공간 혼합을 막는 provider 식별자 |
 | `migrations/0005_revoke_api_function_access.sql` | Supabase의 `anon` / `authenticated` 함수 실행 권한 회수 |
+| `migrations/0007_embedding_vector_space.sql` | provider 식별자에 모델명 포함 — 같은 provider 안의 모델 교체도 재색인 |
+| `migrations/0008_application_window.sql` | 접수 시작 전 공고를 매칭·상세에서 제외하도록 RPC 갱신 |
 
 ---
 
 ## 1. 적용
 
-번호 순서대로 **한 번씩** 적용한다. 재실행을 가정한 멱등 스크립트가 아니다(`CREATE TABLE` 에 `IF NOT EXISTS` 를 두지 않았다 — 이미 만들어진 스키마를 조용히 건너뛰는 것보다 에러가 낫다). 스키마를 바꿔야 하면 `0006_*.sql` 을 새로 만든다.
+번호 순서대로 **한 번씩** 적용한다. 재실행을 가정한 멱등 스크립트가 아니다(`CREATE TABLE` 에 `IF NOT EXISTS` 를 두지 않았다 — 이미 만들어진 스키마를 조용히 건너뛰는 것보다 에러가 낫다). 스키마를 바꿔야 하면 다음 번호의 마이그레이션을 새로 만든다.
 
 ```bash
 # psql 직접 적용
-for f in db/migrations/0001_init.sql db/migrations/0002_match.sql db/migrations/0003_privacy.sql db/migrations/0004_embedding_provider.sql db/migrations/0005_revoke_api_function_access.sql; do
+for f in db/migrations/*.sql; do
   psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f"
 done
 
@@ -30,7 +32,9 @@ supabase db push
 
 `0001` / `0003` 의 마지막 `DO $$ ... $$` 블록은 `anon` / `authenticated` / `service_role` 롤이 **있을 때만** 권한을 조정한다. Supabase 가 아닌 순정 Postgres(로컬 검증용)에서도 그대로 돈다.
 
-`0004` 적용 직후와 `EMBEDDING_PROVIDER` 변경 시에는 `npm run ingest -- --weekly-reconcile`로 전량 재색인한다. 증분 실행은 기존 provider가 다르거나 unknown이면 실패해 서로 다른 벡터 공간이 섞이는 것을 막는다.
+`0004`/`0007` 적용 직후와 `EMBEDDING_PROVIDER` **또는 임베딩 모델** 변경 시에는 `npm run ingest -- --weekly-reconcile`로 전량 재색인한다. 증분 실행은 기존 값이 다르거나 unknown이면 실패해 서로 다른 벡터 공간이 섞이는 것을 막는다.
+
+`provider` 는 provider 단독이 아니라 `provider[:model]` 을 담는다 (`voyage:voyage-4-large`, mock 은 모델이 없어 `mock`). provider 만 저장하면 `voyage-3 → voyage-4-large` 같은 **같은 provider 안의 모델 교체를 감지하지 못해**, 옛 벡터 공간의 문서가 새 모델의 질의 벡터와 비교되며 유사도가 조용히 망가진다.
 
 ### 로컬 검증
 
@@ -38,7 +42,9 @@ supabase db push
 sudo apt-get install -y postgresql-16 postgresql-16-pgvector
 initdb -D /tmp/pg && pg_ctl -D /tmp/pg -o "-p 55432" start
 createdb -p 55432 amuguna
-psql -p 55432 -d amuguna -f db/migrations/0001_init.sql   # 0002~0004도 동일
+for f in db/migrations/*.sql; do
+  psql -v ON_ERROR_STOP=1 -p 55432 -d amuguna -f "$f"
+done
 ```
 
 ---
@@ -51,7 +57,7 @@ psql -p 55432 -d amuguna -f db/migrations/0001_init.sql   # 0002~0004도 동일
 
 - `DATABASE_URL`은 서버 전용이다. `NEXT_PUBLIC_` 접두사를 붙이지 말 것 — 붙는 순간 번들에 실려 나간다.
 - 커넥션 풀러(포트 `6543`, PgBouncer transaction mode)를 쓸 경우 `PREPARE` / 세션 GUC 가 요청 간에 유지되지 않는다. `match_programs()` 는 트랜잭션 로컬 설정만 쓰므로 영향이 없지만, 마이그레이션은 반드시 직결 포트 `5432` 로 적용한다.
-- SPEC §8: 수집 API 키·임베딩 키·Anthropic 키도 전부 서버 환경변수. 클라이언트 노출 금지.
+- SPEC §8: 수집 API 키·임베딩 키·OpenRouter 키도 전부 서버 환경변수. 클라이언트 노출 금지.
 
 ---
 
@@ -256,7 +262,7 @@ profiles  (독립. 프로그램과 조인하지 않는다)
 | `eligibility_rules (program_id)` PK | 1:1 조인 |
 | `program_embeddings (program_id, chunk_idx)` PK | 재임베딩 시 삭제·재삽입 |
 | `program_embeddings USING hnsw (embedding vector_cosine_ops)` | 코사인 top-k (SPEC §5) |
-| `program_embeddings.provider` | provider 전환 시 전 공고를 한 번 재색인해 벡터 공간 혼합 방지 |
+| `program_embeddings.provider` | provider·모델 전환 시 전 공고를 한 번 재색인해 벡터 공간 혼합 방지 |
 | `profiles (created_at) WHERE email IS NULL` | `purge_stale_profiles()` 조건절과 일치하는 부분 인덱스 |
 | `profiles (lower(email)) UNIQUE WHERE email IS NOT NULL` | 중복 구독·해지 조회 |
 | `profiles (unsubscribe_token) UNIQUE` | 1클릭 해지 조회, 세션 식별자와 토큰 분리 |
