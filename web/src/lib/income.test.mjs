@@ -35,6 +35,7 @@ test("2026 official median-income calculator covers fixed and 8+ households", ()
   assert.equal(medianIncomeAmount(8), 10_474_348);
   assert.equal(medianIncomeAmount(10), 12_392_744);
   assert.equal(medianIncomePercent(1, 2_564_238), 100);
+  assert.equal(medianIncomePercent(1, 256.4238 * 10_000), 100);
   assert.equal(medianIncomePercent(1, 2_564_239), 101);
 });
 
