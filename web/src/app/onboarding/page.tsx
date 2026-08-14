@@ -11,7 +11,16 @@
 import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { DECILES, OCCUPATIONS, SIDO, sigunguOf } from "@/lib/shared-data";
+import {
+  DECILES,
+  MEDIAN_INCOME_SOURCE_URL,
+  MEDIAN_INCOME_YEAR,
+  OCCUPATIONS,
+  SIDO,
+  medianIncomeAmount,
+  medianIncomePercent,
+  sigunguOf,
+} from "@/lib/shared-data";
 import { MAX_QUERY_LEN } from "@/lib/validation";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
 import Term from "@/components/Term";
@@ -48,6 +57,9 @@ export default function OnboardingPage() {
   const [sidoCode, setSidoCode] = useState("");
   const [sigunguCode, setSigunguCode] = useState("");
   const [incomeDecile, setIncomeDecile] = useState<number | null>(null);
+  const [incomeDecileChosen, setIncomeDecileChosen] = useState(false);
+  const [householdSize, setHouseholdSize] = useState("");
+  const [monthlyIncome, setMonthlyIncome] = useState("");
   const [query, setQuery] = useState("");
 
   const queryRef = useRef<HTMLTextAreaElement>(null);
@@ -56,13 +68,24 @@ export default function OnboardingPage() {
 
   const ageNum = Number(age);
   const ageValid = age !== "" && Number.isInteger(ageNum) && ageNum >= 0 && ageNum <= 120;
+  const householdNum = Number(householdSize);
+  const monthlyIncomeWon = Number(monthlyIncome) * 10_000;
+  const householdValid =
+    householdSize !== "" && Number.isInteger(householdNum) && householdNum >= 1 && householdNum <= 20;
+  const monthlyIncomeValid =
+    monthlyIncome !== "" && Number.isFinite(monthlyIncomeWon) && monthlyIncomeWon >= 0;
+  const calculatorEmpty = householdSize === "" && monthlyIncome === "";
+  const calculatorValid = calculatorEmpty || (householdValid && monthlyIncomeValid);
+  const calculatedMedianPercent = householdValid && monthlyIncomeValid
+    ? medianIncomePercent(householdNum, monthlyIncomeWon)
+    : null;
 
   const canAdvance =
     (step === 1 && ageValid) ||
     (step === 2 && gender !== "unset") ||
     (step === 3 && occupation !== "") ||
     (step === 4 && sidoCode !== "" && sigunguCode !== "") ||
-    (step === 5 && incomeDecile !== null) ||
+    (step === 5 && incomeDecileChosen && calculatorValid) ||
     step === 6;
 
   async function submit(withQuery: string) {
@@ -79,6 +102,7 @@ export default function OnboardingPage() {
           sidoCode,
           sigunguCode,
           incomeDecile,
+          medianIncomePercent: calculatedMedianPercent,
         }),
       });
       if (!res.ok) {
@@ -285,27 +309,93 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* ---------------- 5. 소득분위 ---------------- */}
+        {/* ---------------- 5. 소득 ---------------- */}
         {step === 5 && (
-          <fieldset>
-            <legend className="mb-3 text-ink-2">
-              월 소득 구간을 보고 가까운 <Term name="소득분위">소득분위</Term>를
-              골라주세요. 정확하지 않아도 됩니다.
-            </legend>
-            <div className="grid gap-2">
-              {DECILES.map((d) => (
+          <div className="space-y-8">
+            <fieldset>
+              <legend className="mb-3 text-ink-2">
+                알고 있는 <Term name="소득분위">소득분위</Term>를 골라주세요.
+              </legend>
+              <div className="grid gap-2">
+                {DECILES.map((d) => (
+                  <ChoiceButton
+                    key={d.decile}
+                    name="incomeDecile"
+                    checked={incomeDecileChosen && incomeDecile === d.decile}
+                    onSelect={() => {
+                      setIncomeDecile(d.decile);
+                      setIncomeDecileChosen(true);
+                    }}
+                    label={d.label}
+                    align="left"
+                  />
+                ))}
                 <ChoiceButton
-                  key={d.decile}
                   name="incomeDecile"
-                  checked={incomeDecile === d.decile}
-                  onSelect={() => setIncomeDecile(d.decile)}
-                  label={d.label}
-                  sub={d.monthly_income_hint}
+                  checked={incomeDecileChosen && incomeDecile === null}
+                  onSelect={() => {
+                    setIncomeDecile(null);
+                    setIncomeDecileChosen(true);
+                  }}
+                  label="소득분위를 모릅니다"
                   align="left"
                 />
-              ))}
-            </div>
-          </fieldset>
+              </div>
+            </fieldset>
+
+            <fieldset className="rounded-xl border border-line bg-bg-soft p-5">
+              <legend className="px-1 font-bold text-ink">
+                기준중위소득 계산 <span className="font-normal text-ink-3">(선택)</span>
+              </legend>
+              <p className="text-sm text-ink-2">
+                두 값을 모두 입력하면 {MEDIAN_INCOME_YEAR}년 공식 기준과 비교합니다.
+                실제 심사는 재산을 환산한 소득인정액 등을 사용할 수 있어 예상치입니다.
+              </p>
+              <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                <label className="font-semibold text-ink">
+                  가구원 수
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    max={20}
+                    value={householdSize}
+                    onChange={(e) => setHouseholdSize(e.target.value)}
+                    className="mt-2 w-full rounded-lg border-2 border-line bg-white px-4 py-3 text-ink focus:border-brand"
+                  />
+                </label>
+                <label className="font-semibold text-ink">
+                  월 가구소득 또는 소득인정액
+                  <span className="ml-1 font-normal text-ink-3">(만원)</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.1"
+                    value={monthlyIncome}
+                    onChange={(e) => setMonthlyIncome(e.target.value)}
+                    className="mt-2 w-full rounded-lg border-2 border-line bg-white px-4 py-3 text-ink focus:border-brand"
+                  />
+                </label>
+              </div>
+              {!calculatorEmpty && !calculatorValid && (
+                <p role="alert" className="mt-3 text-sm font-semibold text-danger">
+                  가구원 수와 월 소득을 모두 올바르게 입력해 주세요.
+                </p>
+              )}
+              {calculatedMedianPercent !== null && (
+                <p aria-live="polite" className="mt-4 rounded-lg bg-brand-soft px-4 py-3 font-semibold text-brand-dark">
+                  {householdNum}인 가구 기준액 {medianIncomeAmount(householdNum).toLocaleString("ko-KR")}원 대비 약 {calculatedMedianPercent}%입니다.
+                </p>
+              )}
+              <p className="mt-3 text-sm text-ink-3">
+                입력한 월 금액과 가구원 수는 서버로 보내거나 저장하지 않고, 계산된 비율만 저장합니다. {" "}
+                <a href={MEDIAN_INCOME_SOURCE_URL} target="_blank" rel="noreferrer" className="underline hover:text-brand">
+                  보건복지부 고시 확인
+                </a>
+              </p>
+            </fieldset>
+          </div>
         )}
 
         {/* ---------------- 6. 원하는 것 ---------------- */}

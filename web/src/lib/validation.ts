@@ -1,6 +1,6 @@
 /**
  * 서버 측 입력 검증 (SPEC §8 보안).
- * 나이 0~120 / 지역코드 화이트리스트 / 소득분위 1~10 / 자유입력 200자.
+ * 나이 0~120 / 지역코드 화이트리스트 / 소득분위 1~10 / 기준중위소득 비율 0~10000.
  * 클라이언트 검증은 UX 용일 뿐이고, 신뢰 경계는 여기다.
  */
 import { isValidOccupation, isValidSido, isValidSigungu } from "./shared-data";
@@ -51,15 +51,27 @@ export function validateProfile(input: any): Validated<Profile> {
     errors.push({ field: "sigunguCode", message: "시·군·구 코드가 올바르지 않습니다." });
   }
 
-  const incomeDecile = Number(input.incomeDecile);
-  if (!Number.isInteger(incomeDecile) || incomeDecile < 1 || incomeDecile > 10) {
+  const incomeDecile = input.incomeDecile == null ? null : Number(input.incomeDecile);
+  if (incomeDecile !== null && (!Number.isInteger(incomeDecile) || incomeDecile < 1 || incomeDecile > 10)) {
     errors.push({ field: "incomeDecile", message: "소득분위는 1에서 10 사이여야 합니다." });
+  }
+
+  const medianIncomePercent =
+    input.medianIncomePercent == null ? null : Number(input.medianIncomePercent);
+  if (
+    medianIncomePercent !== null &&
+    (!Number.isInteger(medianIncomePercent) || medianIncomePercent < 0 || medianIncomePercent > 10000)
+  ) {
+    errors.push({
+      field: "medianIncomePercent",
+      message: "기준중위소득 비율은 0에서 10000 사이여야 합니다.",
+    });
   }
 
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    value: { age, gender, occupation, sidoCode, sigunguCode, incomeDecile },
+    value: { age, gender, occupation, sidoCode, sigunguCode, incomeDecile, medianIncomePercent },
   };
 }
 

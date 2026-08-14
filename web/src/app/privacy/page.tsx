@@ -17,7 +17,7 @@ export default function PrivacyPage() {
         설계 원칙으로 삼습니다. 회원가입이 없고, 이름·연락처·주민등록번호를
         수집하지 않습니다.
       </p>
-      <p className="mt-2 text-sm text-ink-3">최종 개정일: 2026년 8월 8일</p>
+      <p className="mt-2 text-sm text-ink-3">최종 개정일: 2026년 8월 10일</p>
 
       <Section title="1. 수집하는 정보">
         <Table
@@ -25,7 +25,7 @@ export default function PrivacyPage() {
           rows={[
             [
               "인적사항 (익명)",
-              "나이(만), 성별, 직업 대분류, 거주 시·군·구, 소득분위",
+              "나이(만), 성별, 직업 대분류, 거주 시·군·구, 소득분위, 계산된 기준중위소득 비율",
               "온보딩 입력 시",
               "90일 후 자동 삭제",
             ],
@@ -50,7 +50,7 @@ export default function PrivacyPage() {
             "이름 · 생년월일 · 주민등록번호 · 외국인등록번호",
             "전화번호 · 상세 주소",
             "계좌번호 · 카드번호 등 금융거래정보",
-            "실제 소득 금액 (소득분위 구간만 자가 선택)",
+            "실제 월 소득 금액과 가구원 수 (브라우저에서 비율만 계산하고 전송·저장하지 않음)",
           ].map((t) => (
             <li key={t} className="rounded-lg border border-line bg-bg-soft px-4 py-2">
               ✕ {t}
@@ -119,7 +119,7 @@ export default function PrivacyPage() {
         <ul className="list-disc pl-6">
           <li>전 구간 HTTPS 통신 강제</li>
           <li>프로필 쿠키는 httpOnly + 서명 처리 — 스크립트가 읽거나 변조할 수 없습니다</li>
-          <li>모든 입력값 서버 측 재검증 (나이 0~120, 지역코드 화이트리스트, 소득분위 1~10, 자유입력 200자)</li>
+          <li>모든 전송값 서버 측 재검증 (나이 0~120, 지역코드 화이트리스트, 소득분위 1~10, 기준중위소득 비율, 자유입력 200자)</li>
           <li>Content-Security-Policy 등 보안 헤더 적용</li>
           <li>익명 세션 + IP 기준 검색 횟수 제한</li>
           <li>사용자 입력이 대규모 언어모델(LLM)에 전달되는 경로가 없습니다 — 요약·절차는 수집 배치에서 미리 생성한 값입니다</li>
