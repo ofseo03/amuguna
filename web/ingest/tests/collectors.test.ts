@@ -82,7 +82,7 @@ test("central welfare detail calls stay inside the daily quota and checkpoint on
     `<?xml version="1.0" encoding="UTF-8"?><wantedDtl><servId>${id}</servId><servNm>서비스 ${id}</servNm>` +
     `<tgtrDtlCn>만 19세 이상</tgtrDtlCn><resultCode>0</resultCode><resultMessage>SUCCESS</resultMessage></wantedDtl>`;
 
-  const build = (options: { failOn?: string; maxDetailCalls?: number }) => {
+  const build = (options: { failOn?: string; failStatus?: number; maxDetailCalls?: number }) => {
     const detailIds: string[] = [];
     const collector = new SocialSecurityCollector({
       settings: settingsFromEnv({ NODE_ENV: "test", DATA_GO_KR_API_KEY: "test-key" }),
@@ -97,7 +97,7 @@ test("central welfare detail calls stay inside the daily quota and checkpoint on
         const id = url.searchParams.get("servId")!;
         detailIds.push(id);
         // 한도 초과 시 포털이 실제로 돌려주는 응답.
-        if (id === options.failOn) return new Response("", { status: 429 });
+        if (id === options.failOn) return new Response("", { status: options.failStatus ?? 429 });
         return new Response(detailOf(id), { headers: { "Content-Type": "application/xml" } });
       },
     });
@@ -123,6 +123,16 @@ test("central welfare detail calls stay inside the daily quota and checkpoint on
   const partial = await failing.collector.fetch({ maxPages: 1 });
   assert.equal(partial.length, 1);
   assert.equal(partial[0].external_id, `social_security:${ids[0]}`);
+  assert.deepEqual(failing.detailIds, ids.slice(0, 2));
+
+  // 영구적으로 사라진 상세 한 건은 건너뛰고 뒤의 서비스를 계속 수집한다.
+  const missing = build({ failOn: ids[1], failStatus: 404 });
+  const afterMissing = await missing.collector.fetch({ maxPages: 1 });
+  assert.deepEqual(missing.detailIds, ids);
+  assert.deepEqual(
+    afterMissing.map(({ external_id }) => external_id),
+    [`social_security:${ids[0]}`, `social_security:${ids[2]}`],
+  );
 
   // 포털은 논리적 호출이 아니라 HTTP 요청 수로 한도를 센다. 각 건이 1회 재시도 후
   // 성공하면 건당 2요청이므로, 예산 3으로는 두 건이 아니라 한 건만 처리해야 한다.

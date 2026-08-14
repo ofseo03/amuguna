@@ -8,17 +8,18 @@ Postgres (Supabase) + `pgvector`. SPEC.md §5(데이터 모델) / §7.3(교차 �
 | `migrations/0002_match.sql` | `match_programs()` 교차 검증 RPC + `region_prefixes()` 헬퍼 |
 | `migrations/0003_privacy.sql` | `profiles` + `purge_stale_profiles()` (90일 정리) + 스케줄링 안내 |
 | `migrations/0004_embedding_provider.sql` | 벡터 공간 혼합을 막는 provider 식별자 |
+| `migrations/0005_revoke_api_function_access.sql` | Supabase의 `anon` / `authenticated` 함수 실행 권한 회수 |
 | `migrations/0007_embedding_vector_space.sql` | provider 식별자에 모델명 포함 — 같은 provider 안의 모델 교체도 재색인 |
 
 ---
 
 ## 1. 적용
 
-번호 순서대로 **한 번씩** 적용한다. 재실행을 가정한 멱등 스크립트가 아니다(`CREATE TABLE` 에 `IF NOT EXISTS` 를 두지 않았다 — 이미 만들어진 스키마를 조용히 건너뛰는 것보다 에러가 낫다). 스키마를 바꿔야 하면 `0005_*.sql` 을 새로 만든다.
+번호 순서대로 **한 번씩** 적용한다. 재실행을 가정한 멱등 스크립트가 아니다(`CREATE TABLE` 에 `IF NOT EXISTS` 를 두지 않았다 — 이미 만들어진 스키마를 조용히 건너뛰는 것보다 에러가 낫다). 스키마를 바꿔야 하면 다음 번호의 마이그레이션을 새로 만든다.
 
 ```bash
 # psql 직접 적용
-for f in db/migrations/0001_init.sql db/migrations/0002_match.sql db/migrations/0003_privacy.sql db/migrations/0004_embedding_provider.sql; do
+for f in db/migrations/*.sql; do
   psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f"
 done
 
@@ -40,7 +41,9 @@ supabase db push
 sudo apt-get install -y postgresql-16 postgresql-16-pgvector
 initdb -D /tmp/pg && pg_ctl -D /tmp/pg -o "-p 55432" start
 createdb -p 55432 amuguna
-psql -p 55432 -d amuguna -f db/migrations/0001_init.sql   # 0002~0004도 동일
+for f in db/migrations/*.sql; do
+  psql -v ON_ERROR_STOP=1 -p 55432 -d amuguna -f "$f"
+done
 ```
 
 ---

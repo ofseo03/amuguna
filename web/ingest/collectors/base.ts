@@ -7,10 +7,17 @@ import type { CollectedProgram } from "../models";
 export const USER_AGENT =
   "amuguna-ingest/0.1 (contact: ofseo03@gmail.com)";
 
+type CollectorErrorOptions = ErrorOptions & { status?: number; code?: string };
+
 export class CollectorError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
+  readonly status?: number;
+  readonly code?: string;
+
+  constructor(message: string, options?: CollectorErrorOptions) {
     super(message, options);
     this.name = "CollectorError";
+    this.status = options?.status;
+    this.code = options?.code;
   }
 }
 
@@ -109,7 +116,9 @@ export abstract class Collector {
         if (!response.ok) {
           const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
           if (!retryable || attempt === this.retries) {
-            throw new CollectorError(`${this.sourceKey} 호출 실패: HTTP ${response.status}`);
+            throw new CollectorError(`${this.sourceKey} 호출 실패: HTTP ${response.status}`, {
+              status: response.status,
+            });
           }
           lastError = new Error(`HTTP ${response.status}`);
         } else {

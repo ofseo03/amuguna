@@ -72,8 +72,11 @@ function xmlRecords(xml: string, tag: string, fields: readonly string[]): Record
 }
 
 function requireXmlSuccess(xml: string, sourceKey: string): void {
-  if (xmlText(xml, "resultCode") !== "0") {
-    throw new CollectorError(`${sourceKey}: ${xmlText(xml, "resultMessage") || "잘못된 XML 응답"}`);
+  const code = xmlText(xml, "resultCode");
+  if (code !== "0") {
+    throw new CollectorError(`${sourceKey}: ${xmlText(xml, "resultMessage") || "잘못된 XML 응답"}`, {
+      code,
+    });
   }
 }
 
@@ -275,7 +278,18 @@ export class SocialSecurityCollector extends Collector {
           detail = await this.detail(nativeId);
           budget -= this.httpCalls - httpBefore;
         } catch (error) {
+          budget -= this.httpCalls - httpBefore;
           const message = error instanceof Error ? error.message : String(error);
+          const missingDetail =
+            error instanceof CollectorError &&
+            (error.status === 404 ||
+              error.status === 410 ||
+              (error.code !== undefined && Number(error.code) === 3));
+          if (missingDetail) {
+            seen.add(nativeId);
+            console.warn(`${this.sourceKey}: 상세 조회 건너뜀 (${nativeId}: ${message})`);
+            continue;
+          }
           console.warn(
             `${this.sourceKey}: 상세 조회 중단 (${message}) — ${collected.length}건까지 저장하고 다음 회차에 이어받습니다`,
           );

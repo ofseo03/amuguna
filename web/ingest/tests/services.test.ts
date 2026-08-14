@@ -6,7 +6,13 @@ import test from "node:test";
 
 import postgres from "postgres";
 
-import { InMemoryDatabase, postgresOptions, type ProgramValues, type RuleValues } from "../db";
+import {
+  InMemoryDatabase,
+  PostgresDatabase,
+  postgresOptions,
+  type ProgramValues,
+  type RuleValues,
+} from "../db";
 import { chunkText, Embedder } from "../embedder";
 import { EMBEDDING_DIM, embedQuery, VOYAGE_MODEL } from "../../src/lib/embedding";
 import {
@@ -63,6 +69,38 @@ test("explicit sslmode in URL and keyword DSNs wins over PGSSLROOTCERT", async (
     else process.env.PGSSLROOTCERT = original;
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test("embedding replacement rolls back an incomplete chunk set", async () => {
+  let rows = ["old"];
+  let inserts = 0;
+  const transaction = (async (strings: TemplateStringsArray) => {
+    const query = strings.join(" ");
+    if (query.includes("DELETE FROM program_embeddings")) rows = [];
+    if (query.includes("INSERT INTO program_embeddings")) {
+      if (++inserts === 2) throw new Error("insert failed");
+      rows.push("new");
+    }
+    return [];
+  }) as unknown as postgres.TransactionSql;
+  const root = Object.assign(
+    () => Promise.resolve([]),
+    {
+      begin: async <T>(fn: (sql: postgres.TransactionSql) => Promise<T>): Promise<T> => {
+        const snapshot = [...rows];
+        try {
+          return await fn(transaction);
+        } catch (error) {
+          rows = snapshot;
+          throw error;
+        }
+      },
+    },
+  ) as unknown as ReturnType<typeof postgres>;
+  const db = new PostgresDatabase("", root);
+
+  await assert.rejects(db.replaceEmbeddings(1, [[1], [2]], "mock"), /insert failed/);
+  assert.deepEqual(rows, ["old"]);
 });
 
 function program(rawDocumentId: number, status: ProgramValues["status"] = "active"): ProgramValues {

@@ -82,7 +82,7 @@ for (const row of regions.sigungu) {
   const entry = { code: row.code, name: row.name, sido: row.sido };
   add(sigunguIndex, row.name, entry);
   const [head, tail] = row.name.split(" ", 2);
-  if (tail) add(sigunguIndex, head, { code: row.sido, name: head, sido: row.sido });
+  if (tail) add(sigunguIndex, head, entry);
 }
 
 function escapeRegex(text: string): string {
@@ -258,14 +258,22 @@ export function lookupRegions(text: string): [string[], string[], LookupMeta] {
       ? candidates.filter(({ sido }) => sido === nearest.sido)
       : candidates;
     const unique = [...new Map(matched.map((entry) => [entry.code, entry])).values()];
-    if (unique.length !== 1) continue;
-    const entry = unique[0];
-    if (!codes.includes(entry.code)) {
+    const splitCity =
+      unique.length > 1 &&
+      new Set(unique.map(({ sido }) => sido)).size === 1 &&
+      unique.every(({ name }) => name.startsWith(`${match.text} `));
+    if (unique.length === 0 || (unique.length > 1 && !splitCity)) continue;
+    let added = false;
+    for (const entry of unique) {
+      if (codes.includes(entry.code)) continue;
       codes.push(entry.code);
+      added = true;
+    }
+    if (added) {
       evidence.push(match.text);
     }
-    accepted.push({ ...match, codes: [entry.code] });
-    consumedSido.add(entry.sido);
+    accepted.push({ ...match, codes: unique.map(({ code }) => code) });
+    consumedSido.add(unique[0].sido);
   }
 
   for (const { match, entry } of sidoHits) {

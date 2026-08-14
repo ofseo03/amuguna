@@ -47,5 +47,5 @@ Next.js와 독립 배치는 `web/.env.local`, GitHub Actions는 Secrets에 값�
 | `DATA_GO_KR_API_KEY` | 공공데이터포털 — 중앙·지자체복지, 보조금24, K-Startup (각 데이터셋 활용신청 필요) |
 | `BIZINFO_API_KEY` | 기업마당 지원사업 API |
 | `FINLIFE_API_KEY` | 금융감독원 금융상품 한눈에 API |
-| `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | `voyage-4-large` \| openai \| mock (차원 1024 고정) |
+| `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | `voyage` \| `openai` \| `mock` (Voyage 모델: `voyage-4-large`, 차원 1024 고정) |
 | `OPENROUTER_API_KEY` | 배치 전용 — OpenRouter로 파싱 보완 + 요약 생성 (`google/gemma-4-31b-it:free`) |

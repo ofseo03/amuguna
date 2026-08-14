@@ -549,14 +549,17 @@ export class PostgresDatabase implements Database {
     vectors: readonly (readonly number[])[],
     provider: string,
   ): Promise<void> {
-    await this.deleteEmbeddings(programId);
-    for (let chunkIdx = 0; chunkIdx < vectors.length; chunkIdx++) {
-      const literal = toPgVectorLiteral([...vectors[chunkIdx]]);
-      await this.sql`
-        INSERT INTO program_embeddings (program_id, chunk_idx, embedding, provider, embedded_at)
-        VALUES (${programId}, ${chunkIdx}, ${literal}::vector, ${provider}, now())
-      `;
-    }
+    await this.transaction(async (db) => {
+      const sql = (db as PostgresDatabase).sql;
+      await sql`DELETE FROM program_embeddings WHERE program_id = ${programId}`;
+      for (let chunkIdx = 0; chunkIdx < vectors.length; chunkIdx++) {
+        const literal = toPgVectorLiteral([...vectors[chunkIdx]]);
+        await sql`
+          INSERT INTO program_embeddings (program_id, chunk_idx, embedding, provider, embedded_at)
+          VALUES (${programId}, ${chunkIdx}, ${literal}::vector, ${provider}, now())
+        `;
+      }
+    });
   }
 
   async embeddingProvider(programId: number): Promise<string | null> {

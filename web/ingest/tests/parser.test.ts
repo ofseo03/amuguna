@@ -201,7 +201,15 @@ test("shared dictionaries and Korean normalization keep the parser contract", ()
   assert.deepEqual(parseEligibility("강원특별자치도 횡성군 거주").regions, ["51730"]);
   assert.deepEqual(parseEligibility("충청남도 보령시 거주").regions, ["44180"]);
   assert.deepEqual(parseEligibility("경상남도 남해군 거주").regions, ["48840"]);
-  assert.deepEqual(parseEligibility("경기도 수원시 거주").regions, ["41"]);
+  assert.deepEqual(
+    parseEligibility("경기도 수원시 거주").regions,
+    ["41111", "41113", "41115", "41117"],
+  );
+  assert.deepEqual(
+    parseEligibility("경기도 화성시 거주").regions,
+    ["41591", "41593", "41595", "41597"],
+  );
+  assert.deepEqual(parseEligibility("경기도 화성시 동탄구 거주").regions, ["41597"]);
   assert.equal(normalizeText(" 가\u00a0  나\r\n\r\n\r\n다 "), "가 나\n\n다");
 });
 
