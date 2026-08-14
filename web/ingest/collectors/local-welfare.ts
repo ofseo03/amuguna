@@ -4,6 +4,7 @@ import {
   CollectorError,
   firstOf,
   isRecord,
+  PAGINATION_SAFETY_LIMIT,
   parseAmount,
   type CollectorOptions,
   type FetchOptions,
@@ -74,9 +75,12 @@ export class LocalWelfareCollector extends Collector {
     "https://apis.data.go.kr/B554287/LocalGovernmentWelfareInformations/LcgvWelfaredetailed";
   readonly idListEndpoint = this.endpoint;
   override readonly defaultForm = "subsidy";
+  override readonly incrementalStrategy = "full_list_known_ids_detail_budget";
+  readonly maxDetailCalls: number;
 
   constructor(options: CollectorOptions = {}) {
     super({ pageSize: 500, ...options });
+    this.maxDetailCalls = options.maxDetailCalls ?? 90;
   }
 
   protected queryParams({ page }: { since: string | null; page: number }) {
@@ -189,35 +193,70 @@ export class LocalWelfareCollector extends Collector {
     return item;
   }
 
-  override async fetch({ maxPages = 5 }: FetchOptions = {}): Promise<CollectedProgram[]> {
+  override async fetch(options: FetchOptions = {}): Promise<CollectedProgram[]> {
+    const { since, knownIds } = options;
+    const maxPages = options.maxPages ?? PAGINATION_SAFETY_LIMIT;
+    void since;
     if (this.useFixtures) return super.fetch({ maxPages });
+    this.observedCount = 0;
+    this.errors.length = 0;
     const collected: CollectedProgram[] = [];
     const seen = new Set<string>();
+    let budget = this.maxDetailCalls;
+    let skipped = 0;
+    let complete = false;
     for (let page = 1; page <= maxPages; page++) {
       const { items, total } = await this.listPage(page);
+      this.observedCount = total ?? (this.observedCount ?? 0) + items.length;
       for (const item of items) {
         const nativeId = firstOf(item, ["servId"]);
         if (!nativeId || seen.has(nativeId)) continue;
+        if (knownIds?.has(this.externalId(nativeId))) continue;
+        if (budget < this.retries + 1) {
+          skipped++;
+          continue;
+        }
+        const httpBefore = this.httpCalls;
         let detail: Record<string, unknown>;
         try {
           detail = await this.detail(nativeId);
         } catch (error) {
+          budget -= this.httpCalls - httpBefore;
           const missing =
             error instanceof CollectorError &&
             (error.status === 404 ||
               error.status === 410 ||
               (error.code !== undefined && Number(error.code) === 3));
-          if (!missing) throw error;
-          seen.add(nativeId);
-          console.warn(`${this.sourceKey}: 상세 조회 건너뜀 (${nativeId}: ${error.message})`);
-          continue;
+          if (missing) {
+            seen.add(nativeId);
+            console.warn(`${this.sourceKey}: 상세 조회 건너뜀 (${nativeId}: ${error.message})`);
+            continue;
+          }
+          const message = error instanceof Error ? error.message : String(error);
+          console.warn(
+            `${this.sourceKey}: 상세 조회 중단 (${message}) — ${collected.length}건까지 저장하고 다음 회차에 이어받습니다`,
+          );
+          this.errors.push(`상세 조회 중단: ${message}`);
+          return collected;
         }
+        budget -= this.httpCalls - httpBefore;
         const program = this.mapItem({ ...item, ...detail });
         if (!program) continue;
         seen.add(nativeId);
         collected.push(program);
       }
-      if (items.length < this.pageSize || (total !== null && page * this.pageSize >= total)) break;
+      if (items.length < this.pageSize || (total !== null && page * this.pageSize >= total)) {
+        complete = true;
+        break;
+      }
+    }
+    if (!complete && options.maxPages === undefined) {
+      throw new CollectorError(`${this.sourceKey}: 페이지 안전 한도에 도달해 전량 수집 여부를 확인할 수 없음`);
+    }
+    if (skipped) {
+      console.warn(
+        `${this.sourceKey}: 일일 상세 호출 한도(${this.maxDetailCalls})로 ${skipped}건을 다음 회차로 미룹니다`,
+      );
     }
     return collected;
   }
@@ -225,14 +264,19 @@ export class LocalWelfareCollector extends Collector {
   override async listExternalIds(): Promise<Set<string>> {
     if (this.useFixtures) return super.listExternalIds();
     const ids = new Set<string>();
-    for (let page = 1; page <= 50; page++) {
+    let complete = false;
+    for (let page = 1; page <= PAGINATION_SAFETY_LIMIT; page++) {
       const { items, total } = await this.listPage(page);
       for (const item of items) {
         const nativeId = firstOf(item, ["servId"]);
         if (nativeId) ids.add(this.externalId(nativeId));
       }
-      if (items.length < this.pageSize || (total !== null && page * this.pageSize >= total)) break;
+      if (items.length < this.pageSize || (total !== null && page * this.pageSize >= total)) {
+        complete = true;
+        break;
+      }
     }
+    if (!complete) throw new CollectorError(`${this.sourceKey}: ID 전량 대조 페이지 안전 한도 도달`);
     return ids;
   }
 }

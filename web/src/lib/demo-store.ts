@@ -11,8 +11,9 @@ import raw from "@/demo/programs.json";
 import { mockEmbed } from "./embedding";
 import type { EligibilityRules, Program, ProgramForm } from "./types";
 
-interface RawRules extends Omit<EligibilityRules, "parse_method"> {
+interface RawRules extends Omit<EligibilityRules, "parse_method" | "median_income_percent_max"> {
   parse_method: string;
+  median_income_percent_max?: number | null;
 }
 interface RawProgram {
   id: number;
@@ -74,6 +75,7 @@ function build(): { programs: Program[]; fetchedAt: string } {
       regions: p.rules.regions,
       occupations: p.rules.occupations,
       income_decile_max: p.rules.income_decile_max,
+      median_income_percent_max: p.rules.median_income_percent_max ?? null,
       extra_conditions: p.rules.extra_conditions ?? [],
       parse_method: p.rules.parse_method as EligibilityRules["parse_method"],
       confidence: p.rules.confidence,

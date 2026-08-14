@@ -5,7 +5,7 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "개인정보처리방침",
   description:
-    "아무거나는 이름·연락처·주민번호를 수집하지 않습니다. 수집 항목과 보유 기간, 자유입력 처리 방침을 안내합니다.",
+    "아무거나의 개인정보 수집 항목과 보유 기간, 자유입력 처리 방침을 안내합니다.",
 };
 
 export default function PrivacyPage() {
@@ -14,10 +14,11 @@ export default function PrivacyPage() {
       <h1 className="text-3xl font-bold text-ink">개인정보처리방침</h1>
       <p className="mt-3 text-ink-2">
         아무거나(이하 &ldquo;서비스&rdquo;)는 개인정보 수집을 최소화하는 것을
-        설계 원칙으로 삼습니다. 회원가입이 없고, 이름·연락처·주민등록번호를
-        수집하지 않습니다.
+        설계 원칙으로 삼습니다. 회원가입이 없고, 이름·전화번호·주민등록번호를
+        수집하지 않습니다. 이메일 주소는 알림을 별도로 신청할 때만 수집하며,
+        확인 전에는 발송하지 않고 7일 뒤 삭제합니다.
       </p>
-      <p className="mt-2 text-sm text-ink-3">최종 개정일: 2026년 8월 8일</p>
+      <p className="mt-2 text-sm text-ink-3">최종 개정일: 2026년 8월 13일</p>
 
       <Section title="1. 수집하는 정보">
         <Table
@@ -25,7 +26,7 @@ export default function PrivacyPage() {
           rows={[
             [
               "인적사항 (익명)",
-              "나이(만), 성별, 직업 대분류, 거주 시·군·구, 소득분위",
+              "나이(만), 성별, 직업 대분류, 거주 시·군·구, 소득분위, 계산된 기준중위소득 비율",
               "온보딩 입력 시",
               "90일 후 자동 삭제",
             ],
@@ -33,8 +34,8 @@ export default function PrivacyPage() {
             [
               "이메일",
               "이메일 주소",
-              "알림 신청 시 별도 동의 후",
-              "알림 해지 시까지",
+              "알림 신청 시 (확인 전에는 발송하지 않음)",
+              "알림 해지 시까지 (확인 전 7일)",
             ],
           ]}
         />
@@ -50,7 +51,7 @@ export default function PrivacyPage() {
             "이름 · 생년월일 · 주민등록번호 · 외국인등록번호",
             "전화번호 · 상세 주소",
             "계좌번호 · 카드번호 등 금융거래정보",
-            "실제 소득 금액 (소득분위 구간만 자가 선택)",
+            "실제 월 소득 금액과 가구원 수 (브라우저에서 비율만 계산하고 전송·저장하지 않음)",
           ].map((t) => (
             <li key={t} className="rounded-lg border border-line bg-bg-soft px-4 py-2">
               ✕ {t}
@@ -82,7 +83,7 @@ export default function PrivacyPage() {
         <ul className="list-disc pl-6">
           <li>입력하신 인적사항과 공고문 자격요건을 대조해 대상 여부를 판정</li>
           <li>결과 정렬(스코어링)과 근접탈락 안내 문구 생성</li>
-          <li>(동의 시) 신규 매칭·마감 임박 알림 이메일 발송</li>
+          <li>(동의·이메일 확인 시) 자격 조건에 맞는 신규 공고와 정확히 마감 7일 전 공고의 하루 한 번 이메일 발송</li>
         </ul>
         <p className="mt-3">
           수집한 정보를 광고·마케팅에 사용하지 않으며, 제3자에게 제공하거나
@@ -104,7 +105,15 @@ export default function PrivacyPage() {
         </ul>
       </Section>
 
-      <Section title="6. 이용자의 권리">
+      <Section title="6. 알림 매칭 기준">
+        <p>
+          알림은 저장된 인적사항과 공고 자격요건만 대조합니다. &ldquo;원하는 것&rdquo;
+          자유입력은 검색 처리 순간에만 쓰고 저장하지 않으므로 알림 매칭에는 사용하지
+          않습니다.
+        </p>
+      </Section>
+
+      <Section title="7. 이용자의 권리">
         <p>
           언제든지{" "}
           <Link href="/unsubscribe" className="underline hover:text-brand">
@@ -115,18 +124,18 @@ export default function PrivacyPage() {
         </p>
       </Section>
 
-      <Section title="7. 안전성 확보 조치">
+      <Section title="8. 안전성 확보 조치">
         <ul className="list-disc pl-6">
           <li>전 구간 HTTPS 통신 강제</li>
           <li>프로필 쿠키는 httpOnly + 서명 처리 — 스크립트가 읽거나 변조할 수 없습니다</li>
-          <li>모든 입력값 서버 측 재검증 (나이 0~120, 지역코드 화이트리스트, 소득분위 1~10, 자유입력 200자)</li>
+          <li>모든 전송값 서버 측 재검증 (나이 0~120, 지역코드 화이트리스트, 소득분위 1~10, 기준중위소득 비율, 자유입력 200자)</li>
           <li>Content-Security-Policy 등 보안 헤더 적용</li>
           <li>익명 세션 + IP 기준 검색 횟수 제한</li>
           <li>사용자 입력이 대규모 언어모델(LLM)에 전달되는 경로가 없습니다 — 요약·절차는 수집 배치에서 미리 생성한 값입니다</li>
         </ul>
       </Section>
 
-      <Section title="8. 정확성에 대한 고지">
+      <Section title="9. 정확성에 대한 고지">
         <p>
           제공되는 정보는 공공기관이 공개한 자료를 자동으로 수집·정리한
           것입니다. 원문 갱신 시점과 수집 시점의 차이, 자동 추출의 한계로 실제와
@@ -139,7 +148,7 @@ export default function PrivacyPage() {
         </p>
       </Section>
 
-      <Section title="9. 문의">
+      <Section title="10. 문의">
         <p>
           개인정보 처리에 관한 문의는 서비스 저장소의 이슈로 남겨주시기
           바랍니다. 본 서비스는 2026 금융 AI Challenge 출품을 위한 프로토타입으로

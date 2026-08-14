@@ -3,7 +3,7 @@
 > 개인 프로필 기반 공공 금융정보 매칭 서비스
 > 2026 금융 AI Challenge 출품작 · 상위 스펙은 [`../SPEC.md`](../SPEC.md)
 
-나이·성별·직업·지역·소득분위 5필드와 "원하는 것" 한 줄을 받아,
+나이·성별·직업·지역과 소득분위/기준중위소득 비율, "원하는 것" 한 줄을 받아,
 **자격(SQL 규칙 대조) ∩ 의도(벡터 유사도)** 의 교집합만 카드로 보여준다.
 
 ---
@@ -25,6 +25,7 @@ npm run lint         # ESLint
 npm run typecheck    # tsc --noEmit
 npm test             # 웹 회귀 테스트 + TypeScript 배치 테스트
 npm run ingest -- --fixtures --dry-run  # 루트 ingest/ 픽스처 30건 드라이런
+npm run notify       # 확인된 구독자 일일 이메일 알림
 npm run sync:shared  # ../shared/*.json → src/data/ 재복사
 ```
 
@@ -42,7 +43,7 @@ npm run sync:shared  # ../shared/*.json → src/data/ 재복사
 | 벡터 검색 | 인메모리 코사인 (`src/lib/demo-store.ts`) | pgvector HNSW |
 | 스코어링 | `src/lib/scoring.ts` (동일) | `src/lib/scoring.ts` (동일) |
 | 근접탈락·완화 | `src/lib/matching.ts` (동일) | `src/lib/matching.ts` (동일) |
-| 알림 신청 | 저장 없이 안내만 | `profiles` 테이블 |
+| 알림 신청 | 저장·발송 없음 | double opt-in + 일일 digest |
 
 스코어링·근거 문장·근접탈락·빈결과 완화는 **두 모드가 같은 코드를 탄다.**
 백엔드 차이는 "후보를 어디서 가져오는가" 하나뿐이다.
@@ -83,18 +84,19 @@ SPEC §5 의 예시 문구 4종으로 실측해 정한 값이다.
 | POST | `/api/match` | `src/app/api/match/route.ts` |
 | GET | `/api/programs/:id` | `src/app/api/programs/[id]/route.ts` |
 | POST | `/api/subscribe` | `src/app/api/subscribe/route.ts` |
-| GET | `/api/unsubscribe/:token` | `src/app/api/unsubscribe/[token]/route.ts` |
+| POST | `/api/confirm/:token` | `src/app/api/confirm/[token]/route.ts` |
+| POST | `/api/unsubscribe/:token` | `src/app/api/unsubscribe/[token]/route.ts` |
 
 ### 흐름 확인 (curl)
 
 ```bash
 # 1) 프로필 생성 — 세션 쿠키 발급
 curl -s -c jar -X POST localhost:3000/api/profile -H 'content-type: application/json' \
-  -d '{"age":28,"gender":"F","occupation":"employee_office","sidoCode":"11","sigunguCode":"11620","incomeDecile":3}'
+  -d '{"age":28,"gender":"F","occupation":"employee_office","sidoCode":"11","sigunguCode":"11620","incomeDecile":3,"medianIncomePercent":80}'
 
 # 2) 매칭 — 자유입력은 이 요청에만 쓰이고 저장되지 않는다
 curl -s -b jar -X POST localhost:3000/api/match -H 'content-type: application/json' \
-  -d '{"query":"보증금 올려달래서 대출 알아봐요","form":"all","page":1}'
+  -d '{"query":"보증금 올려달래서 대출 알아봐요","form":"all","cursor":null}'
 
 # 3) 상세 — 세션 프로필과 대조한 자격 체크리스트 포함
 curl -s -b jar localhost:3000/api/programs/1
@@ -126,8 +128,9 @@ curl -s -b jar localhost:3000/api/programs/1
 
 공공데이터포털 전용 어댑터는 `gov24`(보조금24 JSON), `local_welfare`(지자체복지 XML
 목록·상세), `kstartup`(K-Startup JSON)이다. 세 소스는 공식 명세 fixture와 테스트에는
-포함되지만, 실제 데이터셋 활용승인과 첫 성공 응답 대조 전에는 스케줄 기본값에 넣지 않는다.
-승인 후 `npm run ingest -- --source gov24`처럼 소스별로 검증한다.
+포함된다. T1인 `gov24`와 `local_welfare`는 기본 정기 배치 대상이며, 배포 전에 데이터셋별
+활용승인과 첫 성공 응답을 반드시 대조한다. T2인 `kstartup`은 승인 후
+`npm run ingest -- --source kstartup`처럼 소스별로 검증한다.
 
 ### mock 임베딩은 손대지 말 것
 
@@ -153,7 +156,7 @@ OpenRouter API를 호출하는 독립 Node 배치(`ingest/`)에서만 읽는다.
 
 ## 팀 공통 계약 데이터
 
-`../shared/*.json` (행정구역 코드 · 직업 대분류 12종 · 소득분위 라벨 · 중위소득 환산표)이
+`../shared/*.json` (행정구역 코드 · 직업 대분류 12종 · 소득분위 라벨 · 2026 기준중위소득표)이
 단일 출처다. **원본은 수정하지 않는다.**
 
 `scripts/copy-shared.mjs` 가 `predev` / `prebuild` 훅에서 `src/data/` 로 복사한다.
@@ -185,6 +188,9 @@ cp .env.example .env.local
 | `OPENROUTER_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |
 | `LLM_MODEL` | `google/gemma-4-31b-it:free` | OpenRouter 모델 ID |
 | `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 서명 키 |
+| `APP_BASE_URL` | (없음) | 확인·해지 링크의 HTTPS 서비스 기준 URL |
+| `RESEND_API_KEY` | (없음) | 확인 메일·일일 digest 발송용 서버 키 |
+| `EMAIL_FROM` | (없음) | Resend에서 검증한 발신 도메인의 이메일 주소 |
 
 ---
 
@@ -199,6 +205,8 @@ cp .env.example .env.local
    ```
 4. DB를 붙일 준비가 되면 `DATABASE_URL` 을 추가하고 재배포한다.
    변수가 없는 동안에는 데모 모드로 정상 서비스된다.
+5. 이메일 알림을 켤 때는 Resend에서 `EMAIL_FROM` 도메인을 인증하고,
+   `APP_BASE_URL`·`RESEND_API_KEY`·`EMAIL_FROM`을 Vercel과 GitHub Actions에 함께 설정한다.
 
 > `prebuild` 훅이 `../shared` 를 읽으므로 저장소 전체를 clone 하는 기본 설정이면 그대로 동작한다.
 > `web/` 만 배포하는 경우 `src/data/` 의 복사본이 사용된다.
@@ -211,10 +219,10 @@ cp .env.example .env.local
 
 구현은 끝났고 아래 외부 환경만 아직 실물 검증이 필요하다.
 
-1. T1 세 소스의 실제 응답으로 엔드포인트·파라미터·봉투 필드명을 확인한다.
+1. T1 소스의 실제 응답으로 엔드포인트·파라미터·봉투 필드명을 확인한다. 특히 Finlife의 상품×권역 조합은 공식 안내 페이지가 이 환경에서 열리지 않아 live key로 재검증해야 한다.
 2. Supabase에 마이그레이션을 적용한 뒤 `match_programs` RPC와 구독·해지를 왕복 검증한다.
 3. `voyage-4-large`의 한국어 검색 품질을 실측한다.
-4. Vercel 배포와 GitHub Actions 실 배치를 실행해 Secrets, 90일 삭제, 심사 구간 가용성을 확인한다.
+4. Vercel 배포와 GitHub Actions 실 배치를 실행해 Secrets, 90일 삭제, 확인 메일·일일 digest, 심사 구간 가용성을 확인한다.
 
 ---
 

@@ -1,7 +1,7 @@
 /** 데이터 출처 · 갱신 주기 (SPEC §9 화면 6, §3 데이터 소스). */
 import type { Metadata } from "next";
 import Link from "next/link";
-import { isDbConfigured } from "@/lib/db";
+import { getSql, isDbConfigured } from "@/lib/db";
 import { demoFetchedAt, demoPrograms } from "@/lib/demo-store";
 import { formatDateTime } from "@/lib/format";
 
@@ -13,54 +13,143 @@ export const metadata: Metadata = {
 
 export const dynamic = "force-dynamic";
 
-const SOURCES = [
+type SourceStatus = "scheduled" | "manual" | "planned";
+
+const SOURCES: {
+  key: string;
+  tier: string;
+  name: string;
+  method: string;
+  covers: string;
+  url: string;
+  status: SourceStatus;
+  permission: string;
+}[] = [
   {
+    key: "social_security",
     tier: "T1",
     name: "공공데이터포털 — 한국사회보장정보원 사회보장급여·공공서비스",
     method: "REST API",
-    covers: "보조금24 전체 복지·지원금 (전국 + 지자체)",
-    url: "https://www.data.go.kr/",
+    covers: "중앙부처 복지서비스 목록·상세",
+    url: "https://www.data.go.kr/data/15090532/openapi.do",
+    status: "scheduled",
+    permission: "코드상 정기 대상. 운영 키·데이터셋 활용승인·재이용 범위는 배포 전에 별도 확인 필요",
   },
   {
+    key: "bizinfo",
     tier: "T1",
     name: "기업마당 (bizinfo.go.kr) 지원사업 정보",
     method: "REST API",
     covers: "소상공인·창업·중소기업 정책자금",
     url: "https://www.bizinfo.go.kr/",
+    status: "scheduled",
+    permission: "코드상 정기 대상. 운영 API 키·약관·재이용 범위는 배포 전에 별도 확인 필요",
   },
   {
+    key: "finlife",
     tier: "T1",
     name: "금융감독원 금융상품통합비교공시",
     method: "REST API",
     covers: "예·적금, 대출, 연금 상품",
     url: "https://finlife.fss.or.kr/",
+    status: "scheduled",
+    permission: "코드상 정기 대상. 운영 발급 키의 상품·권역 범위와 이용조건은 배포 전에 실응답으로 확인 필요",
   },
   {
+    key: "gov24",
+    tier: "T1",
+    name: "공공데이터포털 — 보조금24",
+    method: "REST API",
+    covers: "정부·지자체 수혜서비스",
+    url: "https://www.data.go.kr/",
+    status: "scheduled",
+    permission: "코드상 정기 대상. 운영 키·데이터셋 활용승인·재이용 범위는 배포 전에 별도 확인 필요",
+  },
+  {
+    key: "local_welfare",
+    tier: "T1",
+    name: "공공데이터포털 — 지자체 복지서비스",
+    method: "REST API",
+    covers: "지방자치단체 자체 복지사업",
+    url: "https://www.data.go.kr/",
+    status: "scheduled",
+    permission: "코드상 정기 대상. 운영 키·데이터셋 활용승인·재이용 범위는 배포 전에 별도 확인 필요",
+  },
+  {
+    key: "kstartup",
+    tier: "T2",
+    name: "K-Startup 창업지원포털",
+    method: "REST API",
+    covers: "창업지원 공고",
+    url: "https://www.k-startup.go.kr/",
+    status: "manual",
+    permission: "수집기는 구현됨. 공식 API 이용승인과 실응답 대조 전에는 정기 배치 제외",
+  },
+  {
+    key: "regional_portals",
     tier: "T2",
     name: "서울 열린데이터광장 / 경기데이터드림 등 광역 포털",
-    method: "REST API",
+    method: "미연동",
     covers: "지방자치단체 자체 사업",
     url: "https://data.seoul.go.kr/",
+    status: "planned",
+    permission: "현재 수집하지 않음. 구현 전에 포털별 이용조건 확인 필요",
   },
   {
+    key: "law",
     tier: "T2",
     name: "국가법령정보센터 Open API",
-    method: "REST API",
+    method: "미연동",
     covers: "관련 법령·시행령 원문",
     url: "https://www.law.go.kr/",
+    status: "planned",
+    permission: "현재 수집하지 않음. Open API 이용승인·조건 확인 필요",
   },
   {
+    key: "html_sources",
     tier: "T3",
     name: "소상공인시장진흥공단 · 주택도시기금 · 청약홈 등",
-    method: "HTML 수집 (API 미제공 게시판)",
+    method: "미연동",
     covers: "T1·T2 누락분 보완",
     url: "https://www.semas.or.kr/",
+    status: "planned",
+    permission: "현재 수집하지 않음. 사이트별 robots.txt·약관·재이용 범위 확인 필요",
   },
 ];
 
-export default function SourcesPage() {
+const STATUS_LABEL: Record<SourceStatus, string> = {
+  scheduled: "정기 배치 대상",
+  manual: "승인 확인 후 수동 연동",
+  planned: "현재 미연동",
+};
+
+async function sourceStats(): Promise<Map<string, { count: number; fetchedAt: string | null }>> {
+  const sql = getSql();
+  if (!sql) return new Map();
+  try {
+    const rows = await sql<[{ source_key: string; count: string; fetched_at: string | null }]>`
+      SELECT split_part(external_id, ':', 1) AS source_key,
+             count(*) FILTER (WHERE status = 'active')::text AS count,
+             max(fetched_at)::text AS fetched_at
+        FROM programs
+       GROUP BY 1
+    `;
+    return new Map(
+      rows.map((row) => [
+        row.source_key,
+        { count: Number(row.count), fetchedAt: row.fetched_at },
+      ]),
+    );
+  } catch (error) {
+    console.error("[sources] 수집 상태 조회 실패", error);
+    return new Map();
+  }
+}
+
+export default async function SourcesPage() {
   const demo = !isDbConfigured();
   const programs = demo ? demoPrograms() : [];
+  const stats = await sourceStats();
 
   return (
     <div className="mx-auto max-w-3xl px-4 py-10">
@@ -104,9 +193,19 @@ export default function SourcesPage() {
                   {s.tier}
                 </span>
                 <span className="text-sm text-ink-3">{s.method}</span>
+                <span className="rounded bg-bg-sunken px-2 py-0.5 text-sm text-ink-2">
+                  {STATUS_LABEL[s.status]}
+                </span>
               </div>
               <h3 className="mt-2 font-bold text-ink">{s.name}</h3>
               <p className="mt-1 text-ink-2">{s.covers}</p>
+              {stats.has(s.key) && (
+                <p className="mt-2 text-sm font-semibold text-ok">
+                  DB 활성 {stats.get(s.key)?.count.toLocaleString("ko-KR")}건 · 최근 수집{" "}
+                  {formatDateTime(stats.get(s.key)?.fetchedAt ?? null)}
+                </p>
+              )}
+              <p className="mt-2 text-sm text-ink-3">이용 범위: {s.permission}</p>
               <a
                 href={s.url}
                 target="_blank"
@@ -149,10 +248,9 @@ export default function SourcesPage() {
       <section className="mt-10">
         <h2 className="text-xl font-bold text-ink">수집 정책</h2>
         <ul className="mt-3 list-disc pl-6 text-ink-2">
-          <li>robots.txt 를 준수하고 User-Agent 에 서비스명과 연락처를 명시합니다.</li>
-          <li>도메인당 초당 1회, 동시 1커넥션으로 제한합니다.</li>
-          <li>공개된 공고문만 수집하며 로그인이 필요한 페이지에 접근하지 않습니다.</li>
-          <li>수집 대상 URL 은 화이트리스트로 고정합니다.</li>
+          <li>현재 연동은 발급 키를 사용하는 공식 API 수집기입니다.</li>
+          <li>미연동 T3 HTML 수집을 추가할 때는 robots.txt·약관을 확인하고 공개 공고문만 대상으로 제한합니다.</li>
+          <li>외부 원문 링크는 http·https URL만 표시합니다.</li>
         </ul>
       </section>
 

@@ -75,7 +75,7 @@ test("local welfare XML joins detail, preserves region, and sends required param
   assert.match(requests[2].pathname, /LcgvWelfarelist$/);
 });
 
-test("local welfare skips missing details but aborts on transient failures", async () => {
+test("local welfare skips missing details and returns partial progress on transient failures", async () => {
   const ids = ["LOCAL-1", "LOCAL-2", "LOCAL-3"];
   const list = `<?xml version="1.0" encoding="UTF-8"?><wantedList>${ids
     .map((id) => `<servList><servId>${id}</servId><servNm>서비스 ${id}</servNm></servList>`)
@@ -128,6 +128,10 @@ test("local welfare skips missing details but aborts on transient failures", asy
   );
 
   const transient = build(503);
-  await assert.rejects(transient.collector.fetch({ maxPages: 1 }), /HTTP 503/);
+  assert.deepEqual(
+    (await transient.collector.fetch({ maxPages: 1 })).map(({ external_id }) => external_id),
+    ["local_welfare:LOCAL-1"],
+  );
   assert.deepEqual(transient.detailIds, ids.slice(0, 2));
+  assert.match(transient.collector.errors[0] ?? "", /HTTP 503/);
 });

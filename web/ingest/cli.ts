@@ -88,15 +88,15 @@ async function main(): Promise<number> {
     const previous = values["previous-counts"]
       ? (JSON.parse(values["previous-counts"]) as Record<string, number>)
       : null;
-    for (const warning of checkVolumeDrop(report, previous)) console.warn(`[WARN] ${warning}`);
+    const volumeDrops = checkVolumeDrop(report, previous);
+    for (const warning of volumeDrops) console.error(`[ERROR] ${warning}`);
 
     if (values["json-report"]) {
       await writeFile(values["json-report"], JSON.stringify(reportToJson(report), null, 2), "utf8");
       console.log(`\nJSON 리포트 저장: ${values["json-report"]}`);
     }
     const total = report.totals;
-    const handled = total.created + total.updated + total.unchanged;
-    return total.errors.length && handled === 0 ? 1 : 0;
+    return total.errors.length || volumeDrops.length ? 1 : 0;
   } finally {
     await db.close();
   }

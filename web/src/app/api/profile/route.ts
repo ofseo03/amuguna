@@ -40,17 +40,22 @@ export async function POST(req: Request) {
       if (sql) {
         // region_code 는 가장 구체적인 값(시군구 5자리)을 저장한다.
         await sql`
-          INSERT INTO profiles (id, age, gender, occupation, region_code, income_decile, created_at)
+          INSERT INTO profiles (
+            id, age, gender, occupation, region_code,
+            income_decile, median_income_percent, created_at
+          )
           VALUES (
             ${sessionId}::uuid, ${profile.age}, ${profile.gender},
-            ${profile.occupation}, ${profile.sigunguCode}, ${profile.incomeDecile}, now()
+            ${profile.occupation}, ${profile.sigunguCode},
+            ${profile.incomeDecile}, ${profile.medianIncomePercent}, now()
           )
           ON CONFLICT (id) DO UPDATE SET
             age = EXCLUDED.age,
             gender = EXCLUDED.gender,
             occupation = EXCLUDED.occupation,
             region_code = EXCLUDED.region_code,
-            income_decile = EXCLUDED.income_decile`;
+            income_decile = EXCLUDED.income_decile,
+            median_income_percent = EXCLUDED.median_income_percent`;
         persisted = true;
       }
     } catch (e) {
@@ -61,7 +66,6 @@ export async function POST(req: Request) {
 
   return NextResponse.json({
     ok: true,
-    sessionId,
     profile,
     persisted,
     demoMode: !isDbConfigured(),

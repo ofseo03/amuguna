@@ -11,6 +11,7 @@
 
 export const EMBEDDING_DIM = 1024;
 export const VOYAGE_MODEL = "voyage-4-large";
+export const OPENAI_MODEL = "text-embedding-3-small";
 
 /**
  * 웹 질의와 TypeScript 수집 배치가 공유하는 mock 임베딩 알고리즘:
@@ -76,6 +77,12 @@ export function resolveProvider(): EmbeddingProvider {
   return "mock";
 }
 
+export function vectorSpace(provider: EmbeddingProvider = resolveProvider()): string {
+  return provider === "mock"
+    ? "mock"
+    : `${provider}:${provider === "voyage" ? VOYAGE_MODEL : OPENAI_MODEL}`;
+}
+
 /**
  * 질의 벡터 생성.
  *
@@ -108,7 +115,7 @@ export async function embedQuery(
                 output_dimension: EMBEDDING_DIM,
               }
             : {
-                model: "text-embedding-3-small",
+                model: OPENAI_MODEL,
                 input: [text],
                 dimensions: EMBEDDING_DIM,
               },

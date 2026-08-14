@@ -4,7 +4,6 @@ import {
   hasDependentContext,
   lookupOccupations,
   lookupRegions,
-  midrateToDecile,
   nonRequirementReason,
   normalizeText,
   type LookupMatch,
@@ -23,6 +22,7 @@ type ParsedValues = {
   age_max?: number | null;
   gender?: "M" | "F" | null;
   income_decile_max?: number | null;
+  median_income_percent_max?: number | null;
 };
 type Pattern = {
   source: string;
@@ -42,6 +42,8 @@ const PREFIX_DEPENDENT_NOUNS = [
   "직계존속",
 ];
 const DASH = "[~∼〜～–—\\-]";
+const PUBLIC_ASSISTANCE_SOURCE =
+  "차상위\\s*계층|기초생활\\s*수급|생계급여|의료급여\\s*수급";
 
 const AGE: Pattern[] = [
   {
@@ -76,20 +78,28 @@ const AGE: Pattern[] = [
 
 const INCOME: Pattern[] = [
   {
-    source: "(?:기준\\s*)?중위소득\\s*(\\d{1,3})\\s*%\\s*(?:이하|까지)",
-    handle: (match) => ({ income_decile_max: midrateToDecile(Number(match[1])) }),
+    source: "(?:기준\\s*)?중위소득\\s*(\\d{1,3})\\s*%\\s*(?:이하|까지|이내)",
+    handle: (match) => ({ median_income_percent_max: Number(match[1]) }),
   },
   {
-    source: "소득\\s*(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*이하",
+    source: "(?:기준\\s*)?중위소득\\s*(\\d{1,3})\\s*%\\s*미만",
+    handle: (match) => ({ median_income_percent_max: Number(match[1]) - 1 }),
+  },
+  {
+    source: "소득\\s*(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*(?:이하|이내|까지)",
     handle: (match) => ({ income_decile_max: Number(match[1]) }),
   },
   {
-    source: "(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*이하",
+    source: "(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*(?:이하|이내|까지)",
     handle: (match) => ({ income_decile_max: Number(match[1]) }),
   },
   {
-    source: "차상위\\s*계층|기초생활\\s*수급|생계급여|의료급여\\s*수급",
-    handle: () => ({ income_decile_max: 2 }),
+    source: "소득\\s*(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*미만",
+    handle: (match) => ({ income_decile_max: Number(match[1]) - 1 }),
+  },
+  {
+    source: "(?<!\\d)(10|[1-9])(?!\\d)\\s*분위\\s*미만",
+    handle: (match) => ({ income_decile_max: Number(match[1]) - 1 }),
   },
 ];
 
@@ -127,6 +137,7 @@ const EXTRA_CONDITIONS: Array<[string, string]> = [
   ["insurance", "4대\\s*보험|고용보험\\s*가입|건강보험료\\s*본인부담"],
   ["assets", "재산\\s*과세표준|자산\\s*\\d+\\s*(?:만원|억)|총자산"],
   ["income_exception", "중위소득\\s*\\d{1,3}\\s*%\\s*(?:초과|이상)"],
+  ["public_assistance", PUBLIC_ASSISTANCE_SOURCE],
   ["household", "세대주|세대원\\s*전원|1인\\s*가구"],
   ["education", "재학\\s*중|졸업\\s*후\\s*\\d+\\s*년"],
   ["military", "병역\\s*(?:필|의무\\s*이행)|군\\s*복무"],
@@ -145,6 +156,7 @@ const EXTRA_CONDITION_LABELS: Record<string, string> = {
   insurance: "보험 가입 조건",
   assets: "재산 조건",
   income_exception: "소득 예외 조건",
+  public_assistance: "공적 급여 수급 조건",
   household: "세대 구성 조건",
   education: "학적 조건",
   military: "병역 조건",
@@ -208,6 +220,13 @@ function hasIndependentQualifier(branch: string): boolean {
   );
 }
 
+function householdIncomeScope(text: string, start: number): string | null {
+  return text
+    .slice(Math.max(0, start - 30), start)
+    .match(/(청년\s*본인\s*가구|신청자\s*가구|본인\s*가구|원가구|부모\s*가구)\s*$/u)?.[1]
+    ?.replace(/\s+/gu, " ") ?? null;
+}
+
 function sharedAlternativePrefix(
   span: Span,
   left: number,
@@ -221,7 +240,7 @@ function sharedAlternativePrefix(
   const between = clause.slice(candidate + (span.end - span.start), connector);
   const contradiction = field === "regions"
     ? /(?:전국|(?:지역|거주지?)\s*(?:무관|제한\s*없는|기준\s*없는))/u
-    : field === "income_decile_max"
+    : field === "income_decile_max" || field === "median_income_percent_max"
       ? /소득\s*(?:무관|제한\s*없는|기준\s*없는)/u
       : /(?:연령|나이)\s*(?:무관|제한\s*없는|기준\s*없는)/u;
   return (
@@ -344,7 +363,7 @@ function applyPatterns(
           continue;
         }
       }
-      const fresh = Object.entries(parsed).filter(([key]) => {
+      const fresh = Object.entries(parsed).filter(([key, value]) => {
         const field = key as keyof ParsedValues;
         const alternative = ambiguousScalarCandidate(text, span, patterns, field);
         if (!alternative) {
@@ -352,6 +371,27 @@ function applyPatterns(
             return false;
           }
           unsafeSpans.delete(field);
+          if (
+            field === "median_income_percent_max" &&
+            out[field] != null &&
+            out[field] !== value
+          ) {
+            const accepted = acceptedSpans[field];
+            const acceptedScope = accepted && householdIncomeScope(text, accepted.start);
+            const currentScope = householdIncomeScope(text, span.start);
+            if (accepted && acceptedScope && currentScope && acceptedScope !== currentScope) {
+              out[field] = null;
+              delete evidence[field];
+              protectField(protectedFields, field);
+              unsafeSpans.set(field, [accepted, span]);
+              addRejected(rejected, {
+                kind: "household_income_scopes",
+                text: clauseOf(text, accepted.start, span.end),
+                reason: "서로 다른 가구 범위의 소득 조건은 단일 신청자 기준으로 표현할 수 없음",
+              });
+              return false;
+            }
+          }
           return out[field] == null;
         }
         const accepted = acceptedSpans[field];
@@ -497,6 +537,7 @@ export function parseEligibility(rawText: string): EligibilityRules {
     ["age_min", 0, 120],
     ["age_max", 0, 120],
     ["income_decile_max", 1, 10],
+    ["median_income_percent_max", 0, 1000],
   ] as const) {
     const value = out[field];
     if (value != null && (value < low || value > high)) {
@@ -570,6 +611,10 @@ export function parseEligibility(rawText: string): EligibilityRules {
   }
   if (regionMeta.rejected && !regions.length) protectedFields.add("regions");
   if (occupationMeta.rejected && !occupations.length) protectedFields.add("occupations");
+  if (new RegExp(PUBLIC_ASSISTANCE_SOURCE, "u").test(text)) {
+    protectedFields.add("income_decile_max");
+    protectedFields.add("median_income_percent_max");
+  }
   if (regions.length) evidence.regions = { text: regionEvidence.join(", "), method: "regex" };
   if (occupations.length) {
     evidence.occupations = { text: occupationEvidence.join(", "), method: "regex" };
@@ -583,6 +628,7 @@ export function parseEligibility(rawText: string): EligibilityRules {
     regions: regions.length ? regions : null,
     occupations: occupations.length ? occupations : null,
     income_decile_max: out.income_decile_max,
+    median_income_percent_max: out.median_income_percent_max,
     extra_conditions: [...extractExtraConditions(text), ...rejected],
     parse_evidence: evidence,
     parse_method: resolveParseMethod(evidence),

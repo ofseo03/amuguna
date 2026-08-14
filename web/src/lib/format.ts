@@ -38,3 +38,14 @@ const LEVEL_LABEL: Record<string, string> = {
 export function issuerLevelLabel(level: string): string {
   return LEVEL_LABEL[level] ?? level;
 }
+
+/** 수집 원문에 포함된 링크를 렌더하기 전 http(s)만 허용한다. */
+export function externalHttpUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}

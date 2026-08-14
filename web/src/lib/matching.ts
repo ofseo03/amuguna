@@ -8,7 +8,7 @@
  *
  * 요청 경로에 LLM 은 없다 (§7.5). 요약·절차는 배치 사전 생성분, 근거 문장은 템플릿 조립.
  */
-import { cosine, embedQuery, toPgVectorLiteral } from "./embedding";
+import { cosine, embedQuery, toPgVectorLiteral, vectorSpace } from "./embedding";
 import {
   buildBadges,
   buildReason,
@@ -25,6 +25,7 @@ import { scoreProgram } from "./scoring";
 import { FORMS } from "./forms";
 import type {
   MatchCard,
+  MatchCursor,
   MatchResponse,
   NearMissCard,
   Profile,
@@ -59,7 +60,7 @@ export interface MatchInput {
   query: string | null;
   /** 결과를 본 뒤 좁히는 용도의 form 탭 (§5) */
   form: ProgramForm | "all";
-  page: number;
+  cursor: MatchCursor | null;
 }
 
 /** 백엔드가 돌려주는 원시 후보 (자격 판정 완료, 점수 미산출) */
@@ -69,6 +70,9 @@ interface Candidate {
   violations: number;
   violatedDimensions: RuleDimension[];
   matchedDimensions: RuleDimension[];
+  unknownDimensions: RuleDimension[];
+  /** DB keyset RPC가 정한 정렬 점수. 카드 표시는 같은 점수 계산을 유지한다. */
+  sortScore?: number;
 }
 
 /* ================================================================== */
@@ -104,6 +108,7 @@ function demoCandidates(
       violations: ev.violations,
       violatedDimensions: ev.violatedDimensions,
       matchedDimensions: ev.matchedDimensions,
+      unknownDimensions: ev.unknownDimensions,
     });
   }
 
@@ -161,6 +166,7 @@ function rowToProgram(r: any): Program {
       regions: r.regions ?? null,
       occupations: r.occupations ?? null,
       income_decile_max: r.income_decile_max ?? null,
+      median_income_percent_max: r.median_income_percent_max ?? null,
       extra_conditions: normalizeExtraConditions(r.extra_conditions),
       parse_method: (r.parse_method ?? "regex") as Program["rules"]["parse_method"],
       confidence: r.confidence === null || r.confidence === undefined ? 0 : Number(r.confidence),
@@ -183,59 +189,123 @@ function normalizeExtraConditions(v: any): Program["rules"]["extra_conditions"] 
   return [];
 }
 
-/** DB 계약: SELECT * FROM match_programs(age, gender, region_codes, occupation, decile, qvec, topk) */
-async function dbCandidates(
+interface DbCounts {
+  total: number;
+  byForm: Record<ProgramForm, number>;
+}
+
+interface DbPageRow {
+  program_id: number;
+  sim: number;
+  violations: number;
+  sort_score: number;
+}
+
+/** DB keyset RPC의 얇은 호출부. 카드 근거는 페이지의 프로그램만 다시 읽어 조립한다. */
+async function dbCounts(
   profile: Profile,
   qvec: Float64Array | null,
   topk: number,
   useIntent: boolean,
-): Promise<{ eligible: Candidate[]; nearMiss: Candidate[] }> {
+): Promise<DbCounts> {
   const sql = getSql();
   if (!sql) throw new Error("DATABASE_URL 미설정");
-
   const vecLiteral = useIntent && qvec ? toPgVectorLiteral(qvec) : null;
-
-  const matches = vecLiteral
+  const rows = vecLiteral
     ? await sql`
-        SELECT program_id, sim, violations, violated_field
-        FROM match_programs(
+        SELECT * FROM match_program_counts(
           ${profile.age}::int,
           ${profile.gender}::text,
           ${regionPrefixes(profile)}::text[],
           ${profile.occupation}::text,
           ${profile.incomeDecile}::int,
+          ${profile.medianIncomePercent}::int,
           ${vecLiteral}::vector,
           ${topk}::int
         )`
     : await sql`
-        SELECT program_id, sim, violations, violated_field
-        FROM match_programs(
+        SELECT * FROM match_program_counts(
           ${profile.age}::int,
           ${profile.gender}::text,
           ${regionPrefixes(profile)}::text[],
           ${profile.occupation}::text,
           ${profile.incomeDecile}::int,
+          ${profile.medianIncomePercent}::int,
           NULL::vector,
           ${topk}::int
         )`;
+  const row = rows[0] as any;
+  return {
+    total: Number(row?.total ?? 0),
+    byForm: {
+      subsidy: Number(row?.subsidy_count ?? 0),
+      loan: Number(row?.loan_count ?? 0),
+      tax: Number(row?.tax_count ?? 0),
+      product: Number(row?.product_count ?? 0),
+      law: Number(row?.law_count ?? 0),
+    },
+  };
+}
 
-  if (matches.length === 0) return { eligible: [], nearMiss: [] };
+async function dbPageRows(
+  profile: Profile,
+  qvec: Float64Array | null,
+  topk: number,
+  useIntent: boolean,
+  hasQuery: boolean,
+  form: ProgramForm | "all",
+  cursor: MatchCursor | null,
+  violations: 0 | 1,
+  limit: number,
+): Promise<DbPageRow[]> {
+  const sql = getSql();
+  if (!sql) throw new Error("DATABASE_URL 미설정");
+  const vecLiteral = useIntent && qvec ? toPgVectorLiteral(qvec) : null;
+  const dbForm = form === "all" ? null : form;
+  const rows = vecLiteral
+    ? await sql`
+        SELECT * FROM match_program_page(
+          ${profile.age}::int, ${profile.gender}::text, ${regionPrefixes(profile)}::text[],
+          ${profile.occupation}::text, ${profile.incomeDecile}::int,
+          ${profile.medianIncomePercent}::int, ${vecLiteral}::vector, ${topk}::int,
+          ${hasQuery}::boolean, ${dbForm}::text, ${cursor?.score ?? null}::double precision,
+          ${cursor?.id ?? null}::bigint, ${limit}::int, ${violations}::int
+        )`
+    : await sql`
+        SELECT * FROM match_program_page(
+          ${profile.age}::int, ${profile.gender}::text, ${regionPrefixes(profile)}::text[],
+          ${profile.occupation}::text, ${profile.incomeDecile}::int,
+          ${profile.medianIncomePercent}::int, NULL::vector, ${topk}::int,
+          ${hasQuery}::boolean, ${dbForm}::text, ${cursor?.score ?? null}::double precision,
+          ${cursor?.id ?? null}::bigint, ${limit}::int, ${violations}::int
+        )`;
+  return (rows as any[]).map((r) => ({
+    program_id: Number(r.program_id),
+    sim: r.sim === null || r.sim === undefined ? 0 : Number(r.sim),
+    violations: Number(r.violations),
+    sort_score: Number(r.sort_score),
+  }));
+}
 
-  const ids = matches.map((m: any) => Number(m.program_id));
-  const rows = await sql`
+async function dbCandidatesForRows(profile: Profile, pageRows: DbPageRow[]): Promise<Candidate[]> {
+  if (pageRows.length === 0) return [];
+  const sql = getSql();
+  if (!sql) throw new Error("DATABASE_URL 미설정");
+  const ids = pageRows.map((m) => m.program_id);
+  const programRows = await sql`
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
-           e.income_decile_max, e.extra_conditions, e.parse_method, e.confidence
+           e.income_decile_max, e.median_income_percent_max,
+           e.extra_conditions, e.parse_method, e.confidence
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
     WHERE p.id = ANY(${ids}::bigint[])`;
 
   const byId = new Map<number, Program>();
-  for (const r of rows) byId.set(Number(r.id), rowToProgram(r));
+  for (const r of programRows) byId.set(Number(r.id), rowToProgram(r));
 
-  const eligible: Candidate[] = [];
-  const nearMiss: Candidate[] = [];
-  for (const m of matches as any[]) {
+  const candidates: Candidate[] = [];
+  for (const m of pageRows) {
     const program = byId.get(Number(m.program_id));
     if (!program) continue;
     // violated_field 는 RPC 가 알려주지만, 매칭/위반 축 전체는 규칙으로 재평가한다.
@@ -247,11 +317,12 @@ async function dbCandidates(
       violations: Number(m.violations),
       violatedDimensions: ev.violatedDimensions,
       matchedDimensions: ev.matchedDimensions,
+      unknownDimensions: ev.unknownDimensions,
+      sortScore: m.sort_score,
     };
-    if (cand.violations === 0) eligible.push(cand);
-    else if (cand.violations === 1) nearMiss.push(cand);
+    candidates.push(cand);
   }
-  return { eligible, nearMiss };
+  return candidates;
 }
 
 /* ================================================================== */
@@ -274,11 +345,11 @@ function toCard(
   );
   return {
     program: c.program,
-    score: breakdown.total,
+    score: c.sortScore ?? breakdown.total,
     breakdown,
     sim: c.sim,
-    reason: buildReason(c.matchedDimensions, c.program.rules, profile),
-    badges: buildBadges(c.matchedDimensions, c.program.rules, profile),
+    reason: buildReason(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
+    badges: buildBadges(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
     dDay: dDay(c.program, now),
   };
 }
@@ -301,7 +372,7 @@ function toNearMiss(
   );
   return {
     program: c.program,
-    score: breakdown.total,
+    score: c.sortScore ?? breakdown.total,
     violatedDimension: d,
     message: nearMissMessage(d, c.program.rules, profile),
     dDay: dDay(c.program, now),
@@ -317,6 +388,27 @@ const RELAXATION_NOTICE: Record<RelaxationStage, string | null> = {
   near_miss_only:
     "지금 조건으로 바로 받을 수 있는 지원을 찾지 못했습니다. 조건이 하나만 어긋난 지원을 보여드립니다.",
 };
+
+function compareCards(a: { score: number; program: Program }, b: { score: number; program: Program }) {
+  return b.score - a.score || a.program.id - b.program.id;
+}
+
+export function encodeMatchCursor(cursor: MatchCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+function pageCards(cards: MatchCard[], cursor: MatchCursor | null) {
+  const after = cursor
+    ? cards.filter((card) => card.score < cursor.score || (card.score === cursor.score && card.program.id > cursor.id))
+    : cards;
+  const window = after.slice(0, PAGE_SIZE + 1);
+  const visible = window.slice(0, PAGE_SIZE);
+  const last = visible.at(-1);
+  return {
+    cards: visible,
+    nextCursor: window.length > PAGE_SIZE && last ? encodeMatchCursor({ score: last.score, id: last.program.id }) : null,
+  };
+}
 
 export async function runMatch(input: MatchInput): Promise<MatchResponse> {
   const started = Date.now();
@@ -340,74 +432,119 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
     }
   }
 
+  if (qvec && isDbConfigured()) {
+    try {
+      const sql = getSql();
+      const rows = sql
+        ? await sql`SELECT active_vector_space FROM ingest_embedding_state WHERE singleton`
+        : [];
+      if (rows[0]?.active_vector_space !== vectorSpace()) {
+        qvec = null;
+        degraded = true;
+      }
+    } catch (error) {
+      console.error("[matching] 활성 임베딩 공간 확인 실패", error);
+      qvec = null;
+      degraded = true;
+    }
+  }
+
   const demoMode = !isDbConfigured();
-  const fetchCandidates = async (topk: number, useIntent: boolean) =>
-    demoMode
-      ? demoCandidates(profile, qvec, topk, useIntent, now)
-      : dbCandidates(profile, qvec, topk, useIntent);
-
   const useIntentInitially = qvec !== null;
-
   // ---- §7.7 단계적 완화 ------------------------------------------------
   let stage: RelaxationStage = "none";
-  let result = await fetchCandidates(TOPK_BASE, useIntentInitially);
+  let topk = TOPK_BASE;
+  let useIntent = useIntentInitially;
 
-  if (result.eligible.length === 0 && useIntentInitially) {
-    stage = "topk_expanded"; // 1. 벡터 top-k 확대 (200 → 500)
-    result = await fetchCandidates(TOPK_EXPANDED, true);
-  }
-  if (result.eligible.length === 0 && useIntentInitially) {
-    stage = "intent_dropped"; // 2. 의도 필터 해제
-    result = await fetchCandidates(TOPK_EXPANDED, false);
-  }
-  if (result.eligible.length === 0) {
-    stage = "near_miss_only"; // 3. 근접 탈락만 노출
+  if (demoMode) {
+    let result = demoCandidates(profile, qvec, topk, useIntent, now);
+    if (result.eligible.length === 0 && useIntentInitially) {
+      stage = "topk_expanded";
+      topk = TOPK_EXPANDED;
+      result = demoCandidates(profile, qvec, topk, true, now);
+    }
+    if (result.eligible.length === 0 && useIntentInitially) {
+      stage = "intent_dropped";
+      useIntent = false;
+      result = demoCandidates(profile, qvec, topk, false, now);
+    }
+    if (result.eligible.length === 0) stage = "near_miss_only";
+
+    const hasQueryForScoring = hasQueryInput && stage !== "intent_dropped" && qvec !== null;
+    const allCards = result.eligible
+      .map((c) => toCard(c, profile, hasQueryForScoring, now))
+      .sort(compareCards);
+    const nearMisses = result.nearMiss
+      .map((c) => toNearMiss(c, profile, hasQueryForScoring, now))
+      .filter((x): x is NearMissCard => x !== null)
+      .sort(compareCards)
+      .slice(0, 5);
+    const byForm = FORMS.reduce(
+      (acc, f) => {
+        acc[f] = allCards.filter((c) => c.program.form === f).length;
+        return acc;
+      },
+      {} as Record<ProgramForm, number>,
+    );
+    const filtered = input.form === "all" ? allCards : allCards.filter((c) => c.program.form === input.form);
+    const paged = pageCards(filtered, input.cursor);
+    return {
+      summary: { profileLabel: profileLabel(profile), total: filtered.length, byForm },
+      cards: paged.cards,
+      nearMisses,
+      relaxation: stage,
+      relaxationNotice: RELAXATION_NOTICE[stage],
+      pageSize: PAGE_SIZE,
+      nextCursor: paged.nextCursor,
+      demoMode,
+      degraded,
+      tookMs: Date.now() - started,
+    };
   }
 
-  // 의도 필터가 해제된 단계에서는 유사도 가중치를 빼고 정렬한다
+  let counts = await dbCounts(profile, qvec, topk, useIntent);
+  if (counts.total === 0 && useIntentInitially) {
+    stage = "topk_expanded";
+    topk = TOPK_EXPANDED;
+    counts = await dbCounts(profile, qvec, topk, true);
+  }
+  if (counts.total === 0 && useIntentInitially) {
+    stage = "intent_dropped";
+    useIntent = false;
+    counts = await dbCounts(profile, qvec, topk, false);
+  }
+  if (counts.total === 0) stage = "near_miss_only";
+
   const hasQueryForScoring = hasQueryInput && stage !== "intent_dropped" && qvec !== null;
-
-  const allCards = result.eligible
-    .map((c) => toCard(c, profile, hasQueryForScoring, now))
-    .sort((a, b) => b.score - a.score || a.program.id - b.program.id);
-
-  const nearMisses = result.nearMiss
+  const rows = await dbPageRows(
+    profile, qvec, topk, useIntent, hasQueryForScoring, input.form, input.cursor, 0, PAGE_SIZE + 1,
+  );
+  const hasNext = rows.length > PAGE_SIZE;
+  const visibleRows = rows.slice(0, PAGE_SIZE);
+  const cards = (await dbCandidatesForRows(profile, visibleRows)).map((c) =>
+    toCard(c, profile, hasQueryForScoring, now),
+  );
+  const nearRows = await dbPageRows(
+    profile, qvec, topk, useIntent, hasQueryForScoring, "all", null, 1, 5,
+  );
+  const nearMisses = (await dbCandidatesForRows(profile, nearRows))
     .map((c) => toNearMiss(c, profile, hasQueryForScoring, now))
     .filter((x): x is NearMissCard => x !== null)
-    .sort((a, b) => b.score - a.score || a.program.id - b.program.id)
-    .slice(0, 5); // 최대 5건 (§7.6)
-
-  // form 탭 집계는 좁히기 전 전체 기준 (§5 — 검색 전 필터가 아니라 결과 후 좁히기)
-  const byForm = FORMS.reduce(
-    (acc, f) => {
-      acc[f] = allCards.filter((c) => c.program.form === f).length;
-      return acc;
-    },
-    {} as Record<ProgramForm, number>,
-  );
-
-  const filtered =
-    input.form === "all"
-      ? allCards
-      : allCards.filter((c) => c.program.form === input.form);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const page = Math.min(Math.max(1, input.page), totalPages);
-  const pageCards = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+    .slice(0, 5);
+  const last = cards.at(-1);
 
   return {
     summary: {
       profileLabel: profileLabel(profile),
-      total: filtered.length,
-      byForm,
+      total: input.form === "all" ? counts.total : counts.byForm[input.form],
+      byForm: counts.byForm,
     },
-    cards: pageCards,
+    cards,
     nearMisses,
     relaxation: stage,
     relaxationNotice: RELAXATION_NOTICE[stage],
-    page,
     pageSize: PAGE_SIZE,
-    totalPages,
+    nextCursor: hasNext && last ? encodeMatchCursor({ score: last.score, id: last.program.id }) : null,
     demoMode,
     degraded,
     tookMs: Date.now() - started,
@@ -427,7 +564,8 @@ export async function getProgram(id: number): Promise<Program | null> {
   const rows = await sql`
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
-           e.income_decile_max, e.extra_conditions, e.parse_method, e.confidence
+           e.income_decile_max, e.median_income_percent_max,
+           e.extra_conditions, e.parse_method, e.confidence
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
     WHERE p.id = ${id}::bigint

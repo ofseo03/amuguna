@@ -15,6 +15,8 @@ test("email conflict cannot update another profile", async () => {
 test("matching drops every degraded query vector", async () => {
   const matching = await readFile(new URL("./matching.ts", import.meta.url), "utf8");
   assert.match(matching, /qvec = r\.degraded \? null : r\.vector/);
+  assert.match(matching, /active_vector_space/);
+  assert.match(matching, /vectorSpace\(\)/);
 });
 
 test("application windows use the Korean calendar date in every matching path", async () => {
