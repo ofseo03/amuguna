@@ -14,7 +14,10 @@ import type { Profile } from "./types";
 export const PROFILE_COOKIE = "amuguna_profile";
 export const SESSION_COOKIE = "amuguna_sid";
 
-/** 프로필 보관 90일 후 자동 삭제 정책(§8)과 맞춘 쿠키 수명 */
+/**
+ * 쿠키 수명 90일 — 재방문 시 6단계를 다시 입력하지 않아도 되게 한다.
+ * 서버에 사본이 없으므로 이 값이 프로필의 유일한 보유기간이다. 개인정보처리방침에 같은 값을 고지한다(§8).
+ */
 const MAX_AGE_SEC = 60 * 60 * 24 * 90;
 
 let warned = false;
@@ -114,7 +117,7 @@ export async function clearProfile(): Promise<void> {
   jar.delete(PROFILE_COOKIE);
 }
 
-/** 익명 세션 id — rate limit 키와 (DB 연결 시) profiles 행 식별에 쓴다 */
+/** 익명 세션 id — 요청 빈도 제한 키로만 쓴다 */
 export async function readOrCreateSessionId(): Promise<string> {
   const jar = await cookies();
   const existing = deserializeSessionId(jar.get(SESSION_COOKIE)?.value);

@@ -121,7 +121,7 @@ external_id = source_key + ':' + 원본 공고 고유번호      -- UNIQUE
 | 있음 + hash 상이 | **수정** | `raw_documents` **insert**(덮어쓰지 않음 → 버전 이력) → 재파싱 → 재임베딩 → `programs` **UPDATE** |
 | 전량 대조에서 원본에 없음 | **삭제** | `status = 'expired'`. 행은 지우지 않는다. 단 `program_embeddings`의 해당 행은 삭제 — 만료 건이 벡터 top-k 슬롯을 차지하면 유효 결과가 밀려난다 (§7.3) |
 
-수정 시 `programs.id`를 **유지한다.** 새로 만들면 상세 페이지 URL이 깨지고, 알림 기능이 "이미 알려준 건"을 판별하지 못해 같은 공고를 반복 발송하게 된다.
+수정 시 `programs.id`를 **유지한다.** 새로 만들면 이미 공유된 상세 페이지 URL이 깨진다.
 
 원문 이력이 `raw_documents`에 누적되므로 별도 버전 테이블이 필요 없다. "언제 무엇이 바뀌었나"는 같은 `external_id`의 행을 `fetched_at` 순으로 보면 된다.
 

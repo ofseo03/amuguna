@@ -1,8 +1,8 @@
-# amuguna 웹 검증 (SPEC §10)
+# amuguna 웹·스키마 검증 (SPEC §10)
 #
-# * PR과 main push 에서 타입 검사·린트·테스트를 돌린다. 배치 워크플로(ingest.yml)와 역할이 다르다 —
-#   저쪽은 적재 전 파서 회귀만 보고, 이쪽은 웹까지 포함한 전체 검증이다.
-# * 세 검증은 서로 독립이므로 앞이 깨져도 뒤를 계속 돌린다. 한 번의 실행으로 남은 결함을 모두 본다.
+# * PR과 main push 에서 돌린다. 배치 워크플로(ingest.yml)와 역할이 다르다 —
+#   저쪽은 적재 전 파서 회귀만 보고, 이쪽은 웹과 스키마까지 포함한 전체 검증이다.
+# * 각 검증은 서로 독립이므로 앞이 깨져도 뒤를 계속 돌린다. 한 번의 실행으로 남은 결함을 모두 본다.
 
 name: ci
 
@@ -23,7 +23,7 @@ jobs:
   verify:
     name: 웹 검증
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -47,3 +47,77 @@ jobs:
       - name: 테스트
         if: always()
         run: npm run --prefix web test
+
+      # 타입 검사가 잡지 못하는 것 — 삭제한 라우트로 향하는 링크, prebuild 의 shared 복사,
+      # 서버 컴포넌트의 렌더 시점 오류는 빌드에서만 드러난다.
+      - name: 빌드
+        if: always()
+        run: npm run --prefix web build
+
+      # 수집 파이프라인이 픽스처 30건을 끝까지 통과하는지. 외부 호출 없이 mock 임베딩으로 돈다.
+      - name: 수집 파이프라인 드라이런
+        if: always()
+        env:
+          MOCK_EMBEDDINGS: "1"
+        run: npm run --prefix web ingest -- --fixtures --dry-run --no-llm
+
+  # 마이그레이션은 코드 검증으로 안 잡힌다. 실제 Postgres 에 순서대로 부어 봐야
+  # 순서 의존성·FK 의존성·중복 생성이 드러난다.
+  migrations:
+    name: 마이그레이션 적용
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGPASSWORD: postgres
+      PSQL: psql -h localhost -U postgres -v ON_ERROR_STOP=1
+    steps:
+      # 아래 업그레이드 경로 검증이 과거 커밋의 마이그레이션을 꺼내 쓴다.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 신규 환경 — 0001 부터 순서대로 적용
+        run: |
+          $PSQL -d postgres -c 'CREATE DATABASE fresh'
+          for f in db/migrations/*.sql; do
+            echo "== $f"
+            $PSQL -d fresh -f "$f"
+          done
+
+      - name: 신규 환경 — 개인정보 테이블이 남지 않았는지 확인
+        run: |
+          for t in profiles notification_outbox; do
+            found=$($PSQL -d fresh -tAc "SELECT to_regclass('public.$t') IS NOT NULL")
+            echo "$t 존재: $found"
+            [ "$found" = "f" ] || { echo "::error::$t 이(가) 남아 있다"; exit 1; }
+          done
+
+      # 이미 알림 기능을 적용해 둔 DB 가 있다면 0012 가 그것까지 정리해야 한다.
+      # notification_outbox.profile_id 가 profiles(id) 를 참조하므로 삭제 순서가 틀리면 여기서 깨진다.
+      - name: 업그레이드 경로 — 0011 적용 후 0012 로 정리
+        run: |
+          $PSQL -d postgres -c 'CREATE DATABASE upgraded'
+          for f in $(ls db/migrations/*.sql | grep -v 0012_); do
+            $PSQL -d upgraded -f "$f"
+          done
+          git show 0784261:db/migrations/0011_notifications.sql | $PSQL -d upgraded
+          $PSQL -d upgraded -f db/migrations/0012_drop_profiles.sql
+
+      - name: 업그레이드 경로 — 이메일과 outbox 가 지워졌는지 확인
+        run: |
+          for t in profiles notification_outbox; do
+            found=$($PSQL -d upgraded -tAc "SELECT to_regclass('public.$t') IS NOT NULL")
+            echo "$t 존재: $found"
+            [ "$found" = "f" ] || { echo "::error::업그레이드 후 $t 이(가) 남아 있다"; exit 1; }
+          done

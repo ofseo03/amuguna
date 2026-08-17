@@ -238,13 +238,13 @@ p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
 
 ## 7. 개인정보 보존기간 (SPEC §8)
 
-**보존할 개인정보가 없다.** `0012` 가 `profiles` 와 `purge_stale_profiles()` 를 제거했다. 프로필은 서명한 브라우저 쿠키에만 있고, 사용자가 쿠키를 지우면 즉시 사라진다. 따라서 삭제 배치도, 보존기간 고지도 필요 없다.
+**DB 에 보존할 개인정보가 없다.** `0012` 가 `profiles` 와 `purge_stale_profiles()` 를 제거했다. 프로필은 서명한 브라우저 쿠키에만 있고 90일 뒤 만료된다. 따라서 삭제 배치가 필요 없다.
 
 `0003` 과 `0006` 은 이력 보존을 위해 남겨 두었다. 새 환경도 번호 순서대로 적용하면 `0012` 에서 정리되므로 결과는 같다.
 
-DB 에 남는 것은 공공 API 에서 수집한 지원사업 데이터(`raw_documents` / `programs` / `eligibility_rules` / `program_embeddings`)뿐이다.
+**이미 `0011` 을 적용한 DB가 있다면 `0012` 를 반드시 적용해야 한다.** `0011` 이 만든 `notification_outbox` 에는 이메일과 발송 payload 가 들어 있고, `profiles` 에는 이메일·확인 토큰이 남아 있다. `0012` 는 FK 의존성 때문에 `notification_outbox` 를 먼저 지운 뒤 `profiles` 를 지운다.
 
-어느 쪽이든 반환값을 배치 로그에 남긴다. 심사 구간(9/7~9/11)에도 동작해야 하므로 **W4 배포 점검 항목**이다.
+DB 에 남는 것은 공공 API 에서 수집한 지원사업 데이터(`raw_documents` / `programs` / `eligibility_rules` / `program_embeddings`)와 배치 운영 상태뿐이다.
 
 ---
 

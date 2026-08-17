@@ -7,6 +7,12 @@
 -- 되돌릴 때는 0003 을 다시 적용한 뒤 0006 의 median_income_percent 컬럼을 추가한다.
 BEGIN;
 
+-- 알림 outbox 를 먼저 지운다. 이 테이블의 profile_id 가 profiles(id) 를 참조하므로
+-- 남아 있으면 아래 DROP TABLE 이 FK 의존성 때문에 실패하고 트랜잭션 전체가 롤백된다.
+-- (ON DELETE CASCADE 는 행 삭제 규칙이지 테이블 DROP 을 허용하지 않는다.)
+-- 이 마이그레이션 전에 삭제된 0011 을 적용한 적이 없는 DB 에서는 IF EXISTS 로 그냥 넘어간다.
+DROP TABLE IF EXISTS notification_outbox;
+
 -- profiles 에만 걸려 있던 인덱스·정책·트리거는 테이블과 함께 사라진다.
 DROP TABLE IF EXISTS profiles;
 

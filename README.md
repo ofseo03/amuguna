@@ -19,7 +19,7 @@
 
 | 디렉터리 | 내용 |
 |---|---|
-| `db/` | Postgres 마이그레이션 — 스키마(§5), `match_programs` 교차검증·근접탈락 RPC(§7.3/7.6), 프로필 90일 삭제(§8). [db/README.md](db/README.md) |
+| `db/` | Postgres 마이그레이션 — 스키마(§5), `match_programs` 교차검증·근접탈락 RPC(§7.3/7.6). 개인정보 테이블은 없다(§8). [db/README.md](db/README.md) |
 | `ingest/` | API 응답 봉투·목록/상세 조인을 재현한 픽스처 JSON 6종 |
 | `web/` | Next.js + TypeScript 웹서비스와 독립 Node 배치(`web/ingest`) — 수집·파싱·임베딩·요약, 화면/API, 스코어링. [web/README.md](web/README.md) |
 | `shared/` | 공통 계약 데이터 — 지역코드, 직업분류(+파서 동의어), 소득분위 라벨, 2026 가구원별 기준중위소득표 |
