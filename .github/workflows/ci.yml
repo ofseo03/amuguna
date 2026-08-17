@@ -1,0 +1,49 @@
+# amuguna 웹 검증 (SPEC §10)
+#
+# * PR과 main push 에서 타입 검사·린트·테스트를 돌린다. 배치 워크플로(ingest.yml)와 역할이 다르다 —
+#   저쪽은 적재 전 파서 회귀만 보고, 이쪽은 웹까지 포함한 전체 검증이다.
+# * 세 검증은 서로 독립이므로 앞이 깨져도 뒤를 계속 돌린다. 한 번의 실행으로 남은 결함을 모두 본다.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 같은 PR 에 새 커밋이 오면 이전 실행을 취소한다. 마지막 커밋 기준 결과만 의미가 있다.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: 웹 검증
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.9.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: 의존성 설치
+        run: npm ci --prefix web
+
+      - name: 타입 검사
+        if: always()
+        run: npm run --prefix web typecheck
+
+      - name: 린트
+        if: always()
+        run: npm run --prefix web lint
+
+      - name: 테스트
+        if: always()
+        run: npm run --prefix web test
