@@ -49,5 +49,4 @@ Next.js와 독립 배치는 `web/.env.local`, GitHub Actions는 Secrets에 값�
 | `FINLIFE_API_KEY` | 금융감독원 금융상품 한눈에 API |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | `voyage` \| `openai` \| `mock` (Voyage 모델: `voyage-4-large`, 차원 1024 고정) |
 | `OPENROUTER_API_KEY` | 배치 전용 — OpenRouter로 파싱 보완 + 요약 생성 (`google/gemma-4-31b-it:free`) |
-| `SESSION_SECRET` | 프로덕션 서명 키 (32자 이상) |
-| `APP_BASE_URL` / `RESEND_API_KEY` / `EMAIL_FROM` | double opt-in 확인·일일 알림. Resend 발신 도메인 인증 필요 |
+| `SESSION_SECRET` | 프로덕션 서명 키 (32자 이상). 프로필 쿠키 서명에 쓴다 |

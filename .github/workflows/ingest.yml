@@ -51,9 +51,6 @@ jobs:
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
-      APP_BASE_URL: ${{ vars.APP_BASE_URL }}
-      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
-      EMAIL_FROM: ${{ vars.EMAIL_FROM }}
     steps:
       - uses: actions/checkout@v4
 
@@ -93,14 +90,6 @@ jobs:
             --since "$INGEST_SINCE" \
             "${source_args[@]}" \
             --json-report ../ingest-report.json
-
-      - name: 90일 경과 익명 프로필 삭제
-        if: always() && github.event.inputs.mode != 'fixtures-dry-run'
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -c "SELECT public.purge_stale_profiles() AS deleted_profiles;"
-
-      - name: 확인된 구독자 일일 알림 발송
-        if: ${{ !cancelled() && github.event.inputs.mode != 'fixtures-dry-run' }}
-        run: npm run --prefix web notify
 
       - name: 수집 상태 리포트 보관 (SPEC §10)
         if: always()

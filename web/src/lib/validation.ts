@@ -126,15 +126,3 @@ export function validateCursor(input: unknown): Validated<MatchCursor | null> {
     return { ok: false, errors: [{ field: "cursor", message: "cursor 값이 올바르지 않습니다." }] };
   }
 }
-
-/** 알림 신청 이메일 — 과하게 엄격하지 않게, 명백한 오입력만 거른다 */
-export function validateEmail(input: unknown): Validated<string> {
-  const s = String(input ?? "").trim();
-  if (s.length === 0) {
-    return { ok: false, errors: [{ field: "email", message: "이메일을 입력해 주세요." }] };
-  }
-  if (s.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s)) {
-    return { ok: false, errors: [{ field: "email", message: "이메일 형식이 올바르지 않습니다." }] };
-  }
-  return { ok: true, value: s.toLowerCase() };
-}

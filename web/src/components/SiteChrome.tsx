@@ -48,16 +48,6 @@ export function SiteFooter() {
                 데이터 출처·갱신 주기
               </Link>
             </li>
-            <li>
-              <Link href="/subscribe" className="underline hover:text-brand">
-                알림 신청
-              </Link>
-            </li>
-            <li>
-              <Link href="/unsubscribe" className="underline hover:text-brand">
-                알림 해지
-              </Link>
-            </li>
           </ul>
         </nav>
         <p className="mt-5 text-ink-3">

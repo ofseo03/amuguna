@@ -286,12 +286,6 @@ export default function ResultsPage() {
         >
           조건 다시 입력하기
         </Link>
-        <Link
-          href="/subscribe"
-          className="rounded-lg bg-brand px-5 py-3 font-bold text-white no-underline hover:bg-brand-dark"
-        >
-          새 지원 나오면 알림 받기
-        </Link>
       </div>
 
       <div className="mt-8">

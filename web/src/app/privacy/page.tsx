@@ -15,27 +15,36 @@ export default function PrivacyPage() {
       <p className="mt-3 text-ink-2">
         아무거나(이하 &ldquo;서비스&rdquo;)는 개인정보 수집을 최소화하는 것을
         설계 원칙으로 삼습니다. 회원가입이 없고, 이름·전화번호·주민등록번호를
-        수집하지 않습니다. 이메일 주소는 알림을 별도로 신청할 때만 수집하며,
-        확인 전에는 발송하지 않고 7일 뒤 삭제합니다.
+        수집하지 않습니다. 입력하신 인적사항은 <strong>브라우저 쿠키에만</strong>{" "}
+        담기며 서버에 저장하지 않습니다.
       </p>
-      <p className="mt-2 text-sm text-ink-3">최종 개정일: 2026년 8월 13일</p>
+      <p className="mt-2 text-sm text-ink-3">최종 개정일: 2026년 8월 17일</p>
 
       <Section title="1. 수집하는 정보">
+        <div className="mb-4 rounded-xl border-2 border-brand bg-brand-soft p-5">
+          <p className="font-bold text-ink">
+            서비스 데이터베이스에 저장되는 개인정보는 없습니다.
+          </p>
+          <p className="mt-2">
+            데이터베이스에는 공공 API 에서 수집한 지원사업 정보만 보관합니다.
+            입력하신 인적사항은 서명한 쿠키에 담겨 브라우저에만 남고, 검색은 그
+            쿠키를 읽어 처리합니다.
+          </p>
+        </div>
         <Table
-          head={["구분", "항목", "수집 시점", "보유 기간"]}
+          head={["구분", "항목", "저장 위치", "보유 기간"]}
           rows={[
             [
               "인적사항 (익명)",
               "나이(만), 성별, 직업 대분류, 거주 시·군·구, 소득분위, 계산된 기준중위소득 비율",
-              "온보딩 입력 시",
-              "90일 후 자동 삭제",
+              "브라우저 쿠키",
+              "쿠키 삭제 시까지 (서버 저장 없음)",
             ],
-            ["익명 세션 식별자", "임의 생성 UUID (쿠키)", "첫 방문 시", "90일"],
             [
-              "이메일",
-              "이메일 주소",
-              "알림 신청 시 (확인 전에는 발송하지 않음)",
-              "알림 해지 시까지 (확인 전 7일)",
+              "익명 세션 식별자",
+              "임의 생성 UUID (쿠키)",
+              "브라우저 쿠키",
+              "쿠키 삭제 시까지. 요청 빈도 제한에만 사용",
             ],
           ]}
         />
@@ -83,7 +92,6 @@ export default function PrivacyPage() {
         <ul className="list-disc pl-6">
           <li>입력하신 인적사항과 공고문 자격요건을 대조해 대상 여부를 판정</li>
           <li>결과 정렬(스코어링)과 근접탈락 안내 문구 생성</li>
-          <li>(동의·이메일 확인 시) 자격 조건에 맞는 신규 공고와 정확히 마감 7일 전 공고의 하루 한 번 이메일 발송</li>
         </ul>
         <p className="mt-3">
           수집한 정보를 광고·마케팅에 사용하지 않으며, 제3자에게 제공하거나
@@ -94,37 +102,24 @@ export default function PrivacyPage() {
       <Section title="5. 보유 및 파기">
         <ul className="list-disc pl-6">
           <li>
-            프로필 정보는 생성 후 <strong>90일이 지나면 자동 삭제</strong>됩니다.
+            서버에 저장하는 개인정보가 없으므로 <strong>파기할 대상도 없습니다</strong>.
           </li>
           <li>
-            알림을 신청하신 프로필은 알림 유지를 위해 자동 삭제 대상에서
-            제외하며, <strong>알림을 해지하시면 프로필까지 즉시 삭제</strong>
-            합니다.
+            인적사항과 세션 식별자는 브라우저 쿠키에만 있으며, 브라우저 설정에서
+            쿠키를 삭제하시면 <strong>즉시 사라집니다</strong>.
           </li>
-          <li>브라우저 쿠키는 브라우저 설정에서 직접 삭제하실 수 있습니다.</li>
         </ul>
       </Section>
 
-      <Section title="6. 알림 매칭 기준">
+      <Section title="6. 이용자의 권리">
         <p>
-          알림은 저장된 인적사항과 공고 자격요건만 대조합니다. &ldquo;원하는 것&rdquo;
-          자유입력은 검색 처리 순간에만 쓰고 저장하지 않으므로 알림 매칭에는 사용하지
-          않습니다.
+          브라우저에서 쿠키를 삭제하시면 입력하신 정보가 즉시 사라집니다. 서버에
+          보관하는 정보가 없으므로 회원가입·탈퇴 절차나 별도의 삭제 요청 절차가
+          없습니다.
         </p>
       </Section>
 
-      <Section title="7. 이용자의 권리">
-        <p>
-          언제든지{" "}
-          <Link href="/unsubscribe" className="underline hover:text-brand">
-            알림 해지 페이지
-          </Link>
-          에서 등록 정보를 즉시 삭제하실 수 있습니다. 회원가입이 없으므로 별도의
-          탈퇴 절차는 없습니다.
-        </p>
-      </Section>
-
-      <Section title="8. 안전성 확보 조치">
+      <Section title="7. 안전성 확보 조치">
         <ul className="list-disc pl-6">
           <li>전 구간 HTTPS 통신 강제</li>
           <li>프로필 쿠키는 httpOnly + 서명 처리 — 스크립트가 읽거나 변조할 수 없습니다</li>
@@ -135,7 +130,7 @@ export default function PrivacyPage() {
         </ul>
       </Section>
 
-      <Section title="9. 정확성에 대한 고지">
+      <Section title="8. 정확성에 대한 고지">
         <p>
           제공되는 정보는 공공기관이 공개한 자료를 자동으로 수집·정리한
           것입니다. 원문 갱신 시점과 수집 시점의 차이, 자동 추출의 한계로 실제와
@@ -148,7 +143,7 @@ export default function PrivacyPage() {
         </p>
       </Section>
 
-      <Section title="10. 문의">
+      <Section title="9. 문의">
         <p>
           개인정보 처리에 관한 문의는 서비스 저장소의 이슈로 남겨주시기
           바랍니다. 본 서비스는 2026 금융 AI Challenge 출품을 위한 프로토타입으로

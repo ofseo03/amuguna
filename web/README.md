@@ -25,7 +25,6 @@ npm run lint         # ESLint
 npm run typecheck    # tsc --noEmit
 npm test             # 웹 회귀 테스트 + TypeScript 배치 테스트
 npm run ingest -- --fixtures --dry-run  # 루트 ingest/ 픽스처 30건 드라이런
-npm run notify       # 확인된 구독자 일일 이메일 알림
 npm run sync:shared  # ../shared/*.json → src/data/ 재복사
 ```
 
@@ -43,7 +42,7 @@ npm run sync:shared  # ../shared/*.json → src/data/ 재복사
 | 벡터 검색 | 인메모리 코사인 (`src/lib/demo-store.ts`) | pgvector HNSW |
 | 스코어링 | `src/lib/scoring.ts` (동일) | `src/lib/scoring.ts` (동일) |
 | 근접탈락·완화 | `src/lib/matching.ts` (동일) | `src/lib/matching.ts` (동일) |
-| 알림 신청 | 저장·발송 없음 | double opt-in + 일일 digest |
+| 프로필 | 서명 쿠키 (동일) | 서명 쿠키 (동일) — DB 저장 없음 |
 
 스코어링·근거 문장·근접탈락·빈결과 완화는 **두 모드가 같은 코드를 탄다.**
 백엔드 차이는 "후보를 어디서 가져오는가" 하나뿐이다.
@@ -75,17 +74,13 @@ SPEC §5 의 예시 문구 4종으로 실측해 정한 값이다.
 | 2 | 온보딩 6단계 | `/onboarding` | `src/app/onboarding/page.tsx` |
 | 3 | 결과 | `/results` | `src/app/results/page.tsx` |
 | 4 | 상세 | `/programs/[id]` | `src/app/programs/[id]/page.tsx` |
-| 5 | 알림 신청 / 해지 | `/subscribe`, `/unsubscribe` | `src/app/subscribe`, `src/app/unsubscribe` |
-| 6 | 개인정보처리방침 / 출처 | `/privacy`, `/sources` | `src/app/privacy`, `src/app/sources` |
+| 5 | 개인정보처리방침 / 출처 | `/privacy`, `/sources` | `src/app/privacy`, `src/app/sources` |
 
 | 메서드 | 경로 | 파일 |
 |---|---|---|
 | POST | `/api/profile` | `src/app/api/profile/route.ts` |
 | POST | `/api/match` | `src/app/api/match/route.ts` |
 | GET | `/api/programs/:id` | `src/app/api/programs/[id]/route.ts` |
-| POST | `/api/subscribe` | `src/app/api/subscribe/route.ts` |
-| POST | `/api/confirm/:token` | `src/app/api/confirm/[token]/route.ts` |
-| POST | `/api/unsubscribe/:token` | `src/app/api/unsubscribe/[token]/route.ts` |
 
 ### 흐름 확인 (curl)
 
@@ -188,9 +183,6 @@ cp .env.example .env.local
 | `OPENROUTER_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |
 | `LLM_MODEL` | `google/gemma-4-31b-it:free` | OpenRouter 모델 ID |
 | `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 서명 키 |
-| `APP_BASE_URL` | (없음) | 확인·해지 링크의 HTTPS 서비스 기준 URL |
-| `RESEND_API_KEY` | (없음) | 확인 메일·일일 digest 발송용 서버 키 |
-| `EMAIL_FROM` | (없음) | Resend에서 검증한 발신 도메인의 이메일 주소 |
 
 ---
 
@@ -205,8 +197,6 @@ cp .env.example .env.local
    ```
 4. DB를 붙일 준비가 되면 `DATABASE_URL` 을 추가하고 재배포한다.
    변수가 없는 동안에는 데모 모드로 정상 서비스된다.
-5. 이메일 알림을 켤 때는 Resend에서 `EMAIL_FROM` 도메인을 인증하고,
-   `APP_BASE_URL`·`RESEND_API_KEY`·`EMAIL_FROM`을 Vercel과 GitHub Actions에 함께 설정한다.
 
 > `prebuild` 훅이 `../shared` 를 읽으므로 저장소 전체를 clone 하는 기본 설정이면 그대로 동작한다.
 > `web/` 만 배포하는 경우 `src/data/` 의 복사본이 사용된다.
@@ -220,9 +210,9 @@ cp .env.example .env.local
 구현은 끝났고 아래 외부 환경만 아직 실물 검증이 필요하다.
 
 1. T1 소스의 실제 응답으로 엔드포인트·파라미터·봉투 필드명을 확인한다. 특히 Finlife의 상품×권역 조합은 공식 안내 페이지가 이 환경에서 열리지 않아 live key로 재검증해야 한다.
-2. Supabase에 마이그레이션을 적용한 뒤 `match_programs` RPC와 구독·해지를 왕복 검증한다.
+2. Supabase에 마이그레이션을 적용한 뒤 `match_programs` RPC를 왕복 검증한다.
 3. `voyage-4-large`의 한국어 검색 품질을 실측한다.
-4. Vercel 배포와 GitHub Actions 실 배치를 실행해 Secrets, 90일 삭제, 확인 메일·일일 digest, 심사 구간 가용성을 확인한다.
+4. Vercel 배포와 GitHub Actions 실 배치를 실행해 Secrets와 심사 구간 가용성을 확인한다.
 
 ---
 
