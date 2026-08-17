@@ -18,16 +18,20 @@ export const FIELD_NAMES = [
   "regions",
   "occupations",
   "income_decile_max",
+  "median_income_percent_max",
 ] as const;
 
 export class SourceStats {
   fetched = 0;
+  observed = 0;
   created = 0;
   updated = 0;
   unchanged = 0;
   expired = 0;
   errors: string[] = [];
   incrementalStrategy: string | null = null;
+  previousFetched: number | null = null;
+  volumeDrop = false;
 
   constructor(readonly sourceKey: string) {}
 
@@ -93,6 +97,7 @@ export class RunReport {
     const total = new SourceStats("TOTAL");
     for (const stats of this.sources.values()) {
       total.fetched += stats.fetched;
+      total.observed += stats.observed;
       total.created += stats.created;
       total.updated += stats.updated;
       total.unchanged += stats.unchanged;
@@ -128,8 +133,12 @@ export class Pipeline {
     const contentHash = program.contentHash();
     const previousHash = await db.latestContentHash(program.external_id);
     const existingId = await db.getProgramId(program.external_id);
+    const retryNeedsReview =
+      existingId !== null &&
+      previousHash === contentHash &&
+      (await db.programStatus(program.external_id)) === "needs_review";
 
-    if (existingId !== null && previousHash === contentHash) {
+    if (existingId !== null && previousHash === contentHash && !retryNeedsReview) {
       const restored = await db.reactivateProgram(program.external_id, now);
       if (restored) {
         const [title, summary, body] = restored;
@@ -154,14 +163,17 @@ export class Pipeline {
       return;
     }
 
-    const rawId = await db.insertRawDocument({
-      external_id: program.external_id,
-      source_key: program.source_key,
-      source_url: program.source_url,
-      content_hash: contentHash,
-      raw_body: program.raw_body,
-      fetched_at: now,
-    });
+    const rawId = retryNeedsReview
+      ? await db.programRawDocumentId(program.external_id)
+      : await db.insertRawDocument({
+          external_id: program.external_id,
+          source_key: program.source_key,
+          source_url: program.source_url,
+          content_hash: contentHash,
+          raw_body: program.raw_body,
+          fetched_at: now,
+        });
+    if (rawId === null) throw new Error(`원본 문서를 찾을 수 없음: ${program.external_id}`);
 
     const rules = parseProgram(program);
     const hasAgeAlternatives = rules.extra_conditions.some(
@@ -208,27 +220,39 @@ export class Pipeline {
       status: rules.blocksActivation ? "needs_review" : "active",
     };
     const programId = await db.upsertProgram(values);
-    await db.replaceRules(programId, rules.toRow() as RuleValues);
-
-    const result = await this.options.embedder.embedProgram({
-      title: program.title,
-      summary: card.summary,
-      body: bodyText,
+    await db.replaceRules(programId, rules.toRow() as RuleValues, {
+      needsReview: rules.needs_review,
+      reviewReason: rules.review_reason,
     });
-    await db.replaceEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
-    this.report.embeddingsWritten++;
-    this.report.chunksWritten += result.vectors.length;
+
+    if (rules.blocksActivation) {
+      await db.deleteEmbeddings(programId);
+    } else {
+      const result = await this.options.embedder.embedProgram({
+        title: program.title,
+        summary: card.summary,
+        body: bodyText,
+      });
+      await db.replaceEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
+      this.report.embeddingsWritten++;
+      this.report.chunksWritten += result.vectors.length;
+    }
     if (previousHash === null) stats.created++;
     else stats.updated++;
   }
 
-  async reconcile(collector: Collector, db: Database = this.db): Promise<number> {
+  async reconcile(
+    collector: Collector,
+    db: Database = this.db,
+    stats?: SourceStats,
+  ): Promise<number> {
     let sourceIds: Set<string>;
     try {
       sourceIds = await collector.listExternalIds();
     } catch (error) {
       if (!(error instanceof CollectorError)) throw error;
       console.error(`${collector.sourceKey} 전량 대조 실패: ${error.message}`);
+      stats?.errors.push(`reconcile: ${error.message}`);
       return 0;
     }
     if (!sourceIds.size) {
@@ -250,6 +274,7 @@ export class Pipeline {
     if (!stats) {
       stats = new SourceStats(collector.sourceKey);
       stats.incrementalStrategy = collector.incrementalStrategy;
+      stats.previousFetched = await this.db.sourceBaseline(collector.sourceKey);
       this.report.sources.set(collector.sourceKey, stats);
     }
     let programs: CollectedProgram[];
@@ -266,6 +291,11 @@ export class Pipeline {
     }
 
     stats.fetched = programs.length;
+    stats.observed = collector.observedCount ?? programs.length;
+    stats.volumeDrop =
+      stats.previousFetched !== null &&
+      stats.previousFetched > 0 &&
+      stats.observed <= stats.previousFetched * 0.5;
     const now = new Date();
     await this.db.transaction(async (sourceDb) => {
       for (const program of programs) {
@@ -277,55 +307,64 @@ export class Pipeline {
           stats!.errors.push(`${program.external_id}: ${message}`);
         }
       }
-      if (reconcile) stats!.expired += await this.reconcile(collector, sourceDb);
+      if (reconcile && !stats!.volumeDrop) {
+        stats!.expired += await this.reconcile(collector, sourceDb, stats);
+      }
     });
+    stats.errors.push(...collector.errors);
+    if (!stats.errors.length && !stats.volumeDrop) {
+      await this.db.recordSourceBaseline(collector.sourceKey, stats.observed);
+    }
     return stats;
   }
 
   /**
    * 벡터 공간이 바뀌었을 때 DB에 있는 전 공고를 다시 임베딩한다.
    *
-   * 수집기를 거치지 않는 것이 핵심이다. 예전처럼 전량 삭제만 하고 재생성을 수집
-   * 결과에 맡기면, 이번 회차에 수집기가 돌려주지 않은 공고는 임베딩이 사라진 채
-   * 남는다 — `--source` 로 일부만 돌린 경우, 그리고 일일 한도 때문에 이미 적재된
-   * 건을 건너뛰는 중앙부처복지가 정확히 그 경우다.
+   * 수집기를 거치지 않고 staging 에 전량을 완성한 뒤 active pointer 를 바꾼다.
+   * 새 임베딩 호출이 실패해도 기존 활성 벡터는 남는다. `--source` 일부 실행과 일일
+   * 상세 한도로 이미 적재된 건을 건너뛰는 중앙부처복지에서도 전량 대상이 보장된다.
    */
-  private async embedPrograms(programIds: readonly number[]): Promise<void> {
+  private async embedPrograms(programIds: readonly number[], staged = false): Promise<void> {
     for (const programId of programIds) {
       const input = await this.db.embeddingInput(programId);
       if (!input) continue;
       const [title, summary, body] = input;
       const result = await this.options.embedder.embedProgram({ title, summary, body });
-      await this.db.replaceEmbeddings(
-        programId,
-        result.vectors,
-        this.options.embedder.vectorSpace,
-      );
+      if (staged) {
+        await this.db.stageEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
+      } else {
+        await this.db.replaceEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
+      }
       this.report.embeddingsWritten++;
       this.report.chunksWritten += result.vectors.length;
     }
   }
 
   private async reindexAll(): Promise<void> {
-    await this.db.deleteAllEmbeddings();
-    await this.embedPrograms(await this.db.programIds());
+    await this.db.withEmbeddingReindexLock(async () => {
+      await this.db.clearStagedEmbeddings(this.options.embedder.vectorSpace);
+      await this.embedPrograms(await this.db.programIds(), true);
+      await this.db.activateEmbeddingSpace(this.options.embedder.vectorSpace);
+    });
   }
 
   async run(
     collectors: readonly Collector[],
     options: { since?: string; reconcile?: boolean } = {},
   ): Promise<RunReport> {
-    const providers = await this.db.embeddingProviders();
-    if ([...providers].some((provider) => provider !== this.options.embedder.vectorSpace)) {
-      if (!options.reconcile) {
+    const activeVectorSpace = await this.db.activeEmbeddingSpace();
+    if (activeVectorSpace !== this.options.embedder.vectorSpace) {
+      if (activeVectorSpace !== null && !options.reconcile) {
         throw new Error("임베딩 provider·모델 변경은 --weekly-reconcile로 전량 재색인해야 합니다");
+      }
+      if (activeVectorSpace === null && (await this.db.programIds()).length && !options.reconcile) {
+        throw new Error("활성 임베딩 공간이 없어 --weekly-reconcile 전량 재색인이 필요합니다");
       }
       await this.reindexAll();
     } else {
-      // 재색인은 전량 삭제 후 다시 채우는 구조라 트랜잭션으로 묶이지 않는다. 중간에
-      // 임베딩 API 가 죽으면 남은 공고는 벡터가 없는 채로 끝나고, 다음 회차는 남아
-      // 있는 행이 전부 현재 벡터 공간이라 provider 불일치를 못 본다 — 그대로 두면
-      // 영영 복구되지 않는다. 그래서 벡터가 빠진 공고를 매 회차 이어서 채운다.
+      // 현재 활성 공간에서만 누락된 벡터를 보충한다. 공간 전환은 위 staging 경로가
+      // 담당하므로 이 경로는 중단된 개별 적재만 복구한다.
       const missing = await this.db.programIdsWithoutEmbeddings();
       if (missing.length) {
         console.warn(`임베딩이 없는 공고 ${missing.length}건을 이어서 색인합니다`);
@@ -342,12 +381,11 @@ export function checkVolumeDrop(
   report: RunReport,
   previous?: Record<string, number> | null,
 ): string[] {
-  if (!previous) return [];
   const warnings: string[] = [];
   for (const [key, stats] of report.sources) {
-    const before = previous[key];
-    if (before && stats.fetched < before * 0.5) {
-      warnings.push(`${key}: 전일 ${before}건 → 금일 ${stats.fetched}건 (50% 이상 감소)`);
+    const before = previous?.[key] ?? stats.previousFetched;
+    if (before && stats.observed <= before * 0.5) {
+      warnings.push(`${key}: 기준 ${before}건 → 금일 ${stats.observed}건 (50% 이상 감소)`);
     }
   }
   return warnings;
@@ -364,11 +402,14 @@ export function reportToJson(report: RunReport): Record<string, unknown> {
         key,
         {
           fetched: stats.fetched,
+          observed: stats.observed,
           created: stats.created,
           updated: stats.updated,
           unchanged: stats.unchanged,
           expired: stats.expired,
           errors: stats.errors,
+          previous_fetched: stats.previousFetched,
+          volume_drop: stats.volumeDrop,
           incremental_strategy: stats.incrementalStrategy,
         },
       ]),

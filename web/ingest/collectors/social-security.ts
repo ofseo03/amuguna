@@ -4,6 +4,7 @@ import {
   CollectorError,
   firstOf,
   isRecord,
+  PAGINATION_SAFETY_LIMIT,
   parseAmount,
   recordOrUndefined,
   type CollectorOptions,
@@ -247,18 +248,24 @@ export class SocialSecurityCollector extends Collector {
    * ponytail: 적재된 건은 다시 안 보므로 원본 수정(마감 연장·자격 완화)을 놓친다.
    * 한도가 풀리면(운영계정) knownIds 스킵을 빼고 content_hash 비교로 되돌린다.
    */
-  override async fetch({ since, maxPages = 5, knownIds }: FetchOptions = {}): Promise<CollectedProgram[]> {
+  override async fetch(options: FetchOptions = {}): Promise<CollectedProgram[]> {
+    const { since, knownIds } = options;
+    const maxPages = options.maxPages ?? PAGINATION_SAFETY_LIMIT;
     // 이 공식 목록 API에는 날짜 필터가 없다. --since 는 요청 파라미터로 보내지 않고,
     // 전체 목록을 훑은 뒤 knownIds 로 기존 건을 건너뛰고 상세조회 예산을 신규 건에 쓴다.
     void since;
     if (this.useFixtures) return super.fetch({ maxPages });
+    this.observedCount = 0;
+    this.errors.length = 0;
 
     const collected: CollectedProgram[] = [];
     const seen = new Set<string>();
     let budget = this.maxDetailCalls;
     let skipped = 0;
+    let complete = false;
     for (let page = 1; page <= maxPages; page++) {
       const { items, totalCount } = await this.listPage(page);
+      this.observedCount = totalCount ?? (this.observedCount ?? 0) + items.length;
       for (const item of items) {
         const nativeId = firstOf(item, ["servId"]);
         if (!nativeId || seen.has(nativeId)) continue;
@@ -293,6 +300,7 @@ export class SocialSecurityCollector extends Collector {
           console.warn(
             `${this.sourceKey}: 상세 조회 중단 (${message}) — ${collected.length}건까지 저장하고 다음 회차에 이어받습니다`,
           );
+          this.errors.push(`상세 조회 중단: ${message}`);
           return collected;
         }
 
@@ -301,7 +309,13 @@ export class SocialSecurityCollector extends Collector {
         seen.add(nativeId);
         collected.push(program);
       }
-      if (items.length < this.pageSize || (totalCount !== null && page * this.pageSize >= totalCount)) break;
+      if (items.length < this.pageSize || (totalCount !== null && page * this.pageSize >= totalCount)) {
+        complete = true;
+        break;
+      }
+    }
+    if (!complete && options.maxPages === undefined) {
+      throw new CollectorError(`${this.sourceKey}: 페이지 안전 한도에 도달해 전량 목록 여부를 확인할 수 없음`);
     }
     if (skipped) {
       console.warn(
@@ -314,14 +328,19 @@ export class SocialSecurityCollector extends Collector {
   override async listExternalIds(): Promise<Set<string>> {
     if (this.useFixtures) return super.listExternalIds();
     const ids = new Set<string>();
-    for (let page = 1; page <= 50; page++) {
+    let complete = false;
+    for (let page = 1; page <= PAGINATION_SAFETY_LIMIT; page++) {
       const { items, totalCount } = await this.listPage(page);
       for (const item of items) {
         const nativeId = firstOf(item, ["servId"]);
         if (nativeId) ids.add(this.externalId(nativeId));
       }
-      if (items.length < this.pageSize || (totalCount !== null && page * this.pageSize >= totalCount)) break;
+      if (items.length < this.pageSize || (totalCount !== null && page * this.pageSize >= totalCount)) {
+        complete = true;
+        break;
+      }
     }
+    if (!complete) throw new CollectorError(`${this.sourceKey}: ID 전량 대조 페이지 안전 한도 도달`);
     return ids;
   }
 }

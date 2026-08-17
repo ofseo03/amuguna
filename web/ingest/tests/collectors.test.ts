@@ -11,6 +11,7 @@ import {
   SocialSecurityCollector,
 } from "../collectors";
 import { USER_AGENT } from "../collectors/base";
+import { FINLIFE_GROUPS, FINLIFE_PRODUCTS } from "../collectors/finlife";
 import { settingsFromEnv } from "../config";
 import { parseProgram } from "../parser";
 
@@ -162,6 +163,55 @@ test("central welfare detail calls stay inside the daily quota and checkpoint on
   assert.equal(throttled.length, 1);
 });
 
+test("local welfare skips known IDs, caps details, and returns progress on failure", async () => {
+  const ids = ["LOCAL-1", "LOCAL-2", "LOCAL-3"];
+  const list = `<?xml version="1.0"?><wantedList>${ids
+    .map((id) => `<servList><servId>${id}</servId><servNm>${id}</servNm></servList>`)
+    .join("")}<totalCount>3</totalCount><resultCode>00</resultCode></wantedList>`;
+  const detailOf = (id: string) =>
+    `<?xml version="1.0"?><wantedDtl><servId>${id}</servId><servNm>${id}</servNm>` +
+    `<sprtTrgtCn>만 19세 이상</sprtTrgtCn><resultCode>0</resultCode></wantedDtl>`;
+  const build = (maxDetailCalls: number, failOn?: string) => {
+    const detailIds: string[] = [];
+    const collector = new LocalWelfareCollector({
+      settings: settingsFromEnv({ NODE_ENV: "test", DATA_GO_KR_API_KEY: "test-key" }),
+      pageSize: 3,
+      retries: 0,
+      maxDetailCalls,
+      fetchImpl: async (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (!url.pathname.endsWith("LcgvWelfaredetailed")) {
+          return new Response(list, { headers: { "Content-Type": "application/xml" } });
+        }
+        const id = url.searchParams.get("servId")!;
+        detailIds.push(id);
+        return id === failOn
+          ? new Response("", { status: 429 })
+          : new Response(detailOf(id), { headers: { "Content-Type": "application/xml" } });
+      },
+    });
+    return { collector, detailIds };
+  };
+
+  const capped = build(1);
+  assert.equal((await capped.collector.fetch({ maxPages: 1 })).length, 1);
+  assert.deepEqual(capped.detailIds, [ids[0]]);
+  assert.equal(capped.collector.observedCount, 3);
+
+  const known = build(1);
+  await known.collector.fetch({
+    maxPages: 1,
+    knownIds: new Set([`local_welfare:${ids[0]}`]),
+  });
+  assert.deepEqual(known.detailIds, [ids[1]]);
+
+  const failing = build(3, ids[1]);
+  const partial = await failing.collector.fetch({ maxPages: 1 });
+  assert.deepEqual(partial.map(({ external_id }) => external_id), [`local_welfare:${ids[0]}`]);
+  assert.equal(failing.collector.observedCount, 3);
+  assert.equal(failing.collector.errors.length, 1);
+});
+
 test("six fixture envelopes map all 30 unique records", async () => {
   const collectors = [
     new SocialSecurityCollector({ useFixtures: true }),
@@ -188,6 +238,8 @@ test("Finlife keeps denial text out of positive eligibility", async () => {
     retries: 0,
     fetchImpl: async () => Response.json({
       result: {
+        err_cd: "000",
+        max_page_no: 1,
         baseList: [{
           fin_prdt_cd: "DENY-1",
           fin_co_no: "001",
@@ -208,6 +260,74 @@ test("Finlife keeps denial text out of positive eligibility", async () => {
   assert.doesNotMatch(program.eligibility_text, /19세|서울특별시/);
   const rules = parseProgram(program);
   assert.deepEqual([rules.age_min, rules.age_max, rules.regions], [null, null, null]);
+});
+
+test("Finlife covers all specified product endpoints and financial groups", async () => {
+  const requests: URL[] = [];
+  const collector = new FinlifeCollector({
+    settings: settingsFromEnv({ NODE_ENV: "test", FINLIFE_API_KEY: "finlife-key" }),
+    retries: 0,
+    fetchImpl: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      requests.push(url);
+      const isRentBank =
+        url.pathname.endsWith("/rentHouseLoanProductsSearch.json") &&
+        url.searchParams.get("topFinGrpNo") === "020000";
+      return Response.json({
+        result: {
+          err_cd: "000",
+          max_page_no: 1,
+          baseList: isRentBank
+            ? [{ fin_prdt_cd: "RENT-1", fin_co_no: "001", fin_prdt_nm: "청년 전세대출", kor_co_nm: "테스트은행", loan_lmt: "200000000" }]
+            : [],
+          optionList: [],
+        },
+      });
+    },
+  });
+
+  const programs = await collector.fetch({ maxPages: 1 });
+  assert.equal(requests.length, FINLIFE_PRODUCTS.length * FINLIFE_GROUPS.length);
+  assert.deepEqual(
+    new Set(requests.map((url) => url.pathname.split("/").at(-1)?.replace(".json", ""))),
+    new Set(FINLIFE_PRODUCTS),
+  );
+  assert.deepEqual(
+    new Set(requests.map((url) => url.searchParams.get("topFinGrpNo"))),
+    new Set(FINLIFE_GROUPS),
+  );
+  assert.equal(programs.length, 1);
+  assert.equal(programs[0].form, "loan");
+  assert.match(programs[0].external_id, /^finlife:rent-020000-/);
+});
+
+test("Finlife trusts max_page_no over a short page", async () => {
+  const targetPages: string[] = [];
+  const collector = new FinlifeCollector({
+    settings: settingsFromEnv({ NODE_ENV: "test", FINLIFE_API_KEY: "finlife-key" }),
+    retries: 0,
+    fetchImpl: async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const target = url.pathname.endsWith("/depositProductsSearch.json") &&
+        url.searchParams.get("topFinGrpNo") === "020000";
+      const page = url.searchParams.get("pageNo") ?? "";
+      if (target) targetPages.push(page);
+      return Response.json({
+        result: {
+          err_cd: "000",
+          max_page_no: target ? 2 : 1,
+          baseList: target
+            ? [{ fin_prdt_cd: `PAGE-${page}`, fin_co_no: "001", fin_prdt_nm: `페이지 ${page}`, kor_co_nm: "테스트은행" }]
+            : [],
+          optionList: [],
+        },
+      });
+    },
+  });
+
+  const programs = await collector.fetch();
+  assert.deepEqual(targetPages, ["1", "2"]);
+  assert.equal(programs.filter((program) => program.external_id.includes("PAGE-")).length, 2);
 });
 
 test("an empty malformed envelope is an error, not a successful last page", async () => {

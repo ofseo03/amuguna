@@ -24,4 +24,10 @@ export const COLLECTORS: Record<string, CollectorConstructor> = {
   social_security: SocialSecurityCollector,
 };
 
-export const DEFAULT_SOURCE_KEYS = ["bizinfo", "finlife", "social_security"] as const;
+export const DEFAULT_SOURCE_KEYS = [
+  "bizinfo",
+  "finlife",
+  "gov24",
+  "local_welfare",
+  "social_security",
+] as const;

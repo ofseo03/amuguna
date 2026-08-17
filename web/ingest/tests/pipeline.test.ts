@@ -3,14 +3,15 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import { COLLECTORS } from "../collectors";
 import { Collector, CollectorError } from "../collectors/base";
 import { settingsFromEnv } from "../config";
 import { InMemoryDatabase } from "../db";
 import { Embedder, OPENAI_MODEL } from "../embedder";
-import { CollectedProgram } from "../models";
-import { Pipeline, reportToJson, SourceStats } from "../pipeline";
+import { CollectedProgram, EligibilityRules } from "../models";
+import { checkVolumeDrop, Pipeline, reportToJson, SourceStats } from "../pipeline";
 
 const settings = settingsFromEnv({ NODE_ENV: "test" });
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -71,6 +72,92 @@ class FakeCollector extends Collector {
 function pipeline(db: InMemoryDatabase, embedder = new Embedder(settings)) {
   return new Pipeline(db, { embedder, llm: null, dryRun: true });
 }
+
+const LABEL_FIELDS = [
+  "age_min",
+  "age_max",
+  "gender",
+  "regions",
+  "occupations",
+  "income_decile_max",
+  "median_income_percent_max",
+] as const;
+type FixtureLabel = Pick<EligibilityRules, (typeof LABEL_FIELDS)[number]>;
+const label = (overrides: Partial<FixtureLabel> = {}): FixtureLabel => ({
+  age_min: null,
+  age_max: null,
+  gender: null,
+  regions: null,
+  occupations: null,
+  income_decile_max: null,
+  median_income_percent_max: null,
+  ...overrides,
+});
+
+const FIXTURE_LABELS: Record<string, FixtureLabel> = {
+  "bizinfo:PBLN_000000000098431": label({ occupations: ["self_employed"] }),
+  "bizinfo:PBLN_000000000099022": label({
+    regions: ["26350"],
+    occupations: ["self_employed"],
+  }),
+  "bizinfo:PBLN_000000000097355": label({ occupations: ["self_employed"] }),
+  "bizinfo:PBLN_000000000098770": label(),
+  "bizinfo:PBLN_000000000099410": label({ occupations: ["self_employed"] }),
+  "bizinfo:PBLN_000000000096001": label(),
+  "bizinfo:PBLN_000000000099880": label({ occupations: ["self_employed"] }),
+  "bizinfo:PBLN_000000000095220": label(),
+  "finlife:0010001-KB-YOUTH-01": label({
+    age_min: 19,
+    age_max: 34,
+    median_income_percent_max: 180,
+  }),
+  "finlife:0010002-IBK-BOSS-02": label({ occupations: ["self_employed"] }),
+  "finlife:0010003-SHB-EDEP-05": label(),
+  "finlife:0010004-NH-SENIOR-03": label({ age_min: 60 }),
+  "finlife:0010005-HANA-FREE-07": label({ age_min: 19, age_max: 34 }),
+  "finlife:0010006-WOORI-HOUSE-09": label(),
+  "finlife:0010007-KAKAO-PARK-11": label(),
+  "gov24:GOV24-DEMO-001": label({
+    age_min: 19,
+    age_max: 34,
+    median_income_percent_max: 150,
+  }),
+  "kstartup:KSTARTUP-DEMO-001": label({ age_min: 20, age_max: 39 }),
+  "local_welfare:LOCAL-DEMO-001": label({
+    age_min: 19,
+    age_max: 39,
+    regions: ["11620"],
+    median_income_percent_max: 150,
+  }),
+  "social_security:WII0000345": label({ age_min: 19, age_max: 34 }),
+  "social_security:WII0000112": label({ median_income_percent_max: 48 }),
+  "social_security:WII0000001": label({ age_min: 65 }),
+  "social_security:WII0000078": label({ median_income_percent_max: 75 }),
+  "social_security:WII0000254": label({ age_min: 65 }),
+  "social_security:WII0000411": label(),
+  "social_security:WII0000633": label({
+    regions: ["46150"],
+    occupations: ["farmer_fisher"],
+  }),
+  "social_security:WII0000702": label({
+    age_min: 19,
+    age_max: 39,
+    regions: ["11"],
+    median_income_percent_max: 150,
+  }),
+  "social_security:WII0000188": label({ median_income_percent_max: 150 }),
+  "social_security:WII0000520": label({ age_min: 19, age_max: 34 }),
+  "social_security:WII0000861": label({
+    regions: ["26350"],
+    median_income_percent_max: 60,
+  }),
+  "social_security:WII0000970": label({
+    age_min: 15,
+    age_max: 69,
+    occupations: ["jobseeker"],
+    median_income_percent_max: 60,
+  }),
+};
 
 test("new, unchanged, update, and reconciliation preserve the state-machine contract", async () => {
   const db = new InMemoryDatabase();
@@ -221,19 +308,92 @@ test("a vector-space change reindexes every stored program, not just the collect
   }
 });
 
-test("an interrupted reindex is resumed on the next run", async () => {
+test("failed reindex keeps the prior active vector space until a complete retry", async () => {
   const db = new InMemoryDatabase();
   await pipeline(db).runSource(new FakeCollector([program()]));
   await pipeline(db).runSource(
     new FakeCollector([program({ external_id: "other:001", source_key: "other" })]),
   );
-  // 재색인이 중간에 죽어 한 건만 벡터가 없는 상태를 만든다. 남은 행은 전부 현재
-  // 벡터 공간이라 provider 불일치로는 잡히지 않는다.
-  await db.deleteEmbeddings(2);
-  assert.deepEqual(await db.programIdsWithoutEmbeddings(), [2]);
+  db.activeVectorSpace = "mock";
 
-  await pipeline(db).run([new FakeCollector([program()])]);
-  assert.deepEqual(await db.programIdsWithoutEmbeddings(), []);
+  let fail = true;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    fail
+      ? new Response("upstream failed", { status: 500 })
+      : new Response(JSON.stringify({ data: [{ embedding: [1, ...new Array(1023).fill(0)] }] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+  try {
+    const reindex = pipeline(
+      db,
+      new Embedder({ embedding_provider: "openai", embedding_api_key: "test", mock_embeddings: false }),
+    );
+    await assert.rejects(reindex.run([], { reconcile: true }), /embedding API 500/);
+    assert.equal(await db.activeEmbeddingSpace(), "mock");
+    assert.equal(await db.embeddingProvider(1), "mock");
+    assert.equal(await db.embeddingProvider(2), "mock");
+
+    fail = false;
+    await reindex.run([], { reconcile: true });
+    assert.equal(await db.activeEmbeddingSpace(), `openai:${OPENAI_MODEL}`);
+    assert.equal(await db.embeddingProvider(1), `openai:${OPENAI_MODEL}`);
+    assert.equal(await db.embeddingProvider(2), `openai:${OPENAI_MODEL}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("unchanged needs_review records are reparsed without another raw version", async () => {
+  const db = new InMemoryDatabase();
+  const original = program();
+  await pipeline(db).runSource(new FakeCollector([original]));
+  db.programs.get(1)!.status = "needs_review";
+  db.rules.get(1)!.needsReview = true;
+  db.rules.get(1)!.reviewReason = "llm_failed";
+  assert.equal((await db.knownExternalIds("fake")).has(original.external_id), false);
+
+  const retry = pipeline(db);
+  await retry.runSource(new FakeCollector([original]));
+  assert.equal(db.programs.get(1)?.status, "active");
+  assert.equal(db.rawDocuments.length, 1);
+  assert.equal(retry.report.totals.updated, 1);
+  assert.equal(db.rules.get(1)?.reviewReason, null);
+});
+
+test("reconciliation expires active records but preserves needs_review records", async () => {
+  const db = new InMemoryDatabase();
+  const ingest = pipeline(db);
+  await ingest.runSource(new FakeCollector([program()]));
+  db.programs.get(1)!.status = "needs_review";
+
+  await ingest.runSource(new FakeCollector([], new Set()), { reconcile: true });
+  assert.equal(db.programs.get(1)?.status, "needs_review");
+});
+
+test("source baselines are retained and flag a drop of 50% or more", async () => {
+  const db = new InMemoryDatabase();
+  const initial = Array.from({ length: 10 }, (_, index) =>
+    program({ external_id: `fake:${String(index).padStart(3, "0")}` }),
+  );
+  await pipeline(db).runSource(new FakeCollector(initial));
+  assert.equal(await db.sourceBaseline("fake"), 10);
+
+  const second = pipeline(db);
+  await second.runSource(new FakeCollector(initial.slice(0, 5)), { reconcile: true });
+  assert.deepEqual(checkVolumeDrop(second.report), ["fake: 기준 10건 → 금일 5건 (50% 이상 감소)"]);
+  assert.equal(await db.sourceBaseline("fake"), 10);
+  assert.equal(db.programs.get(10)?.status, "active", "급감한 목록으로 기존 공고를 만료하면 안 된다");
+});
+
+test("atomic reindex rejects a staged id set that differs from active programs", async () => {
+  const db = new InMemoryDatabase();
+  await pipeline(db).runSource(new FakeCollector([program()]));
+  await db.stageEmbeddings(1, [[1]], "openai:test");
+  await db.stageEmbeddings(999, [[1]], "openai:test");
+  await assert.rejects(db.activateEmbeddingSpace("openai:test"), /완전하지/);
+  assert.equal(await db.embeddingProvider(1), "mock");
 });
 
 test("expired programs are not resurrected by a reindex", async () => {
@@ -264,6 +424,26 @@ test("CLI exits non-zero when every fetched record rolls back", () => {
   assert.equal(result.status, 1, result.stdout + result.stderr);
 });
 
+test("CLI exits non-zero on a source volume drop", () => {
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      "ingest/cli.ts",
+      "--fixtures",
+      "--dry-run",
+      "--no-llm",
+      "--source",
+      "bizinfo",
+      "--previous-counts",
+      '{"bizinfo":20}',
+    ],
+    { cwd: webRoot, env: { ...process.env, DATABASE_URL: "" }, encoding: "utf8" },
+  );
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+});
+
 test("all 30 fixtures match the established coverage baseline and are idempotent", async () => {
   const db = new InMemoryDatabase();
   const ingest = pipeline(db);
@@ -277,15 +457,33 @@ test("all 30 fixtures match the established coverage baseline and are idempotent
     { bizinfo: 8, finlife: 7, gov24: 1, kstartup: 1, local_welfare: 1, social_security: 12 },
   );
   assert.equal(ingest.report.totals.created, 30);
+  const actualByExternalId = new Map(
+    [...db.programs].map(([id, stored]) => [stored.external_id, db.rules.get(id)]),
+  );
+  assert.deepEqual([...actualByExternalId.keys()].sort(), Object.keys(FIXTURE_LABELS).sort());
+  for (const field of LABEL_FIELDS) {
+    const correct = Object.entries(FIXTURE_LABELS).filter(([externalId, expected]) =>
+      isDeepStrictEqual(actualByExternalId.get(externalId)?.[field], expected[field]),
+    ).length;
+    assert.ok(correct / 30 >= 0.9, `${field}: ${correct}/30`);
+  }
+
+  const alternativeAge = actualByExternalId.get("bizinfo:PBLN_000000000098770");
+  assert.deepEqual([alternativeAge?.age_min, alternativeAge?.age_max], [null, null]);
+  const scopedIncome = actualByExternalId.get("social_security:WII0000345");
+  assert.equal(scopedIncome?.median_income_percent_max, null);
+  assert(
+    scopedIncome?.extra_conditions.some(({ kind }) => kind === "household_income_scopes"),
+  );
   assert.deepEqual(ingest.report.parse.fieldHits, {
     age_min: 12,
     age_max: 9,
     regions: 5,
     occupations: 8,
-    income_decile_max: 11,
+    median_income_percent_max: 9,
   });
-  assert.equal(ingest.report.parse.withExtraConditions, 13);
-  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.707);
+  assert.equal(ingest.report.parse.withExtraConditions, 14);
+  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.684);
 
   await ingest.run(collectors);
   assert.equal(ingest.report.totals.updated, 0);

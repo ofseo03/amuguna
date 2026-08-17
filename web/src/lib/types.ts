@@ -7,7 +7,7 @@ export type ProgramForm = "subsidy" | "loan" | "tax" | "product" | "law";
 
 export type IssuerLevel = "central" | "metro" | "local";
 
-/** SPEC §5 입력 필드 1~5 (인적사항). 자유입력(6번)은 저장하지 않으므로 여기에 없다. */
+/** SPEC §5 입력 필드 1~5 (인적사항). 월소득 원문과 자유입력은 저장하지 않는다. */
 export interface Profile {
   /** 만 나이 0~120 */
   age: number;
@@ -18,8 +18,10 @@ export interface Profile {
   sidoCode: string;
   /** 시군구 5자리. shared/regions.json 화이트리스트 */
   sigunguCode: string;
-  /** 1~10 */
-  incomeDecile: number;
+  /** 1~10 자가 선택. 모르면 null */
+  incomeDecile: number | null;
+  /** 2026 기준중위소득 대비 정수 비율. 브라우저 계산값이며 원소득은 저장하지 않는다. */
+  medianIncomePercent: number | null;
 }
 
 /** SPEC §7.3 질의용 지역 코드 배열 — [시도 2자리, 시군구 5자리] */
@@ -41,6 +43,7 @@ export interface EligibilityRules {
   regions: string[] | null;
   occupations: string[] | null;
   income_decile_max: number | null;
+  median_income_percent_max: number | null;
   extra_conditions: ExtraCondition[];
   parse_method: "regex" | "llm" | "mixed";
   confidence: number;
@@ -86,6 +89,8 @@ export interface DimensionCheck {
   /** 이 프로그램이 해당 축에 조건을 걸고 있는가 (NULL = 조건 없음 = 통과) */
   constrained: boolean;
   pass: boolean;
+  /** 조건은 있지만 대응하는 사용자 값이 없어 자동 판정하지 않음 */
+  unknown: boolean;
   /** 상세 화면 체크리스트 문구 */
   requirement: string;
   mine: string;
@@ -112,6 +117,12 @@ export interface MatchCard {
   /** 카드 배지 (매칭에 관여한 내 속성) */
   badges: string[];
   dDay: number | null;
+}
+
+/** 서버가 다음 결과 묶음을 찾는 데만 쓰는 opaque cursor payload. */
+export interface MatchCursor {
+  score: number;
+  id: number;
 }
 
 /** §7.6 근접 탈락 1건 */
@@ -145,9 +156,8 @@ export interface MatchResponse {
   relaxation: RelaxationStage;
   /** 완화 적용 시 화면에 그대로 노출할 안내 문구 (§7.7) */
   relaxationNotice: string | null;
-  page: number;
   pageSize: number;
-  totalPages: number;
+  nextCursor: string | null;
   /** DB 미연결 시 true — 번들 데모 데이터로 동작 중 */
   demoMode: boolean;
   /** 임베딩 실패 등으로 의도 축이 빠진 경우 (§8 신뢰성) */

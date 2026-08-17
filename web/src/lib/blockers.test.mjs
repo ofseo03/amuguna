@@ -4,17 +4,20 @@ import test from "node:test";
 import { EMBEDDING_DIM, embedQuery, mockEmbed } from "./embedding.ts";
 import { isOpen } from "./eligibility.ts";
 
-test("email conflict cannot update another profile", async () => {
+test("the profile endpoint keeps personal input out of the database", async () => {
   const route = await readFile(
-    new URL("../app/api/subscribe/route.ts", import.meta.url),
+    new URL("../app/api/profile/route.ts", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(route, /UPDATE profiles[\s\S]*WHERE lower\(email\)/);
+  assert.doesNotMatch(route, /INSERT INTO profiles/);
+  assert.doesNotMatch(route, /getSql|isDbConfigured/);
 });
 
 test("matching drops every degraded query vector", async () => {
   const matching = await readFile(new URL("./matching.ts", import.meta.url), "utf8");
   assert.match(matching, /qvec = r\.degraded \? null : r\.vector/);
+  assert.match(matching, /active_vector_space/);
+  assert.match(matching, /vectorSpace\(\)/);
 });
 
 test("application windows use the Korean calendar date in every matching path", async () => {

@@ -34,6 +34,7 @@ export const RULE_COLUMNS = [
   "regions",
   "occupations",
   "income_decile_max",
+  "median_income_percent_max",
   "extra_conditions",
   "parse_method",
   "parse_evidence",
@@ -70,6 +71,7 @@ export type RuleValues = {
   regions: string[] | null;
   occupations: string[] | null;
   income_decile_max: number | null;
+  median_income_percent_max: number | null;
   extra_conditions: Array<Record<string, string>>;
   parse_method: "regex" | "llm" | "mixed";
   parse_evidence: Record<string, unknown>;
@@ -100,6 +102,11 @@ export type EmbeddingRow = {
   embedded_at: Date;
 };
 
+export type ReviewState = {
+  needsReview: boolean;
+  reviewReason: string | null;
+};
+
 export type InsertRawDocument = Omit<RawDocument, "id">;
 
 export interface Database {
@@ -107,6 +114,8 @@ export interface Database {
   latestContentHash(externalId: string): Promise<string | null>;
   insertRawDocument(values: InsertRawDocument): Promise<number>;
   getProgramId(externalId: string): Promise<number | null>;
+  programStatus(externalId: string): Promise<ProgramValues["status"] | null>;
+  programRawDocumentId(externalId: string): Promise<number | null>;
   upsertProgram(values: ProgramValues): Promise<number>;
   touchProgram(externalId: string, fetchedAt: Date): Promise<void>;
   reactivateProgram(
@@ -116,9 +125,10 @@ export interface Database {
   embeddingInput(
     programId: number,
   ): Promise<[title: string, summary: string, bodyText: string] | null>;
-  replaceRules(programId: number, values: RuleValues): Promise<void>;
+  replaceRules(programId: number, values: RuleValues, review?: ReviewState): Promise<void>;
   embeddingProvider(programId: number): Promise<string | null>;
   embeddingProviders(): Promise<Set<string>>;
+  activeEmbeddingSpace(): Promise<string | null>;
   replaceEmbeddings(
     programId: number,
     vectors: readonly (readonly number[])[],
@@ -126,10 +136,18 @@ export interface Database {
   ): Promise<void>;
   deleteEmbeddings(programId: number): Promise<void>;
   deleteAllEmbeddings(): Promise<void>;
+  clearStagedEmbeddings(vectorSpace: string): Promise<void>;
+  stageEmbeddings(
+    programId: number,
+    vectors: readonly (readonly number[])[],
+    vectorSpace: string,
+  ): Promise<void>;
+  activateEmbeddingSpace(vectorSpace: string): Promise<void>;
+  withEmbeddingReindexLock<T>(fn: () => Promise<T>): Promise<T>;
   /**
    * 재색인 대상. 수집기와 무관하게 DB 에 있는 공고를 다시 임베딩할 때 쓴다.
-   * `expired` 는 만료 시 임베딩을 지우므로 되살리지 않는다 — 되살리면 만료 공고가
-   * 벡터 top-k 자리를 잡아먹는다.
+   * 활성 공고만 대상으로 한다. `expired`와 `needs_review`가 벡터 top-k 자리를
+   * 잡아먹지 않게 두 상태 모두 제외한다.
    */
   programIds(): Promise<number[]>;
   /** 임베딩이 없는 공고. 중단된 재색인을 다음 회차가 이어받는 데 쓴다. */
@@ -143,6 +161,8 @@ export interface Database {
    */
   knownExternalIds(sourceKey: string): Promise<Set<string>>;
   expirePrograms(externalIds: Iterable<string>): Promise<number>;
+  sourceBaseline(sourceKey: string): Promise<number | null>;
+  recordSourceBaseline(sourceKey: string, fetchedCount: number): Promise<void>;
   commit(): Promise<void>;
   close(): Promise<void>;
 }
@@ -163,8 +183,11 @@ function assertExactKeys(
 export class InMemoryDatabase implements Database {
   rawDocuments: RawDocument[] = [];
   programs = new Map<number, ProgramRow>();
-  rules = new Map<number, RuleValues & { program_id: number }>();
+  rules = new Map<number, RuleValues & ReviewState & { program_id: number }>();
   embeddings = new Map<number, EmbeddingRow[]>();
+  stagedEmbeddings = new Map<string, Map<number, EmbeddingRow[]>>();
+  activeVectorSpace: string | null = null;
+  baselines = new Map<string, number>();
   committed = 0;
   private byExternal = new Map<string, number>();
   private nextProgramId = 1;
@@ -176,6 +199,9 @@ export class InMemoryDatabase implements Database {
       programs: this.programs,
       rules: this.rules,
       embeddings: this.embeddings,
+      stagedEmbeddings: this.stagedEmbeddings,
+      activeVectorSpace: this.activeVectorSpace,
+      baselines: this.baselines,
       byExternal: this.byExternal,
       nextProgramId: this.nextProgramId,
       nextRawId: this.nextRawId,
@@ -187,6 +213,9 @@ export class InMemoryDatabase implements Database {
       this.programs = snapshot.programs;
       this.rules = snapshot.rules;
       this.embeddings = snapshot.embeddings;
+      this.stagedEmbeddings = snapshot.stagedEmbeddings;
+      this.activeVectorSpace = snapshot.activeVectorSpace;
+      this.baselines = snapshot.baselines;
       this.byExternal = snapshot.byExternal;
       this.nextProgramId = snapshot.nextProgramId;
       this.nextRawId = snapshot.nextRawId;
@@ -215,6 +244,16 @@ export class InMemoryDatabase implements Database {
 
   async getProgramId(externalId: string): Promise<number | null> {
     return this.byExternal.get(externalId) ?? null;
+  }
+
+  async programStatus(externalId: string): Promise<ProgramValues["status"] | null> {
+    const id = this.byExternal.get(externalId);
+    return id === undefined ? null : this.programs.get(id)?.status ?? null;
+  }
+
+  async programRawDocumentId(externalId: string): Promise<number | null> {
+    const id = this.byExternal.get(externalId);
+    return id === undefined ? null : this.programs.get(id)?.raw_document_id ?? null;
   }
 
   async upsertProgram(values: ProgramValues): Promise<number> {
@@ -265,9 +304,13 @@ export class InMemoryDatabase implements Database {
     return row ? [row.title, row.summary ?? "", row.body_text ?? ""] : null;
   }
 
-  async replaceRules(programId: number, values: RuleValues): Promise<void> {
+  async replaceRules(
+    programId: number,
+    values: RuleValues,
+    review: ReviewState = { needsReview: false, reviewReason: null },
+  ): Promise<void> {
     assertExactKeys(values, RULE_COLUMNS, "eligibility_rules");
-    this.rules.set(programId, { program_id: programId, ...structuredClone(values) });
+    this.rules.set(programId, { program_id: programId, ...structuredClone(values), ...review });
   }
 
   async replaceEmbeddings(
@@ -294,9 +337,11 @@ export class InMemoryDatabase implements Database {
   }
 
   async embeddingProviders(): Promise<Set<string>> {
-    return new Set(
-      [...this.embeddings.values()].flat().map((row) => row.provider || "unknown"),
-    );
+    return this.activeVectorSpace ? new Set([this.activeVectorSpace]) : new Set();
+  }
+
+  async activeEmbeddingSpace(): Promise<string | null> {
+    return this.activeVectorSpace;
   }
 
   async deleteEmbeddings(programId: number): Promise<void> {
@@ -307,9 +352,54 @@ export class InMemoryDatabase implements Database {
     this.embeddings.clear();
   }
 
+  async clearStagedEmbeddings(vectorSpace: string): Promise<void> {
+    this.stagedEmbeddings.delete(vectorSpace);
+  }
+
+  async stageEmbeddings(
+    programId: number,
+    vectors: readonly (readonly number[])[],
+    vectorSpace: string,
+  ): Promise<void> {
+    let staged = this.stagedEmbeddings.get(vectorSpace);
+    if (!staged) {
+      staged = new Map();
+      this.stagedEmbeddings.set(vectorSpace, staged);
+    }
+    const embeddedAt = new Date();
+    staged.set(
+      programId,
+      vectors.map((embedding, chunk_idx) => ({
+        program_id: programId,
+        chunk_idx,
+        embedding: [...embedding],
+        provider: vectorSpace,
+        embedded_at: embeddedAt,
+      })),
+    );
+  }
+
+  async activateEmbeddingSpace(vectorSpace: string): Promise<void> {
+    const expected = await this.programIds();
+    const staged = this.stagedEmbeddings.get(vectorSpace);
+    const stagedIds = [...(staged?.entries() ?? [])]
+      .filter(([, rows]) => rows.length > 0)
+      .map(([programId]) => programId)
+      .sort((a, b) => a - b);
+    if (expected.length !== stagedIds.length || expected.some((id, index) => id !== stagedIds[index])) {
+      throw new Error(`재색인 벡터가 완전하지 않습니다: ${vectorSpace}`);
+    }
+    this.embeddings = structuredClone(staged ?? new Map());
+    this.activeVectorSpace = vectorSpace;
+  }
+
+  async withEmbeddingReindexLock<T>(fn: () => Promise<T>): Promise<T> {
+    return fn();
+  }
+
   async programIds(): Promise<number[]> {
     return [...this.programs.values()]
-      .filter((row) => row.status !== "expired")
+      .filter((row) => row.status === "active")
       .map((row) => row.id)
       .sort((a, b) => a - b);
   }
@@ -329,7 +419,7 @@ export class InMemoryDatabase implements Database {
       [...this.programs.values()]
         .filter(
           (row) =>
-            row.status !== "expired" &&
+            row.status === "active" &&
             row.external_id.startsWith(prefix) &&
             currentRawIds.has(row.raw_document_id),
         )
@@ -359,6 +449,14 @@ export class InMemoryDatabase implements Database {
     return count;
   }
 
+  async sourceBaseline(sourceKey: string): Promise<number | null> {
+    return this.baselines.get(sourceKey) ?? null;
+  }
+
+  async recordSourceBaseline(sourceKey: string, fetchedCount: number): Promise<void> {
+    this.baselines.set(sourceKey, fetchedCount);
+  }
+
   async commit(): Promise<void> {
     this.committed++;
   }
@@ -369,39 +467,14 @@ export class InMemoryDatabase implements Database {
 type RootSql = ReturnType<typeof postgres>;
 type QuerySql = RootSql | postgres.TransactionSql;
 
-function dsnSslMode(dsn: string): string | null {
-  try {
-    return new URL(dsn).searchParams.get("sslmode");
-  } catch {
-    // Do not try to fully parse libpq keyword DSNs here.  This is only enough
-    // to avoid overriding an explicit sslmode before the driver validates it.
-    const match = /(?:^|\s)sslmode\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
-    return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
-  }
-}
-
-function isLocalDsn(dsn: string): boolean {
-  try {
-    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(dsn).hostname);
-  } catch {
-    const match = /(?:^|\s)host\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
-    const host = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
-    return ["localhost", "127.0.0.1", "::1"].includes(host) || host.startsWith("/");
-  }
-}
-
 export function postgresOptions(dsn: string): postgres.Options<Record<string, never>> {
-  const sslMode = dsnSslMode(dsn);
+  const ssl = sslOption(dsn);
   return {
     max: 1,
     connect_timeout: 10,
     idle_timeout: 20,
     prepare: false,
-    ...(sslMode === null && process.env.PGSSLROOTCERT
-      ? { ssl: sslOption() }
-      : sslMode === null && !isLocalDsn(dsn)
-        ? { ssl: "verify-full" as const }
-        : {}),
+    ...(ssl === undefined ? {} : { ssl }),
   };
 }
 
@@ -457,6 +530,20 @@ export class PostgresDatabase implements Database {
       SELECT id FROM programs WHERE external_id = ${externalId}
     `;
     return rows[0] ? Number(rows[0].id) : null;
+  }
+
+  async programStatus(externalId: string): Promise<ProgramValues["status"] | null> {
+    const rows = await this.sql<{ status: ProgramValues["status"] }[]>`
+      SELECT status FROM programs WHERE external_id = ${externalId}
+    `;
+    return rows[0]?.status ?? null;
+  }
+
+  async programRawDocumentId(externalId: string): Promise<number | null> {
+    const rows = await this.sql<{ raw_document_id: number | string }[]>`
+      SELECT raw_document_id FROM programs WHERE external_id = ${externalId}
+    `;
+    return rows[0] ? Number(rows[0].raw_document_id) : null;
   }
 
   async upsertProgram(values: ProgramValues): Promise<number> {
@@ -529,18 +616,25 @@ export class PostgresDatabase implements Database {
     return row ? [row.title, row.summary, row.body_text] : null;
   }
 
-  async replaceRules(programId: number, values: RuleValues): Promise<void> {
+  async replaceRules(
+    programId: number,
+    values: RuleValues,
+    review: ReviewState = { needsReview: false, reviewReason: null },
+  ): Promise<void> {
     assertExactKeys(values, RULE_COLUMNS, "eligibility_rules");
     await this.sql`
       INSERT INTO eligibility_rules (
         program_id, age_min, age_max, gender, regions, occupations,
-        income_decile_max, extra_conditions, parse_method, parse_evidence, confidence
+        income_decile_max, median_income_percent_max,
+        extra_conditions, parse_method, parse_evidence, confidence, needs_review, review_reason
       ) VALUES (
         ${programId}, ${values.age_min}, ${values.age_max}, ${values.gender},
         ${values.regions ? this.sql.array(values.regions) : null}::text[],
         ${values.occupations ? this.sql.array(values.occupations) : null}::text[],
-        ${values.income_decile_max}, ${JSON.stringify(values.extra_conditions)}::jsonb,
-        ${values.parse_method}, ${JSON.stringify(values.parse_evidence)}::jsonb, ${values.confidence}
+        ${values.income_decile_max}, ${values.median_income_percent_max},
+        ${JSON.stringify(values.extra_conditions)}::jsonb,
+        ${values.parse_method}, ${JSON.stringify(values.parse_evidence)}::jsonb, ${values.confidence},
+        ${review.needsReview}, ${review.reviewReason}
       )
       ON CONFLICT (program_id) DO UPDATE SET
         age_min = EXCLUDED.age_min,
@@ -549,10 +643,13 @@ export class PostgresDatabase implements Database {
         regions = EXCLUDED.regions,
         occupations = EXCLUDED.occupations,
         income_decile_max = EXCLUDED.income_decile_max,
+        median_income_percent_max = EXCLUDED.median_income_percent_max,
         extra_conditions = EXCLUDED.extra_conditions,
         parse_method = EXCLUDED.parse_method,
         parse_evidence = EXCLUDED.parse_evidence,
-        confidence = EXCLUDED.confidence
+        confidence = EXCLUDED.confidence,
+        needs_review = EXCLUDED.needs_review,
+        review_reason = EXCLUDED.review_reason
     `;
   }
 
@@ -583,9 +680,18 @@ export class PostgresDatabase implements Database {
 
   async embeddingProviders(): Promise<Set<string>> {
     const rows = await this.sql<{ provider: string }[]>`
-      SELECT DISTINCT COALESCE(provider, 'unknown') AS provider FROM program_embeddings
+      SELECT active_vector_space AS provider
+      FROM ingest_embedding_state
+      WHERE singleton
     `;
-    return new Set(rows.map((row) => row.provider));
+    return new Set(rows.flatMap((row) => (row.provider ? [row.provider] : [])));
+  }
+
+  async activeEmbeddingSpace(): Promise<string | null> {
+    const rows = await this.sql<{ active_vector_space: string | null }[]>`
+      SELECT active_vector_space FROM ingest_embedding_state WHERE singleton
+    `;
+    return rows[0]?.active_vector_space ?? null;
   }
 
   async deleteEmbeddings(programId: number): Promise<void> {
@@ -596,9 +702,74 @@ export class PostgresDatabase implements Database {
     await this.sql`DELETE FROM program_embeddings`;
   }
 
+  async clearStagedEmbeddings(vectorSpace: string): Promise<void> {
+    await this.sql`
+      DELETE FROM program_embedding_staging WHERE vector_space = ${vectorSpace}
+    `;
+  }
+
+  async stageEmbeddings(
+    programId: number,
+    vectors: readonly (readonly number[])[],
+    vectorSpace: string,
+  ): Promise<void> {
+    await this.sql`
+      DELETE FROM program_embedding_staging
+      WHERE program_id = ${programId} AND vector_space = ${vectorSpace}
+    `;
+    for (let chunkIdx = 0; chunkIdx < vectors.length; chunkIdx++) {
+      const literal = toPgVectorLiteral([...vectors[chunkIdx]]);
+      await this.sql`
+        INSERT INTO program_embedding_staging (program_id, vector_space, chunk_idx, embedding, embedded_at)
+        VALUES (${programId}, ${vectorSpace}, ${chunkIdx}, ${literal}::vector, now())
+      `;
+    }
+  }
+
+  async activateEmbeddingSpace(vectorSpace: string): Promise<void> {
+    if (this.root) {
+      return this.transaction((db) => db.activateEmbeddingSpace(vectorSpace));
+    }
+    await this.sql`SELECT pg_advisory_xact_lock(hashtext('amuguna_embedding_reindex'))`;
+    await this.sql`LOCK TABLE programs, program_embedding_staging, program_embeddings IN SHARE ROW EXCLUSIVE MODE`;
+    const rows = await this.sql<{ complete: boolean }[]>`
+      SELECT NOT EXISTS (
+        (SELECT id AS program_id FROM programs WHERE status = 'active'
+         EXCEPT
+         SELECT DISTINCT program_id FROM program_embedding_staging WHERE vector_space = ${vectorSpace})
+        UNION ALL
+        (SELECT DISTINCT program_id FROM program_embedding_staging WHERE vector_space = ${vectorSpace}
+         EXCEPT
+         SELECT id AS program_id FROM programs WHERE status = 'active')
+      ) AS complete
+    `;
+    if (!rows[0]?.complete) {
+      throw new Error(`재색인 벡터가 완전하지 않습니다: ${vectorSpace}`);
+    }
+    await this.sql`DELETE FROM program_embeddings`;
+    await this.sql`
+      INSERT INTO program_embeddings (program_id, chunk_idx, embedding, provider, embedded_at)
+      SELECT s.program_id, s.chunk_idx, s.embedding, s.vector_space, s.embedded_at
+      FROM program_embedding_staging AS s
+      JOIN programs AS p ON p.id = s.program_id AND p.status = 'active'
+      WHERE s.vector_space = ${vectorSpace}
+    `;
+    await this.sql`
+      UPDATE ingest_embedding_state
+      SET active_vector_space = ${vectorSpace}, updated_at = now()
+      WHERE singleton
+    `;
+  }
+
+  async withEmbeddingReindexLock<T>(fn: () => Promise<T>): Promise<T> {
+    // 활성 교체 트랜잭션의 xact lock과 정확한 ID 집합 검증이 최종 경계를 맡는다.
+    // session lock은 transaction-pooler에서 같은 연결로 unlock됨을 보장할 수 없다.
+    return fn();
+  }
+
   async programIds(): Promise<number[]> {
     const rows = await this.sql<{ id: number }[]>`
-      SELECT id FROM programs WHERE status <> 'expired' ORDER BY id
+      SELECT id FROM programs WHERE status = 'active' ORDER BY id
     `;
     return rows.map((row) => row.id);
   }
@@ -606,7 +777,7 @@ export class PostgresDatabase implements Database {
   async programIdsWithoutEmbeddings(): Promise<number[]> {
     const rows = await this.sql<{ id: number }[]>`
       SELECT p.id FROM programs p
-      WHERE p.status <> 'expired'
+      WHERE p.status = 'active'
         AND NOT EXISTS (SELECT 1 FROM program_embeddings e WHERE e.program_id = p.id)
       ORDER BY p.id
     `;
@@ -620,7 +791,7 @@ export class PostgresDatabase implements Database {
       SELECT p.external_id
       FROM programs p
       JOIN raw_documents d ON d.id = p.raw_document_id
-      WHERE p.status <> 'expired'
+      WHERE p.status = 'active'
         AND starts_with(p.external_id, ${`${sourceKey}:`})
         AND starts_with(d.content_hash, ${PARSER_HASH_PREFIX})
     `;
@@ -650,6 +821,23 @@ export class PostgresDatabase implements Database {
       `;
     }
     return rows.length;
+  }
+
+  async sourceBaseline(sourceKey: string): Promise<number | null> {
+    const rows = await this.sql<{ fetched_count: number }[]>`
+      SELECT fetched_count FROM ingest_source_baselines WHERE source_key = ${sourceKey}
+    `;
+    return rows[0]?.fetched_count ?? null;
+  }
+
+  async recordSourceBaseline(sourceKey: string, fetchedCount: number): Promise<void> {
+    await this.sql`
+      INSERT INTO ingest_source_baselines (source_key, fetched_count, succeeded_at)
+      VALUES (${sourceKey}, ${fetchedCount}, now())
+      ON CONFLICT (source_key) DO UPDATE SET
+        fetched_count = EXCLUDED.fetched_count,
+        succeeded_at = EXCLUDED.succeeded_at
+    `;
   }
 
   async commit(): Promise<void> {

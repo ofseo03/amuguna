@@ -1,11 +1,12 @@
 import {
   EMBEDDING_DIM,
   mockEmbed,
+  OPENAI_MODEL,
   VOYAGE_MODEL,
   type EmbeddingProvider,
 } from "../src/lib/embedding";
 
-export const OPENAI_MODEL = "text-embedding-3-small";
+export { OPENAI_MODEL };
 
 export const TARGET_CHUNK_CHARS = 500;
 export const MAX_CHUNK_CHARS = 900;

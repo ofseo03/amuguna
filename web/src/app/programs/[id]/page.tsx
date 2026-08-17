@@ -12,7 +12,14 @@ import { getProgram } from "@/lib/matching";
 import { checklist, DIMENSION_LABEL, dDay, evaluate } from "@/lib/eligibility";
 import { readProfile } from "@/lib/session";
 import { FORM_LABEL } from "@/lib/forms";
-import { dDayLabel, formatDate, formatDateTime, isUrgent, issuerLevelLabel } from "@/lib/format";
+import {
+  dDayLabel,
+  externalHttpUrl,
+  formatDate,
+  formatDateTime,
+  isUrgent,
+  issuerLevelLabel,
+} from "@/lib/format";
 import { Disclaimer } from "@/components/SiteChrome";
 import Term from "@/components/Term";
 
@@ -42,6 +49,8 @@ export default async function ProgramDetailPage({ params }: Props) {
   const ev = profile ? evaluate(program.rules, profile) : null;
   const d = dDay(program);
   const extras = program.rules.extra_conditions ?? [];
+  const sourceUrl = externalHttpUrl(program.source_url);
+  const applyUrl = externalHttpUrl(program.apply_url);
 
   return (
     <article className="mx-auto max-w-3xl px-4 py-8">
@@ -76,8 +85,10 @@ export default async function ProgramDetailPage({ params }: Props) {
           }`}
         >
           <p className="text-lg font-bold">
-            {ev.violations === 0 ? (
+            {ev.violations === 0 && ev.unknownDimensions.length === 0 ? (
               <span className="text-ok">✅ 입력하신 정보로는 대상에 해당합니다</span>
+            ) : ev.violations === 0 ? (
+              <span className="text-warn">⚠️ 입력하지 않은 조건을 추가로 확인해 주세요</span>
             ) : (
               <span className="text-warn">
                 ⚠️ 조건 {ev.violations}개가 맞지 않습니다
@@ -147,16 +158,18 @@ export default async function ProgramDetailPage({ params }: Props) {
                 className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-4 py-3 ${
                   !c.constrained
                     ? "border-line-soft bg-bg-soft"
+                    : c.unknown
+                      ? "border-warn bg-warn-soft"
                     : c.pass
                       ? "border-ok bg-ok-soft"
                       : "border-danger bg-danger-soft"
                 }`}
               >
                 <span aria-hidden="true" className="text-lg">
-                  {!c.constrained ? "➖" : c.pass ? "✅" : "❌"}
+                  {!c.constrained ? "➖" : c.unknown ? "⚠️" : c.pass ? "✅" : "❌"}
                 </span>
                 <span className="sr-only">
-                  {!c.constrained ? "조건 없음" : c.pass ? "충족" : "미충족"}
+                  {!c.constrained ? "조건 없음" : c.unknown ? "추가 확인 필요" : c.pass ? "충족" : "미충족"}
                 </span>
                 <span className="w-20 font-semibold text-ink">
                   {DIMENSION_LABEL[c.dimension]}
@@ -242,14 +255,18 @@ export default async function ProgramDetailPage({ params }: Props) {
         <div className="mt-3 rounded-xl border border-line bg-white p-5">
           <p className="text-ink-2">
             <span className="font-semibold text-ink">원문</span>{" "}
-            <a
-              href={program.source_url}
-              target="_blank"
-              rel="noopener noreferrer nofollow"
-              className="break-all underline hover:text-brand"
-            >
-              {program.source_url}
-            </a>
+            {sourceUrl ? (
+              <a
+                href={sourceUrl}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="break-all underline hover:text-brand"
+              >
+                {program.source_url}
+              </a>
+            ) : (
+              <span className="text-ink-3">안전한 원문 링크 없음</span>
+            )}
           </p>
           <p className="mt-2 text-ink-2">
             <span className="font-semibold text-ink">수집 시각</span>{" "}
@@ -259,9 +276,9 @@ export default async function ProgramDetailPage({ params }: Props) {
             발행 기관 {program.issuer} · 식별자 {program.external_id} · 자격요건
             추출 방식 {program.rules.parse_method}
           </p>
-          {program.apply_url && (
+          {applyUrl && (
             <a
-              href={program.apply_url}
+              href={applyUrl}
               target="_blank"
               rel="noopener noreferrer nofollow"
               className="mt-4 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"

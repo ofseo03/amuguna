@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { midrateToDecile, normalizeText } from "../dictionaries";
+import { normalizeText } from "../dictionaries";
 import {
   CollectedProgram,
   EligibilityRules,
@@ -30,13 +30,14 @@ const NORMAL_CASES: Array<[string, Expected]> = [
   ["만 60세 초과 가입자", { age_min: 61 }],
   ["만 19세 이상 39세 미만 청년", { age_min: 19, age_max: 38 }],
   ["만 15세 이상 69세 이하 구직자", { age_min: 15, age_max: 69, occupations: ["jobseeker"] }],
-  ["기준 중위소득 60% 이하 가구", { income_decile_max: 3 }],
-  ["기준 중위소득 150% 이하", { income_decile_max: 7 }],
-  ["중위소득 100% 이하 가구", { income_decile_max: 5 }],
-  ["기준 중위소득 48% 이하 가구", { income_decile_max: 2 }],
+  ["기준 중위소득 60% 이하 가구", { median_income_percent_max: 60 }],
+  ["기준 중위소득 150% 이하", { median_income_percent_max: 150 }],
+  ["중위소득 100% 이하 가구", { median_income_percent_max: 100 }],
+  ["기준 중위소득 48% 이하 가구", { median_income_percent_max: 48 }],
   ["소득 3분위 이하 가구", { income_decile_max: 3 }],
-  ["차상위계층 또는 기초생활수급 가구", { income_decile_max: 2 }],
-  ["기준 중위소득 180% 이하 가구원", { income_decile_max: 8 }],
+  ["차상위계층 또는 기초생활수급 가구", { income_decile_max: null }],
+  ["기준 중위소득 180% 이하 가구원", { median_income_percent_max: 180 }],
+  ["기준 중위소득 150% 미만 가구", { median_income_percent_max: 149 }],
   ["여성만 신청 가능합니다", { gender: "F" }],
   ["남성에 한정합니다", { gender: "M" }],
   ["여성 가구주에 한함", { gender: "F" }],
@@ -49,9 +50,9 @@ const NORMAL_CASES: Array<[string, Expected]> = [
   ["프리랜서 및 특수형태근로종사자", { occupations: ["freelancer"] }],
   [
     "만 19세 이상 34세 이하이며 기준 중위소득 150% 이하인 서울특별시 거주 청년",
-    { age_min: 19, age_max: 34, income_decile_max: 7, regions: ["11"] },
+    { age_min: 19, age_max: 34, median_income_percent_max: 150, regions: ["11"] },
   ],
-  ["기초생활수급 가구의 만 65세 이상 어르신", { age_min: 65, income_decile_max: 2 }],
+  ["기초생활수급 가구의 만 65세 이상 어르신", { age_min: 65, income_decile_max: null }],
   ["부산광역시 해운대구에 사업장을 둔 소상공인", { regions: ["26350"], occupations: ["self_employed"] }],
 ];
 
@@ -74,8 +75,8 @@ function checkSubset(rules: EligibilityRules, expected: Expected, message: strin
   }
 }
 
-test("parser contract keeps 30 normal and 10 trap cases", () => {
-  assert.equal(NORMAL_CASES.length, 30);
+test("parser contract keeps normal and trap cases", () => {
+  assert.equal(NORMAL_CASES.length, 31);
   assert.equal(TRAP_CASES.length, 10);
   for (const [sentence, expected] of NORMAL_CASES) {
     checkSubset(parseEligibility(sentence), expected, sentence);
@@ -121,15 +122,37 @@ test("age conjunction intersects while OR alternatives stay unfiltered", () => {
   assert.deepEqual([reversed.age_min, reversed.age_max], [null, null]);
 });
 
+test("different household income scopes stay out of the hard filter", () => {
+  const scoped = parseEligibility(
+    "청년 본인 가구 기준 중위소득 60% 이하이며, 원가구 기준 중위소득 100% 이하",
+  );
+  assert.equal(scoped.median_income_percent_max, null);
+  assert(
+    scoped.extra_conditions.some(({ kind }) => kind === "household_income_scopes"),
+  );
+
+  assert.equal(
+    parseEligibility(
+      "신청자 가구 기준 중위소득 60% 이하이며 신청자 가구 기준 중위소득 100% 이하",
+    ).median_income_percent_max,
+    60,
+  );
+});
+
 test("live notation variants and invalid scalar values stay inside the schema", () => {
   for (const text of ["19세~34세", "만 19세~만 34세", "만 19세～34세"]) {
     assert.deepEqual([parseEligibility(text).age_min, parseEligibility(text).age_max], [19, 34], text);
   }
   assert.equal(parseEligibility("소득 1분위 이하").income_decile_max, 1);
   assert.equal(parseEligibility("소득 10분위 이하").income_decile_max, 10);
+  assert.equal(parseEligibility("소득 3분위 이내").income_decile_max, 3);
+  assert.equal(parseEligibility("소득 3분위 까지").income_decile_max, 3);
+  assert.equal(parseEligibility("소득 3분위 미만").income_decile_max, 2);
+  assert.equal(parseEligibility("소득 1분위 미만").income_decile_max, null);
   assert.equal(parseEligibility("소득 0분위 이하").income_decile_max, null);
   assert.equal(parseEligibility("소득 11분위 이하").income_decile_max, null);
   assert.equal(parseEligibility("만 999세 이상").age_min, null);
+  assert.equal(parseEligibility("기준 중위소득 1500% 이하").median_income_percent_max, null);
   assert.equal(parseEligibility("만 18세 이상 한부모가족 세대주").age_min, 18);
 });
 
@@ -195,12 +218,6 @@ test("evidence, parse method, and confidence preserve parser diagnostics", () =>
 });
 
 test("shared dictionaries and Korean normalization keep the parser contract", () => {
-  for (const [percent, decile] of [
-    [30, 2], [50, 2], [60, 3], [75, 3], [100, 5],
-    [120, 6], [150, 7], [180, 8], [200, 9], [300, 10],
-  ] as Array<[number, number]>) {
-    assert.equal(midrateToDecile(percent), decile);
-  }
   assert.deepEqual(parseEligibility("서울특별시 관악구 거주").regions, ["11620"]);
   assert.deepEqual(parseEligibility("서울특별시 거주").regions, ["11"]);
   assert.deepEqual(parseEligibility("강원특별자치도 횡성군 거주").regions, ["51730"]);
@@ -279,8 +296,11 @@ test("non-requirements and partial alternatives never become hard filters", () =
     null,
   );
 
-  assert.equal(parseEligibility("차상위계층 또는 기초생활수급 가구").income_decile_max, 2);
-  assert.equal(parseEligibility("생계급여 또는 의료급여 수급 가구").income_decile_max, 2);
+  const assistance = parseEligibility("차상위계층 또는 기초생활수급 가구");
+  assert.equal(assistance.income_decile_max, null);
+  assert.equal(assistance.median_income_percent_max, null);
+  assert(assistance.extra_conditions.some(({ kind }) => kind === "public_assistance"));
+  assert.equal(parseEligibility("생계급여 또는 의료급여 수급 가구").income_decile_max, null);
   assert.deepEqual(parseEligibility("농업인 또는 어업인").occupations, ["farmer_fisher"]);
   assert.deepEqual(parseEligibility("취업준비생 또는 개인사업자").occupations?.sort(), [
     "jobseeker",
@@ -297,8 +317,8 @@ test("non-requirements and partial alternatives never become hard filters", () =
     ["jobseeker"],
   );
   assert.equal(
-    parseEligibility("기준 중위소득 100% 이하인 농업인 또는 어업인").income_decile_max,
-    5,
+    parseEligibility("기준 중위소득 100% 이하인 농업인 또는 어업인").median_income_percent_max,
+    100,
   );
   assert.deepEqual(
     parseEligibility("전라남도 순천시에 거주하는 농업인 또는 어업인").regions,
@@ -307,8 +327,8 @@ test("non-requirements and partial alternatives never become hard filters", () =
   assert.equal(parseEligibility("만 19세 이상 청년 중 저소득층을 우대합니다.").age_min, 19);
   assert.equal(
     parseEligibility("기준 중위소득 100% 이하 가구 중 한부모 가구를 우선 지원합니다.")
-      .income_decile_max,
-    5,
+      .median_income_percent_max,
+    100,
   );
   assert.equal(
     parseEligibility("만 19세 이상 청년을 지원하며 저소득층을 우대합니다.").age_min,
@@ -320,12 +340,12 @@ test("non-requirements and partial alternatives never become hard filters", () =
   );
   assert.equal(
     parseEligibility("기준 중위소득 100% 이하 가구를 지원하며 한부모 가구를 우선 지원합니다.")
-      .income_decile_max,
-    5,
+      .median_income_percent_max,
+    100,
   );
   assert.equal(
     parseEligibility("기준 중위소득 100% 이하인 농업인 또는 소득 무관 어업인")
-      .income_decile_max,
+      .median_income_percent_max,
     null,
   );
   assert.equal(
@@ -338,7 +358,7 @@ test("non-requirements and partial alternatives never become hard filters", () =
   );
   assert.equal(
     parseEligibility("기준 중위소득 100% 이하인 농업인 또는 소득 제한 없는 어업인")
-      .income_decile_max,
+      .median_income_percent_max,
     null,
   );
   assert.equal(
@@ -388,6 +408,7 @@ test("CollectedProgram hashes stable fields and builds the embedding source", ()
     eligibility_text: "만 19세 이상",
   });
   const volatile = new CollectedProgram({ ...base.toDict(), source_url: "https://example.test/2", raw_body: { views: 9 } });
+  assert.equal(PARSER_HASH_PREFIX, "parser-v3:");
   assert.equal(base.contentHash(), volatile.contentHash());
   assert.equal(
     base.contentHash(),

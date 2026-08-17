@@ -1,10 +1,10 @@
 /**
  * 서버 측 입력 검증 (SPEC §8 보안).
- * 나이 0~120 / 지역코드 화이트리스트 / 소득분위 1~10 / 자유입력 200자.
+ * 나이 0~120 / 지역코드 화이트리스트 / 소득분위 1~10 / 기준중위소득 비율 0~10000.
  * 클라이언트 검증은 UX 용일 뿐이고, 신뢰 경계는 여기다.
  */
 import { isValidOccupation, isValidSido, isValidSigungu } from "./shared-data";
-import type { Gender, Profile, ProgramForm } from "./types";
+import type { Gender, MatchCursor, Profile, ProgramForm } from "./types";
 import { FORMS } from "./forms";
 
 export const MAX_QUERY_LEN = 200;
@@ -51,15 +51,27 @@ export function validateProfile(input: any): Validated<Profile> {
     errors.push({ field: "sigunguCode", message: "시·군·구 코드가 올바르지 않습니다." });
   }
 
-  const incomeDecile = Number(input.incomeDecile);
-  if (!Number.isInteger(incomeDecile) || incomeDecile < 1 || incomeDecile > 10) {
+  const incomeDecile = input.incomeDecile == null ? null : Number(input.incomeDecile);
+  if (incomeDecile !== null && (!Number.isInteger(incomeDecile) || incomeDecile < 1 || incomeDecile > 10)) {
     errors.push({ field: "incomeDecile", message: "소득분위는 1에서 10 사이여야 합니다." });
+  }
+
+  const medianIncomePercent =
+    input.medianIncomePercent == null ? null : Number(input.medianIncomePercent);
+  if (
+    medianIncomePercent !== null &&
+    (!Number.isInteger(medianIncomePercent) || medianIncomePercent < 0 || medianIncomePercent > 10000)
+  ) {
+    errors.push({
+      field: "medianIncomePercent",
+      message: "기준중위소득 비율은 0에서 10000 사이여야 합니다.",
+    });
   }
 
   if (errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
-    value: { age, gender, occupation, sidoCode, sigunguCode, incomeDecile },
+    value: { age, gender, occupation, sidoCode, sigunguCode, incomeDecile, medianIncomePercent },
   };
 }
 
@@ -87,20 +99,30 @@ export function validateForm(input: unknown): ProgramForm | "all" {
   return "all";
 }
 
-export function validatePage(input: unknown): number {
-  const n = Number(input);
-  if (!Number.isFinite(n) || n < 1) return 1;
-  return Math.min(Math.floor(n), 10_000);
-}
+export function validateCursor(input: unknown): Validated<MatchCursor | null> {
+  if (input === undefined || input === null || input === "") return { ok: true, value: null };
+  if (typeof input !== "string" || input.length > 256 || !/^[A-Za-z0-9_-]+$/.test(input)) {
+    return { ok: false, errors: [{ field: "cursor", message: "cursor 값이 올바르지 않습니다." }] };
+  }
 
-/** 알림 신청 이메일 — 과하게 엄격하지 않게, 명백한 오입력만 거른다 */
-export function validateEmail(input: unknown): Validated<string> {
-  const s = String(input ?? "").trim();
-  if (s.length === 0) {
-    return { ok: false, errors: [{ field: "email", message: "이메일을 입력해 주세요." }] };
+  try {
+    const parsed: unknown = JSON.parse(Buffer.from(input, "base64url").toString("utf8"));
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed) ||
+      Object.keys(parsed).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(parsed, "score") ||
+      !Object.prototype.hasOwnProperty.call(parsed, "id")
+    ) {
+      throw new Error("invalid cursor shape");
+    }
+    const { score, id } = parsed as MatchCursor;
+    if (!Number.isFinite(score) || score < 0 || score > 1 || !Number.isSafeInteger(id) || id < 1) {
+      throw new Error("invalid cursor values");
+    }
+    return { ok: true, value: { score, id } };
+  } catch {
+    return { ok: false, errors: [{ field: "cursor", message: "cursor 값이 올바르지 않습니다." }] };
   }
-  if (s.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s)) {
-    return { ok: false, errors: [{ field: "email", message: "이메일 형식이 올바르지 않습니다." }] };
-  }
-  return { ok: true, value: s.toLowerCase() };
 }

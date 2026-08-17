@@ -45,6 +45,9 @@ export interface FetchOptions {
 
 export type CollectorConstructor = new (options?: CollectorOptions) => Collector;
 
+/** 총 건수가 없는 API의 무한 페이지를 막는다. 도달 시 성공으로 가장하지 않는다. */
+export const PAGINATION_SAFETY_LIMIT = 1_000;
+
 export abstract class Collector {
   abstract readonly sourceKey: string;
   abstract readonly endpoint: string;
@@ -58,6 +61,8 @@ export abstract class Collector {
   readonly retries: number;
   readonly timeoutMs: number;
   httpCalls = 0;
+  observedCount: number | null = null;
+  readonly errors: string[] = [];
 
   private readonly fetchImpl: FetchLike;
 
@@ -191,22 +196,39 @@ export abstract class Collector {
     }
   }
 
-  async fetch({ since = null, maxPages = 5 }: FetchOptions = {}): Promise<CollectedProgram[]> {
+  async fetch(options: FetchOptions = {}): Promise<CollectedProgram[]> {
+    this.observedCount = null;
+    this.errors.length = 0;
+    const { since = null } = options;
+    const maxPages = options.maxPages ?? PAGINATION_SAFETY_LIMIT;
     const payloads: unknown[] = [];
     if (this.useFixtures) {
       payloads.push(await this.loadJson(this.fixturePath));
     } else {
+      let complete = false;
       for (let page = 1; page <= maxPages; page += 1) {
         const payload = await this.getJson(this.queryParams({ since, page }));
         const pageItems = this.items(payload);
         if (pageItems.length === 0) this.validateEmptyPage(payload);
         payloads.push(payload);
-        if (pageItems.length < this.pageSize) break;
+        if (pageItems.length < this.pageSize) {
+          complete = true;
+          break;
+        }
+      }
+      if (!complete && options.maxPages === undefined) {
+        throw new CollectorError(
+          `${this.sourceKey}: ${PAGINATION_SAFETY_LIMIT}페이지 안전 한도에 도달해 전량 수집 여부를 확인할 수 없음`,
+        );
       }
     }
 
     const collected: CollectedProgram[] = [];
     const seen = new Set<string>();
+    this.observedCount = payloads.reduce<number>(
+      (count, payload) => count + this.items(payload).length,
+      0,
+    );
     for (const payload of payloads) {
       for (const item of this.items(payload)) {
         try {
@@ -216,6 +238,7 @@ export abstract class Collector {
           collected.push(program);
         } catch (error) {
           console.warn(`${this.sourceKey}: 항목 매핑 실패`, error);
+          this.errors.push(`항목 매핑 실패: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
     }
@@ -235,7 +258,7 @@ export abstract class Collector {
         if (!(error instanceof CollectorError) || !error.cause || !isMissingFile(error.cause)) throw error;
       }
     }
-    return new Set((await this.fetch({ maxPages: this.useFixtures ? 5 : 50 })).map((p) => p.external_id));
+    return new Set((await this.fetch()).map((p) => p.external_id));
   }
 }
 

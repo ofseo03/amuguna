@@ -9,7 +9,7 @@ import { NextResponse } from "next/server";
 import { runMatch } from "@/lib/matching";
 import { readProfile, readSessionId } from "@/lib/session";
 import { checkSessionAndIpRateLimit } from "@/lib/rate-limit";
-import { validateForm, validatePage, validateQuery } from "@/lib/validation";
+import { validateCursor, validateForm, validateQuery } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -52,13 +52,17 @@ export async function POST(req: Request) {
   if (!q.ok) {
     return NextResponse.json({ ok: false, errors: q.errors }, { status: 400 });
   }
+  const cursor = validateCursor(body.cursor);
+  if (!cursor.ok) {
+    return NextResponse.json({ ok: false, errors: cursor.errors }, { status: 400 });
+  }
 
   try {
     const result = await runMatch({
       profile,
       query: q.value,
       form: validateForm(body.form),
-      page: validatePage(body.page),
+      cursor: cursor.value,
     });
     return NextResponse.json(
       { ok: true, ...result },

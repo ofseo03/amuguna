@@ -1,7 +1,7 @@
 /**
  * 익명 세션 (SPEC §8 개인정보).
  *
- * 회원가입 없음. 프로필 5필드는 httpOnly 쿠키에만 담고,
+ * 회원가입 없음. 정규화한 프로필은 httpOnly 쿠키에 담고,
  * 자유입력("원하는 것")은 절대 쿠키에도 DB 에도 넣지 않는다 — 요청 처리 중에만 존재한다.
  *
  * 쿠키에는 HMAC 서명을 붙여 클라이언트 변조를 막는다. 서명 키가 없으면
@@ -14,13 +14,19 @@ import type { Profile } from "./types";
 export const PROFILE_COOKIE = "amuguna_profile";
 export const SESSION_COOKIE = "amuguna_sid";
 
-/** 프로필 보관 90일 후 자동 삭제 정책(§8)과 맞춘 쿠키 수명 */
+/**
+ * 쿠키 수명 90일 — 재방문 시 6단계를 다시 입력하지 않아도 되게 한다.
+ * 서버에 사본이 없으므로 이 값이 프로필의 유일한 보유기간이다. 개인정보처리방침에 같은 값을 고지한다(§8).
+ */
 const MAX_AGE_SEC = 60 * 60 * 24 * 90;
 
 let warned = false;
-function secret(): string {
-  const s = process.env.SESSION_SECRET;
-  if (s && s.length >= 16) return s;
+export function sessionSecret(env: NodeJS.ProcessEnv = process.env): string {
+  const s = env.SESSION_SECRET;
+  if (s && s.length >= 32) return s;
+  if (env.NODE_ENV === "production") {
+    throw new Error("SESSION_SECRET은 프로덕션에서 32자 이상이어야 합니다.");
+  }
   if (!warned) {
     warned = true;
     console.warn(
@@ -31,7 +37,7 @@ function secret(): string {
 }
 
 function sign(payload: string): string {
-  return createHmac("sha256", secret()).update(payload).digest("base64url");
+  return createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -39,6 +45,22 @@ function safeEqual(a: string, b: string): boolean {
   const bb = Buffer.from(b);
   if (ba.length !== bb.length) return false;
   return timingSafeEqual(ba, bb);
+}
+
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function serializeSessionId(id: string): string {
+  if (!UUID_V4.test(id)) throw new Error("invalid session id");
+  return `${id}.${sign(`sid:${id}`)}`;
+}
+
+export function deserializeSessionId(raw: string | undefined): string | null {
+  if (!raw) return null;
+  const dot = raw.lastIndexOf(".");
+  if (dot <= 0) return null;
+  const id = raw.slice(0, dot);
+  const signature = raw.slice(dot + 1);
+  return UUID_V4.test(id) && safeEqual(signature, sign(`sid:${id}`)) ? id : null;
 }
 
 export function serializeProfile(p: Profile): string {
@@ -59,12 +81,14 @@ export function deserializeProfile(raw: string | undefined): Profile | null {
       typeof obj?.age !== "number" ||
       typeof obj?.occupation !== "string" ||
       typeof obj?.sidoCode !== "string" ||
-      typeof obj?.sigunguCode !== "string" ||
-      typeof obj?.incomeDecile !== "number"
+      typeof obj?.sigunguCode !== "string"
     ) {
       return null;
     }
-    return obj as Profile;
+    const incomeDecile = typeof obj.incomeDecile === "number" ? obj.incomeDecile : null;
+    const medianIncomePercent =
+      typeof obj.medianIncomePercent === "number" ? obj.medianIncomePercent : null;
+    return { ...obj, incomeDecile, medianIncomePercent } as Profile;
   } catch {
     return null;
   }
@@ -93,18 +117,18 @@ export async function clearProfile(): Promise<void> {
   jar.delete(PROFILE_COOKIE);
 }
 
-/** 익명 세션 id — rate limit 키와 (DB 연결 시) profiles 행 식별에 쓴다 */
+/** 익명 세션 id — 요청 빈도 제한 키로만 쓴다 */
 export async function readOrCreateSessionId(): Promise<string> {
   const jar = await cookies();
-  const existing = jar.get(SESSION_COOKIE)?.value;
-  if (existing && /^[0-9a-f-]{36}$/.test(existing)) return existing;
+  const existing = deserializeSessionId(jar.get(SESSION_COOKIE)?.value);
+  if (existing) return existing;
   const sid = randomUUID();
-  jar.set(SESSION_COOKIE, sid, COOKIE_OPTS);
+  jar.set(SESSION_COOKIE, serializeSessionId(sid), COOKIE_OPTS);
   return sid;
 }
 
 /** 쓰기 없이 읽기만 (읽기 전용 컨텍스트에서 안전) */
 export async function readSessionId(): Promise<string | null> {
   const jar = await cookies();
-  return jar.get(SESSION_COOKIE)?.value ?? null;
+  return deserializeSessionId(jar.get(SESSION_COOKIE)?.value);
 }

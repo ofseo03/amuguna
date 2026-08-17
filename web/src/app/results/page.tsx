@@ -5,7 +5,7 @@
  * 매칭 요약 배너 + form 탭 + 카드 리스트 + 근접탈락 + 완화 안내 + 페이지네이션(20건).
  *
  * 자유입력은 sessionStorage 에서만 읽어 /api/match 로 보낸다 — URL 이나 서버에 남기지 않는다 (§8).
- * (form, page) 조합별로 응답을 캐시해 탭 전환 때마다 rate limit 을 소모하지 않게 한다.
+ * (form, cursor) 조합별로 응답을 캐시해 탭 전환 때마다 rate limit 을 소모하지 않게 한다.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -21,7 +21,7 @@ type Payload = MatchResponse & { ok: true };
 
 export default function ResultsPage() {
   const [tab, setTab] = useState<Tab>("all");
-  const [page, setPage] = useState(1);
+  const [cursor, setCursor] = useState<string | null>(null);
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; noProfile?: boolean } | null>(null);
@@ -38,15 +38,15 @@ export default function ResultsPage() {
    * 상태 갱신은 전부 호출부의 .then 안에서 일어나므로 effect 본문에서 동기 setState 가 없다.
    */
   const fetchMatch = useCallback(
-    (nextTab: Tab, nextPage: number, q: string | null): Promise<Outcome> => {
-      const key = `${nextTab}|${nextPage}`;
+    (nextTab: Tab, nextCursor: string | null, q: string | null): Promise<Outcome> => {
+      const key = `${nextTab}|${nextCursor ?? "first"}`;
       const hit = cache.current.get(key);
       if (hit) return Promise.resolve({ kind: "ok", payload: hit });
 
       return fetch("/api/match", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query: q, form: nextTab, page: nextPage }),
+        body: JSON.stringify({ query: q, form: nextTab, cursor: nextCursor }),
       })
         .then(async (res) => {
           const body = await res.json();
@@ -84,7 +84,7 @@ export default function ResultsPage() {
     let cancelled = false;
     // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
     const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
-    void fetchMatch("all", 1, q).then((o) => {
+    void fetchMatch("all", null, q).then((o) => {
       if (!cancelled) apply(o, q);
     });
     return () => {
@@ -92,19 +92,20 @@ export default function ResultsPage() {
     };
   }, [fetchMatch, apply]);
 
-  function navigate(nextTab: Tab, nextPage: number) {
+  function navigate(nextTab: Tab, nextCursor: string | null) {
     setTab(nextTab);
-    setPage(nextPage);
+    setCursor(nextCursor);
     setLoading(true);
-    void fetchMatch(nextTab, nextPage, query).then((o) => apply(o, query));
+    void fetchMatch(nextTab, nextCursor, query).then((o) => apply(o, query));
   }
 
   function changeTab(t: Tab) {
-    navigate(t, 1);
+    navigate(t, null);
   }
 
-  function changePage(p: number) {
-    navigate(tab, p);
+  function nextPage() {
+    if (!data?.nextCursor) return;
+    navigate(tab, data.nextCursor);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -136,7 +137,7 @@ export default function ResultsPage() {
           <h1 className="font-bold text-danger">{error.message}</h1>
           <button
             type="button"
-            onClick={() => navigate(tab, page)}
+            onClick={() => navigate(tab, cursor)}
             className="mt-4 rounded-lg border-2 border-danger bg-white px-5 py-2 font-semibold text-danger"
           >
             다시 시도
@@ -158,7 +159,7 @@ export default function ResultsPage() {
 
   if (!data) return null;
 
-  const { summary, cards, nearMisses, relaxationNotice, totalPages, demoMode, degraded } = data;
+  const { summary, cards, nearMisses, relaxationNotice, nextCursor, demoMode, degraded } = data;
 
   return (
     <Shell>
@@ -247,24 +248,12 @@ export default function ResultsPage() {
       </section>
 
       {/* ---------------- 페이지네이션 ---------------- */}
-      {totalPages > 1 && (
+      {nextCursor && (
         <nav aria-label="결과 페이지" className="mt-8 flex items-center justify-center gap-2">
           <button
             type="button"
-            disabled={page <= 1}
-            onClick={() => changePage(page - 1)}
-            className="rounded-lg border-2 border-line bg-white px-4 py-2 font-semibold text-ink-2 disabled:text-ink-3 disabled:opacity-50"
-          >
-            ← 이전
-          </button>
-          <span aria-current="page" className="px-3 font-semibold text-ink">
-            {page} / {totalPages}
-          </span>
-          <button
-            type="button"
-            disabled={page >= totalPages}
-            onClick={() => changePage(page + 1)}
-            className="rounded-lg border-2 border-line bg-white px-4 py-2 font-semibold text-ink-2 disabled:text-ink-3 disabled:opacity-50"
+            onClick={nextPage}
+            className="rounded-lg border-2 border-line bg-white px-4 py-2 font-semibold text-ink-2"
           >
             다음 →
           </button>
@@ -296,12 +285,6 @@ export default function ResultsPage() {
           className="rounded-lg border-2 border-line bg-white px-5 py-3 font-semibold text-ink-2 no-underline hover:bg-bg-sunken"
         >
           조건 다시 입력하기
-        </Link>
-        <Link
-          href="/subscribe"
-          className="rounded-lg bg-brand px-5 py-3 font-bold text-white no-underline hover:bg-brand-dark"
-        >
-          새 지원 나오면 알림 받기
         </Link>
       </div>
 

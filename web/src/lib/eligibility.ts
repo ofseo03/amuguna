@@ -35,7 +35,7 @@ export const DIMENSION_LABEL: Record<RuleDimension, string> = {
   gender: "성별",
   region: "거주지역",
   occupation: "직업",
-  income: "소득분위",
+  income: "소득",
 };
 
 /** SPEC §7.3 — 질의용 지역 코드 두 값 [시도 2자리, 시군구 5자리] */
@@ -69,8 +69,29 @@ function passOccupation(r: EligibilityRules, p: Profile): boolean {
 }
 
 function passIncome(r: EligibilityRules, p: Profile): boolean {
-  if (r.income_decile_max === null) return true;
-  return p.incomeDecile <= r.income_decile_max;
+  if (
+    r.income_decile_max !== null &&
+    p.incomeDecile !== null &&
+    p.incomeDecile > r.income_decile_max
+  ) return false;
+  if (
+    r.median_income_percent_max !== null &&
+    p.medianIncomePercent !== null &&
+    p.medianIncomePercent > r.median_income_percent_max
+  ) return false;
+  return true;
+}
+
+function incomeUnknown(r: EligibilityRules, p: Profile): boolean {
+  return (
+    (r.income_decile_max !== null && p.incomeDecile === null) ||
+    (r.median_income_percent_max !== null && p.medianIncomePercent === null)
+  );
+}
+
+function dimensionUnknown(r: EligibilityRules, p: Profile, d: RuleDimension): boolean {
+  return (d === "gender" && r.gender !== null && p.gender === null) ||
+    (d === "income" && incomeUnknown(r, p));
 }
 
 const PREDICATES: Record<
@@ -96,7 +117,7 @@ export function isConstrained(r: EligibilityRules, d: RuleDimension): boolean {
     case "occupation":
       return r.occupations !== null && r.occupations.length > 0;
     case "income":
-      return r.income_decile_max !== null;
+      return r.income_decile_max !== null || r.median_income_percent_max !== null;
   }
 }
 
@@ -106,40 +127,60 @@ export interface EligibilityResult {
   violatedDimensions: RuleDimension[];
   /** 조건이 걸려 있고 내가 통과한 축 — 매칭 근거·조건_구체성의 근거 */
   matchedDimensions: RuleDimension[];
+  /** 공고 조건은 있지만 대응하는 사용자 값이 없는 축 */
+  unknownDimensions: RuleDimension[];
 }
 
 export function evaluate(r: EligibilityRules, p: Profile): EligibilityResult {
   const violated: RuleDimension[] = [];
   const matched: RuleDimension[] = [];
+  const unknown: RuleDimension[] = [];
   for (const d of RULE_DIMENSIONS) {
     const ok = PREDICATES[d](r, p);
     if (!ok) violated.push(d);
-    else if (isConstrained(r, d)) matched.push(d);
+    else if (isConstrained(r, d)) {
+      if (dimensionUnknown(r, p, d)) unknown.push(d);
+      else matched.push(d);
+    }
   }
   return {
     violations: violated.length,
     violatedDimensions: violated,
     matchedDimensions: matched,
+    unknownDimensions: unknown,
   };
 }
 
-function seoulDate(now: Date): string {
-  // 한국은 DST가 없으므로 UTC+9로 옮긴 뒤 ISO 날짜 부분만 비교하면 DB의
-  // `(now() AT TIME ZONE 'Asia/Seoul')::date`와 같은 경계가 된다.
-  return new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1_000;
+
+function kstDate(now: Date): string {
+  return new Date(now.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
 }
 
-/** 기간 조건 — status='active' AND starts_at <= KST today <= ends_at */
+/** 기간 조건 — status='active'이고 KST 기준 접수 시작일부터 마감일까지 */
 export function isOpen(prog: Program, now = new Date()): boolean {
   if (prog.status !== "active") return false;
-  const today = seoulDate(now);
-  if (prog.starts_at && prog.starts_at.slice(0, 10) > today) return false;
-  return !prog.ends_at || prog.ends_at.slice(0, 10) >= today;
+  const today = kstDate(now);
+  if (prog.starts_at) {
+    if (DATE_ONLY.test(prog.starts_at)) {
+      if (prog.starts_at > today) return false;
+    } else if (new Date(prog.starts_at).getTime() > now.getTime()) {
+      return false;
+    }
+  }
+  if (!prog.ends_at) return true;
+  if (DATE_ONLY.test(prog.ends_at)) return prog.ends_at >= today;
+  return new Date(prog.ends_at).getTime() >= now.getTime();
 }
 
 /** 마감 D-n. 상시/무기한이면 null */
 export function dDay(prog: Program, now = new Date()): number | null {
   if (prog.is_always_open || !prog.ends_at) return null;
+  if (DATE_ONLY.test(prog.ends_at)) {
+    return (Date.parse(`${prog.ends_at}T00:00:00Z`) - Date.parse(`${kstDate(now)}T00:00:00Z`)) /
+      86_400_000;
+  }
   const end = new Date(prog.ends_at);
   const ms = end.getTime() - now.getTime();
   return Math.ceil(ms / 86_400_000);
@@ -172,7 +213,14 @@ export function dimensionBadge(
     case "occupation":
       return occupationName(p.occupation);
     case "income":
-      return decileLabel(p.incomeDecile);
+      return [
+        r.income_decile_max !== null && p.incomeDecile !== null
+          ? decileLabel(p.incomeDecile)
+          : null,
+        r.median_income_percent_max !== null && p.medianIncomePercent !== null
+          ? `기준중위소득 ${p.medianIncomePercent}%`
+          : null,
+      ].filter(Boolean).join(" · ");
   }
 }
 
@@ -184,21 +232,27 @@ export function buildReason(
   matched: RuleDimension[],
   r: EligibilityRules,
   p: Profile,
+  unknown: RuleDimension[] = [],
 ): string {
+  const pending = unknown.length
+    ? `${unknown.map((dimension) => DIMENSION_LABEL[dimension]).join("·")} 조건은 추가 확인이 필요합니다`
+    : null;
   if (matched.length === 0) {
-    return "별도 자격 제한이 없어 누구나 신청할 수 있습니다";
+    return pending ?? "별도 자격 제한이 없어 누구나 신청할 수 있습니다";
   }
   const parts = matched.map((d) => dimensionBadge(d, r, p));
-  return `${parts.join(" · ")} 조건에 해당합니다`;
+  return `${parts.join(" · ")} 조건에 해당합니다${pending ? ` · ${pending}` : ""}`;
 }
 
 export function buildBadges(
   matched: RuleDimension[],
   r: EligibilityRules,
   p: Profile,
+  unknown: RuleDimension[] = [],
 ): string[] {
-  if (matched.length === 0) return ["자격 제한 없음"];
-  return matched.map((d) => dimensionBadge(d, r, p));
+  const badges = matched.map((d) => dimensionBadge(d, r, p));
+  badges.push(...unknown.map((dimension) => `${DIMENSION_LABEL[dimension]} 추가 확인`));
+  return badges.length ? badges : ["자격 제한 없음"];
 }
 
 /* ------------------------------------------------------------------ */
@@ -212,8 +266,28 @@ export function nearMissMessage(
   p: Profile,
 ): string {
   switch (d) {
-    case "income":
-      return `소득 ${r.income_decile_max}분위 이하면 대상입니다 (현재 ${p.incomeDecile}분위)`;
+    case "income": {
+      const messages: string[] = [];
+      if (
+        r.income_decile_max !== null &&
+        p.incomeDecile !== null &&
+        p.incomeDecile > r.income_decile_max
+      ) {
+        messages.push(
+          `소득 ${r.income_decile_max}분위 이하면 대상입니다 (현재 ${p.incomeDecile}분위)`,
+        );
+      }
+      if (
+        r.median_income_percent_max !== null &&
+        p.medianIncomePercent !== null &&
+        p.medianIncomePercent > r.median_income_percent_max
+      ) {
+        messages.push(
+          `기준중위소득 ${r.median_income_percent_max}% 이하면 대상입니다 (현재 약 ${p.medianIncomePercent}%)`,
+        );
+      }
+      return messages.join(" · ");
+    }
     case "age": {
       // "이상" 뒤에는 조사 '이'가 붙어야 자연스럽다 ("만 65세 이상이면")
       let range: string;
@@ -263,9 +337,12 @@ function requirementText(d: RuleDimension, r: EligibilityRules): string {
       if (!r.occupations || r.occupations.length === 0) return "직업 조건 없음";
       return r.occupations.map(occupationName).join(", ");
     case "income":
-      return r.income_decile_max === null
-        ? "소득 조건 없음"
-        : `소득 ${r.income_decile_max}분위 이하`;
+      return [
+        r.income_decile_max === null ? null : `소득 ${r.income_decile_max}분위 이하`,
+        r.median_income_percent_max === null
+          ? null
+          : `기준중위소득 ${r.median_income_percent_max}% 이하`,
+      ].filter(Boolean).join(" · ") || "소득 조건 없음";
   }
 }
 
@@ -280,18 +357,25 @@ function mineText(d: RuleDimension, p: Profile): string {
     case "occupation":
       return occupationName(p.occupation);
     case "income":
-      return decileLabel(p.incomeDecile);
+      return [
+        p.incomeDecile === null ? null : decileLabel(p.incomeDecile),
+        p.medianIncomePercent === null ? null : `기준중위소득 약 ${p.medianIncomePercent}%`,
+      ].filter(Boolean).join(" · ") || "입력 안 함";
   }
 }
 
 export function checklist(r: EligibilityRules, p: Profile): DimensionCheck[] {
-  return RULE_DIMENSIONS.map((d) => ({
-    dimension: d,
-    constrained: isConstrained(r, d),
-    pass: PREDICATES[d](r, p),
-    requirement: requirementText(d, r),
-    mine: mineText(d, p),
-  }));
+  return RULE_DIMENSIONS.map((d) => {
+    const unknown = isConstrained(r, d) && dimensionUnknown(r, p, d);
+    return {
+      dimension: d,
+      constrained: isConstrained(r, d),
+      pass: PREDICATES[d](r, p),
+      unknown,
+      requirement: requirementText(d, r),
+      mine: mineText(d, p),
+    };
+  });
 }
 
 /** 배너용 "28세 · 서울 관악구 기준" */

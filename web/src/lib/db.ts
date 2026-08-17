@@ -20,8 +20,28 @@ export function isDbConfigured(): boolean {
  * `PGSSLROOTCERT` 에 CA 번들 경로를 주어 우회한다 — libpq 와 같은 변수명이라
  * TypeScript 배치(web/ingest/db.ts)와 한 값으로 맞출 수 있다. 없으면 시스템 CA 로 검증한다.
  */
-export function sslOption() {
-  const caPath = process.env.PGSSLROOTCERT;
+function dsnSslMode(dsn: string): string | null {
+  try {
+    return new URL(dsn).searchParams.get("sslmode");
+  } catch {
+    const match = /(?:^|\s)sslmode\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
+    return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+  }
+}
+
+function isLocalDsn(dsn: string): boolean {
+  try {
+    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(dsn).hostname);
+  } catch {
+    const match = /(?:^|\s)host\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
+    const host = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
+    return ["localhost", "127.0.0.1", "::1"].includes(host) || host.startsWith("/");
+  }
+}
+
+export function sslOption(dsn: string, env: NodeJS.ProcessEnv = process.env) {
+  if (dsnSslMode(dsn) !== null || isLocalDsn(dsn)) return undefined;
+  const caPath = env.PGSSLROOTCERT;
   if (!caPath) return "verify-full" as const;
   return { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true };
 }
@@ -29,11 +49,13 @@ export function sslOption() {
 export function getSql(): Sql | null {
   if (!isDbConfigured()) return null;
   if (!client) {
-    client = postgres(process.env.DATABASE_URL as string, {
+    const dsn = process.env.DATABASE_URL as string;
+    const ssl = sslOption(dsn);
+    client = postgres(dsn, {
       max: 5,
       idle_timeout: 20,
       connect_timeout: 10,
-      ssl: sslOption(),
+      ...(ssl === undefined ? {} : { ssl }),
       prepare: false,
     });
   }
