@@ -114,7 +114,6 @@ export interface Database {
   latestContentHash(externalId: string): Promise<string | null>;
   insertRawDocument(values: InsertRawDocument): Promise<number>;
   getProgramId(externalId: string): Promise<number | null>;
-  programStatus(externalId: string): Promise<ProgramValues["status"] | null>;
   /**
    * 이 공고의 `eligibility_rules.review_reason`. 없으면 null.
    *
@@ -256,11 +255,6 @@ export class InMemoryDatabase implements Database {
 
   async getProgramId(externalId: string): Promise<number | null> {
     return this.byExternal.get(externalId) ?? null;
-  }
-
-  async programStatus(externalId: string): Promise<ProgramValues["status"] | null> {
-    const id = this.byExternal.get(externalId);
-    return id === undefined ? null : this.programs.get(id)?.status ?? null;
   }
 
   async ruleReviewReason(externalId: string): Promise<string | null> {
@@ -557,13 +551,6 @@ export class PostgresDatabase implements Database {
       WHERE p.external_id = ${externalId}
     `;
     return rows[0]?.review_reason ?? null;
-  }
-
-  async programStatus(externalId: string): Promise<ProgramValues["status"] | null> {
-    const rows = await this.sql<{ status: ProgramValues["status"] }[]>`
-      SELECT status FROM programs WHERE external_id = ${externalId}
-    `;
-    return rows[0]?.status ?? null;
   }
 
   async programRawDocumentId(externalId: string): Promise<number | null> {

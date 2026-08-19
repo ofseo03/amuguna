@@ -65,14 +65,29 @@ test("질의 정규화는 표기 차이를 흡수한다", () => {
   assert.equal(normalizeQuery("보증금\n\n대출"), "보증금 대출");
 });
 
-test("캐시 키에 provider 와 모델명이 들어간다", () => {
+test("캐시 키가 벡터 공간을 구분한다", () => {
   const voyage = queryCacheKey(QUERY, `voyage:${VOYAGE_MODEL}`);
   const openai = queryCacheKey(QUERY, `openai:${OPENAI_MODEL}`);
   assert.notEqual(voyage, openai, "모델이 달라도 같은 키가 나오면 벡터 공간이 섞인다");
-  assert.match(voyage, new RegExp(VOYAGE_MODEL));
-  assert.match(openai, new RegExp(OPENAI_MODEL));
-  // 정규화된 질의로 키를 잡는다
+  // 정규화된 질의로 키를 잡는다 (표기만 다른 같은 질문은 같은 키)
   assert.equal(queryCacheKey("  보증금  대출 ", "x"), queryCacheKey("보증금 대출", "x"));
+  assert.equal(queryCacheKey(QUERY, "x"), queryCacheKey(QUERY, "x"), "같은 입력이 같은 키를 내야 한다");
+});
+
+test("캐시 키에 자유입력 원문이 남지 않는다", () => {
+  // SPEC §8: 사용자가 질병명·채무 상황 같은 개인사를 적을 수 있으므로
+  // 입력 원문은 저장하지 않는다 (검색 시점에만 사용, 영속화 없음).
+  // 원문을 그대로 키로 쓰면 요청이 끝나도 최대 500건이 프로세스 메모리에 남는다.
+  const sensitive = "우울증 약값이 부담되고 카드빚이 3천만원 있어요";
+  const key = queryCacheKey(sensitive, `openai:${OPENAI_MODEL}`);
+
+  for (const fragment of ["우울증", "카드빚", "3천만원", "약값"]) {
+    assert.ok(!key.includes(fragment), `캐시 키에 '${fragment}' 이 그대로 남아 있다`);
+  }
+  // 모델명도 노출하지 않는다 — 해시 입력에만 들어간다
+  assert.ok(!key.includes(OPENAI_MODEL));
+  // sha256 base64url = 43자
+  assert.match(key, /^[A-Za-z0-9_-]{43}$/, "키가 해시 형태가 아니다");
 });
 
 test("같은 질의는 임베딩 API 를 한 번만 부른다", async () => {

@@ -21,6 +21,7 @@ import {
   shortSido,
   sigunguName,
 } from "./shared-data";
+import { DATE_ONLY, KST_OFFSET_MS } from "./format";
 
 export const RULE_DIMENSIONS: RuleDimension[] = [
   "age",
@@ -151,8 +152,7 @@ export function evaluate(r: EligibilityRules, p: Profile): EligibilityResult {
   };
 }
 
-export const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
-const KST_OFFSET_MS = 9 * 60 * 60 * 1_000;
+// 날짜 원시값은 format.ts(leaf)가 단일 출처다
 
 /** 주어진 시각의 KST 달력 날짜 (YYYY-MM-DD) */
 export function kstDate(now: Date): string {

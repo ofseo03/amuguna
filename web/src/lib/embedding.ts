@@ -9,6 +9,8 @@
  * 하나라도 어긋나면 유사도가 전부 무의미해지므로 이 함수는 임의로 수정하지 않는다.
  */
 
+import { createHash } from "node:crypto";
+
 export const EMBEDDING_DIM = 1024;
 export const VOYAGE_MODEL = "voyage-4-large";
 export const OPENAI_MODEL = "text-embedding-3-small";
@@ -92,8 +94,21 @@ export function normalizeQuery(text: string): string {
   return text.normalize("NFC").trim().replace(/\s+/gu, " ").toLowerCase();
 }
 
+/**
+ * 캐시 키 — **자유입력 원문을 메모리에 남기지 않는다.**
+ *
+ * SPEC §8: "사용자가 여기에 개인사(질병명, 채무 상황 등)를 적을 수 있다 …
+ * 입력 원문은 저장하지 않는다 (검색 시점에만 사용, 영속화 없음)."
+ *
+ * 원문을 그대로 키로 쓰면 요청이 끝나도 최대 500건이 프로세스 메모리에 남아 그 규정을
+ * 어긴다. 힙 덤프·디버거·크래시 리포트에 그대로 실릴 수 있고, 같은 코드베이스가
+ * 프로필 쿠키를 암호화해 준식별정보를 가리는 것과도 방향이 어긋난다.
+ *
+ * 해시는 단방향이므로 캐시 동작(같은 문장 → 같은 키)은 그대로 유지하면서 원문만 사라진다.
+ * provider·모델명은 해시 입력에 포함해 벡터 공간이 다르면 키도 달라지게 한다.
+ */
 export function queryCacheKey(text: string, space: string): string {
-  return `${space} :: ${normalizeQuery(text)}`;
+  return createHash("sha256").update(`${space}::${normalizeQuery(text)}`).digest("base64url");
 }
 
 function cacheGet(key: string): Float64Array | null {

@@ -1,7 +1,12 @@
 /** 표시용 포매터. 숫자 필드는 항상 DB 값을 그대로 렌더한다 (§7.5). */
 
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
-const KST_OFFSET_MS = 9 * 60 * 60 * 1_000;
+/**
+ * 날짜 원시값 — 이 모듈이 의존이 없는 leaf 라서 여기에 둔다.
+ * `eligibility.ts` 가 가져다 쓴다. 반대로 하면 format 을 쓰는 클라이언트 컴포넌트에
+ * eligibility·shared-data·JSON 이 통째로 딸려온다.
+ */
+export const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
+export const KST_OFFSET_MS = 9 * 60 * 60 * 1_000;
 
 /**
  * 날짜 표기 — 전 경로 KST 고정 (SPEC §5).
