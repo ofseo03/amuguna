@@ -47,6 +47,14 @@ export interface EligibilityRules {
   extra_conditions: ExtraCondition[];
   parse_method: "regex" | "llm" | "mixed";
   confidence: number;
+  /**
+   * 자격요건 자동 추출이 불완전하게 끝났는가 (SPEC §6.2).
+   *
+   * 이 값이 true 여도 공고는 정상 노출한다 — 배치 LLM 장애로 공고가 사라지는 편이
+   * 훨씬 비싸고, 추출 실패 필드는 NULL(= 조건 없음 = 통과)로 남아 잘못된 탈락을
+   * 만들지 않기 때문이다(§7.3). 대신 상세 화면에 원문 확인 안내를 띄운다.
+   */
+  needs_review: boolean;
 }
 
 /** SPEC §5 programs + eligibility_rules 조인 결과 (카드/상세 렌더 단위) */
@@ -160,6 +168,14 @@ export interface MatchResponse {
   nextCursor: string | null;
   /** DB 미연결 시 true — 번들 데모 데이터로 동작 중 */
   demoMode: boolean;
+  /**
+   * DB 는 연결됐는데 노출 가능한 공고가 **한 건도 없는** 상태 (콜드 스타트).
+   *
+   * "내 조건에 맞는 게 없다"와 "아직 데이터가 없다"는 사용자에게 전혀 다른 사실인데
+   * 둘 다 빈 화면으로 보이면 서비스가 고장 난 것처럼 읽힌다. 초기 적재가 며칠에 걸쳐
+   * 진행되는 소스가 있으므로(SPEC §3.2 상세조회 100회/일) 이 구분이 필요하다.
+   */
+  catalogEmpty: boolean;
   /** 임베딩 실패 등으로 의도 축이 빠진 경우 (§8 신뢰성) */
   degraded: boolean;
   tookMs: number;

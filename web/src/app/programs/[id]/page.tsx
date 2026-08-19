@@ -11,7 +11,7 @@ import type { Metadata } from "next";
 import { getProgram } from "@/lib/matching";
 import { checklist, DIMENSION_LABEL, dDay, evaluate } from "@/lib/eligibility";
 import { readProfile } from "@/lib/session";
-import { FORM_LABEL } from "@/lib/forms";
+import { FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import {
   dDayLabel,
   externalHttpUrl,
@@ -20,7 +20,7 @@ import {
   isUrgent,
   issuerLevelLabel,
 } from "@/lib/format";
-import { Disclaimer } from "@/components/SiteChrome";
+import { Disclaimer, FinancialProductNotice } from "@/components/SiteChrome";
 import Term from "@/components/Term";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +100,19 @@ export default async function ProgramDetailPage({ params }: Props) {
             조건은 자동 판정하지 않습니다.
           </p>
         </div>
+      )}
+
+      {/*
+        자동 추출이 불완전하게 끝난 건 (SPEC §6.2).
+        공고를 숨기지 않는 대신 여기서 한계를 밝힌다 — 숨기면 받을 수 있는 사람이 못 받고,
+        말없이 보여주면 자동 판정을 과신하게 된다.
+      */}
+      {program.rules.needs_review && (
+        <p className="mt-6 rounded-xl border-2 border-warn bg-warn-soft px-5 py-4 text-ink-2">
+          <span className="font-bold text-warn">⚠️ 자격요건 자동 추출이 불완전합니다.</span>{" "}
+          아래 체크리스트에 나오지 않는 조건이 공고문에 더 있을 수 있습니다. 신청 전에
+          반드시 아래 <strong className="text-ink">출처</strong>의 원문을 확인해 주세요.
+        </p>
       )}
 
       {!profile && (
@@ -288,6 +301,13 @@ export default async function ProgramDetailPage({ params }: Props) {
           )}
         </div>
       </section>
+
+      {/* 금소법 대응 (§8) — 대출·금융상품에는 비교·정보 제공임을 한 번 더 밝힌다 */}
+      {isFinancialProduct(program.form) && (
+        <div className="mt-8">
+          <FinancialProductNotice />
+        </div>
+      )}
 
       <div className="mt-8">
         <Disclaimer />

@@ -115,6 +115,18 @@ export interface Database {
   insertRawDocument(values: InsertRawDocument): Promise<number>;
   getProgramId(externalId: string): Promise<number | null>;
   programStatus(externalId: string): Promise<ProgramValues["status"] | null>;
+  /**
+   * 이 공고의 `eligibility_rules.review_reason`. 없으면 null.
+   *
+   * 파이프라인은 이 값이 **재시도해서 나아질 수 있는 사유**일 때만 원문이 그대로여도
+   * 다시 파싱한다 (`EligibilityRules.INCOMPLETE_REVIEW_REASONS`).
+   *
+   * `needs_review` 플래그로 판정하면 안 된다 — 그 플래그는 `llm_unavailable`(키 없음),
+   * `llm_no_fields`(LLM 이 돌았지만 뽑을 게 없었음) 처럼 **원문이 같으면 결과도 같은**
+   * 사유에도 켜진다. 그런 건까지 재시도하면 무변경 공고를 매 회차 재파싱·재임베딩하게
+   * 되어 증분 수집의 비용 이점이 통째로 사라진다 (SPEC §3.2).
+   */
+  ruleReviewReason(externalId: string): Promise<string | null>;
   programRawDocumentId(externalId: string): Promise<number | null>;
   upsertProgram(values: ProgramValues): Promise<number>;
   touchProgram(externalId: string, fetchedAt: Date): Promise<void>;
@@ -249,6 +261,11 @@ export class InMemoryDatabase implements Database {
   async programStatus(externalId: string): Promise<ProgramValues["status"] | null> {
     const id = this.byExternal.get(externalId);
     return id === undefined ? null : this.programs.get(id)?.status ?? null;
+  }
+
+  async ruleReviewReason(externalId: string): Promise<string | null> {
+    const id = this.byExternal.get(externalId);
+    return id === undefined ? null : this.rules.get(id)?.reviewReason ?? null;
   }
 
   async programRawDocumentId(externalId: string): Promise<number | null> {
@@ -530,6 +547,16 @@ export class PostgresDatabase implements Database {
       SELECT id FROM programs WHERE external_id = ${externalId}
     `;
     return rows[0] ? Number(rows[0].id) : null;
+  }
+
+  async ruleReviewReason(externalId: string): Promise<string | null> {
+    const rows = await this.sql<{ review_reason: string | null }[]>`
+      SELECT e.review_reason
+      FROM eligibility_rules e
+      JOIN programs p ON p.id = e.program_id
+      WHERE p.external_id = ${externalId}
+    `;
+    return rows[0]?.review_reason ?? null;
   }
 
   async programStatus(externalId: string): Promise<ProgramValues["status"] | null> {

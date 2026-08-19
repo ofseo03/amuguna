@@ -18,6 +18,7 @@ import {
   nearMissMessage,
   profileLabel,
   regionPrefixes,
+  toDateString,
 } from "./eligibility";
 import { getSql, isDbConfigured } from "./db";
 import { demoEmbeddingIndex, demoPrograms } from "./demo-store";
@@ -152,8 +153,9 @@ function rowToProgram(r: any): Program {
     benefit_amount_max: r.benefit_amount_max === null ? null : Number(r.benefit_amount_max),
     apply_url: r.apply_url ?? null,
     apply_method: r.apply_method ?? null,
-    starts_at: r.starts_at ? new Date(r.starts_at).toISOString() : null,
-    ends_at: r.ends_at ? new Date(r.ends_at).toISOString() : null,
+    // date 컬럼은 날짜로 유지한다 — 타임스탬프로 바꾸면 KST 자정 근처에서 D-day 가 밀린다
+    starts_at: toDateString(r.starts_at),
+    ends_at: toDateString(r.ends_at),
     is_always_open: Boolean(r.is_always_open),
     source_url: r.source_url ?? "",
     fetched_at: r.fetched_at ? new Date(r.fetched_at).toISOString() : "",
@@ -170,6 +172,7 @@ function rowToProgram(r: any): Program {
       extra_conditions: normalizeExtraConditions(r.extra_conditions),
       parse_method: (r.parse_method ?? "regex") as Program["rules"]["parse_method"],
       confidence: r.confidence === null || r.confidence === undefined ? 0 : Number(r.confidence),
+      needs_review: Boolean(r.needs_review),
     },
   };
 }
@@ -296,7 +299,7 @@ async function dbCandidatesForRows(profile: Profile, pageRows: DbPageRow[]): Pro
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
            e.income_decile_max, e.median_income_percent_max,
-           e.extra_conditions, e.parse_method, e.confidence
+           e.extra_conditions, e.parse_method, e.confidence, e.needs_review
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
     WHERE p.id = ANY(${ids}::bigint[])`;
@@ -497,6 +500,8 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
       pageSize: PAGE_SIZE,
       nextCursor: paged.nextCursor,
       demoMode,
+      // 데모 모드는 번들 데이터가 항상 들어 있으므로 콜드 스타트가 성립하지 않는다
+      catalogEmpty: false,
       degraded,
       tookMs: Date.now() - started,
     };
@@ -532,6 +537,9 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
     .filter((x): x is NearMissCard => x !== null)
     .slice(0, 5);
   const last = cards.at(-1);
+  // 결과가 통째로 비었을 때만 카탈로그 자체를 확인한다 — 정상 경로에 질의를 늘리지 않는다.
+  const catalogEmpty =
+    cards.length === 0 && nearMisses.length === 0 ? await isCatalogEmpty() : false;
 
   return {
     summary: {
@@ -546,9 +554,34 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
     pageSize: PAGE_SIZE,
     nextCursor: hasNext && last ? encodeMatchCursor({ score: last.score, id: last.program.id }) : null,
     demoMode,
+    catalogEmpty,
     degraded,
     tookMs: Date.now() - started,
   };
+}
+
+/**
+ * 노출 가능한 공고가 한 건도 없는가 (콜드 스타트 판정).
+ *
+ * 첫 배포 직후나 초기 적재가 진행 중인 동안에는 DB 가 비어 있을 수 있다.
+ * 조회 실패 시 false 를 돌려 "데이터 없음" 안내를 잘못 띄우지 않는다 —
+ * 일시적인 DB 오류를 콜드 스타트로 오인하는 편이 더 나쁜 오해다.
+ */
+async function isCatalogEmpty(): Promise<boolean> {
+  const sql = getSql();
+  if (!sql) return false;
+  try {
+    const rows = await sql<{ any_active: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1 FROM programs
+        WHERE status = 'active'
+          AND (ends_at IS NULL OR ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date)
+      ) AS any_active`;
+    return rows[0]?.any_active === false;
+  } catch (error) {
+    console.error("[matching] 카탈로그 적재 여부 확인 실패", error);
+    return false;
+  }
 }
 
 /** 상세 화면용 단건 조회 */
@@ -565,7 +598,7 @@ export async function getProgram(id: number): Promise<Program | null> {
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
            e.income_decile_max, e.median_income_percent_max,
-           e.extra_conditions, e.parse_method, e.confidence
+           e.extra_conditions, e.parse_method, e.confidence, e.needs_review
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
     WHERE p.id = ${id}::bigint

@@ -3,7 +3,8 @@ import { CollectorError } from "./collectors/base";
 import type { Database, ProgramValues, RuleValues } from "./db";
 import { Embedder } from "./embedder";
 import { applyFallback, LLMFallback, Summarizer } from "./llm";
-import type { CollectedProgram, EligibilityRules } from "./models";
+import type { CollectedProgram } from "./models";
+import { EligibilityRules } from "./models";
 import {
   computeConfidence,
   eligibilitySourceText,
@@ -46,7 +47,8 @@ export class ParseStats {
   methods: Record<string, number> = {};
   needsReview = 0;
   reviewReasons: Record<string, number> = {};
-  blocked = 0;
+  /** 자동 추출이 불완전하게 끝난 건. 노출은 되지만 상세 화면에 확인 안내가 붙는다 */
+  incomplete = 0;
   withExtraConditions = 0;
   confidenceSum = 0;
 
@@ -64,7 +66,7 @@ export class ParseStats {
       const reason = rules.review_reason ?? "unknown";
       this.reviewReasons[reason] = (this.reviewReasons[reason] ?? 0) + 1;
     }
-    if (rules.blocksActivation) this.blocked++;
+    if (rules.incompleteExtraction) this.incomplete++;
     if (rules.extra_conditions.length) this.withExtraConditions++;
     this.confidenceSum += rules.confidence;
   }
@@ -85,8 +87,35 @@ export class RunReport {
   chunksWritten = 0;
   llmParseCalls = 0;
   llmSummaryCalls = 0;
+  /** 모든 모델·재시도를 소진하고 실패한 호출 수 (SPEC §8 신뢰성) */
+  llmParseFailures = 0;
+  llmSummaryFailures = 0;
   reconciled = false;
   startedAt = new Date();
+
+  /**
+   * 실패율이 이 값을 넘으면 배치가 눈에 띄게 경고한다.
+   *
+   * 무료 티어가 흔들리기 시작하면 개별 실패는 폴백으로 흡수되지만(요약은 mock, 자격은 NULL),
+   * 그 상태가 계속되면 신규 공고의 설명 품질이 조용히 무너진다. 조용한 저하를 막는 임계치다.
+   */
+  static readonly LLM_FAILURE_WARN_RATIO = 0.2;
+
+  get llmCalls(): number {
+    return this.llmParseCalls + this.llmSummaryCalls;
+  }
+
+  get llmFailures(): number {
+    return this.llmParseFailures + this.llmSummaryFailures;
+  }
+
+  get llmFailureRatio(): number {
+    return this.llmCalls ? this.llmFailures / this.llmCalls : 0;
+  }
+
+  get llmDegraded(): boolean {
+    return this.llmFailures > 0 && this.llmFailureRatio >= RunReport.LLM_FAILURE_WARN_RATIO;
+  }
 
   constructor(
     readonly embeddingProvider: string,
@@ -133,10 +162,18 @@ export class Pipeline {
     const contentHash = program.contentHash();
     const previousHash = await db.latestContentHash(program.external_id);
     const existingId = await db.getProgramId(program.external_id);
+    // 원문이 그대로여도 **재시도해서 나아질 수 있는** 사유로 실패한 건은 다시 파싱한다 —
+    // LLM 이 잠시 죽어서 실패한 건이 영원히 불완전한 채로 남지 않게 하는 회복 경로다.
+    //
+    // `needs_review` 플래그가 아니라 사유로 판정하는 것이 중요하다. 그 플래그는
+    // llm_unavailable(키 없음)·llm_no_fields(뽑을 게 없었음) 처럼 원문이 같으면 결과도
+    // 같은 사유에도 켜지므로, 플래그로 판정하면 무변경 공고를 매 회차 재파싱·재임베딩한다.
     const retryNeedsReview =
       existingId !== null &&
       previousHash === contentHash &&
-      (await db.programStatus(program.external_id)) === "needs_review";
+      EligibilityRules.INCOMPLETE_REVIEW_REASONS.has(
+        (await db.ruleReviewReason(program.external_id)) ?? "",
+      );
 
     if (existingId !== null && previousHash === contentHash && !retryNeedsReview) {
       const restored = await db.reactivateProgram(program.external_id, now);
@@ -181,8 +218,10 @@ export class Pipeline {
     );
     if (this.options.llm) {
       const before = this.options.llm.calls;
+      const failedBefore = this.options.llm.failures;
       await applyFallback(rules, eligibilitySourceText(program), this.options.llm);
       this.report.llmParseCalls += this.options.llm.calls - before;
+      this.report.llmParseFailures += this.options.llm.failures - failedBefore;
     }
     if (hasAgeAlternatives) {
       rules.age_min = null;
@@ -197,6 +236,7 @@ export class Pipeline {
     const bodyText = program.embeddingSource();
     const card = await this.options.summarizer!.generate(program);
     this.report.llmSummaryCalls = this.options.summarizer!.calls;
+    this.report.llmSummaryFailures = this.options.summarizer!.failures;
     const values: ProgramValues = {
       external_id: program.external_id,
       raw_document_id: rawId,
@@ -217,7 +257,9 @@ export class Pipeline {
       is_always_open: program.is_always_open,
       source_url: program.source_url,
       fetched_at: now,
-      status: rules.blocksActivation ? "needs_review" : "active",
+      // LLM 보완 실패는 공고를 숨기지 않는다 (EligibilityRules.INCOMPLETE_REVIEW_REASONS 참조).
+      // 제목·금액·마감일·원문 링크는 전부 DB 값이라 LLM 없이 렌더된다.
+      status: "active",
     };
     const programId = await db.upsertProgram(values);
     await db.replaceRules(programId, rules.toRow() as RuleValues, {
@@ -225,18 +267,16 @@ export class Pipeline {
       reviewReason: rules.review_reason,
     });
 
-    if (rules.blocksActivation) {
-      await db.deleteEmbeddings(programId);
-    } else {
-      const result = await this.options.embedder.embedProgram({
-        title: program.title,
-        summary: card.summary,
-        body: bodyText,
-      });
-      await db.replaceEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
-      this.report.embeddingsWritten++;
-      this.report.chunksWritten += result.vectors.length;
-    }
+    // 자동 추출이 불완전해도 임베딩은 만든다 — 벡터가 없으면 의도 축(집합 B)에서
+    // 영원히 검색되지 않아 사실상 숨긴 것과 같아진다.
+    const result = await this.options.embedder.embedProgram({
+      title: program.title,
+      summary: card.summary,
+      body: bodyText,
+    });
+    await db.replaceEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
+    this.report.embeddingsWritten++;
+    this.report.chunksWritten += result.vectors.length;
     if (previousHash === null) stats.created++;
     else stats.updated++;
   }
@@ -420,12 +460,18 @@ export function reportToJson(report: RunReport): Record<string, unknown> {
       methods: report.parse.methods,
       needs_review: report.parse.needsReview,
       review_reasons: report.parse.reviewReasons,
-      status_needs_review: report.parse.blocked,
+      incomplete_extraction: report.parse.incomplete,
       with_extra_conditions: report.parse.withExtraConditions,
       mean_confidence: Number(report.parse.meanConfidence.toFixed(4)),
     },
     embeddings: { programs: report.embeddingsWritten, chunks: report.chunksWritten },
     llm_calls: { parse: report.llmParseCalls, summary: report.llmSummaryCalls },
+    llm_failures: {
+      parse: report.llmParseFailures,
+      summary: report.llmSummaryFailures,
+      ratio: Number(report.llmFailureRatio.toFixed(4)),
+      degraded: report.llmDegraded,
+    },
   };
 }
 
@@ -455,7 +501,19 @@ export function renderReport(report: RunReport): string {
     `파싱: ${report.parse.parsed}건 / needs_review ${report.parse.needsReview}건 / 평균 confidence ${report.parse.meanConfidence.toFixed(3)}`,
     `임베딩: 프로그램 ${report.embeddingsWritten}건 / 청크 ${report.chunksWritten}행`,
     `LLM 호출: 자격요건 ${report.llmParseCalls}회 / 요약 ${report.llmSummaryCalls}회`,
+    `LLM 실패: 자격요건 ${report.llmParseFailures}회 / 요약 ${report.llmSummaryFailures}회` +
+      ` (${(report.llmFailureRatio * 100).toFixed(1)}%)`,
   );
+  if (report.llmDegraded) {
+    // 개별 실패는 폴백으로 흡수되므로 여기서 크게 알리지 않으면 아무도 모르고 지나간다.
+    const percent = (RunReport.LLM_FAILURE_WARN_RATIO * 100).toFixed(0);
+    lines.push(
+      "",
+      `!! 경고: LLM 실패율이 ${percent}% 임계치를 넘었습니다 (${report.llmFailures}/${report.llmCalls}).`,
+      "   요약은 원문 첫 문장으로, 자격요건 보완분은 '조건 없음'으로 대체되어 서비스는 계속 동작합니다.",
+      "   OpenRouter 무료 티어 상태를 확인하고 LLM_FALLBACK_MODELS 에 검증된 대체 모델을 지정하세요.",
+    );
+  }
   if (total.errors.length) lines.push("", ...total.errors.slice(0, 10).map((error) => `오류: ${error}`));
   return lines.join("\n");
 }

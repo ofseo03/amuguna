@@ -68,6 +68,62 @@ export function toPgVectorLiteral(v: Float64Array | number[]): string {
   return `[${parts.join(",")}]`;
 }
 
+/* ------------------------------------------------------------------ */
+/* 질의 벡터 캐시                                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * 같은 문장은 같은 벡터를 만드는데 매 요청 임베딩 API 를 부르고 있었다.
+ * 검색 1회 = 과금 1회이므로 반복 질의가 곧 낭비다 — 특히 온보딩의 예시 문구 4종은
+ * 누르기만 하면 그대로 전송되므로 사용자 수만큼 같은 문장이 반복된다.
+ *
+ * 캐시 키에 **provider 와 모델명을 포함한다.** 모델을 바꾸면 벡터 공간이 달라지는데,
+ * 문장만으로 키를 잡으면 예전 공간의 벡터가 새 공간의 색인과 비교되어 유사도가
+ * 통째로 무의미해진다 — 값이 틀리는 게 아니라 조용히 엉뚱해지는 종류의 오류다.
+ */
+const QUERY_CACHE_MAX = 500;
+const queryCache = new Map<string, Float64Array>();
+
+/**
+ * 질의 정규화 — 표기만 다른 같은 질문을 한 항목으로 모은다.
+ * 임베딩 모델이 대소문자·공백에 사실상 불변이므로 캐시 적중률만 올라간다.
+ */
+export function normalizeQuery(text: string): string {
+  return text.normalize("NFC").trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+export function queryCacheKey(text: string, space: string): string {
+  return `${space} :: ${normalizeQuery(text)}`;
+}
+
+function cacheGet(key: string): Float64Array | null {
+  const hit = queryCache.get(key);
+  if (!hit) return null;
+  // LRU: 다시 넣어 최근 사용으로 올린다
+  queryCache.delete(key);
+  queryCache.set(key, hit);
+  return hit;
+}
+
+function cacheSet(key: string, vector: Float64Array): void {
+  queryCache.set(key, vector);
+  while (queryCache.size > QUERY_CACHE_MAX) {
+    // Map 은 삽입 순서를 지키므로 첫 항목이 가장 오래 안 쓰인 것이다
+    const oldest = queryCache.keys().next().value;
+    if (oldest === undefined) break;
+    queryCache.delete(oldest);
+  }
+}
+
+/** 테스트·운영 점검용 */
+export function queryCacheSize(): number {
+  return queryCache.size;
+}
+
+export function clearQueryCache(): void {
+  queryCache.clear();
+}
+
 export type EmbeddingProvider = "voyage" | "openai" | "mock";
 
 export function resolveProvider(): EmbeddingProvider {
@@ -93,8 +149,14 @@ export async function embedQuery(
   text: string,
 ): Promise<{ vector: Float64Array | null; provider: EmbeddingProvider; degraded: boolean }> {
   const provider = resolveProvider();
+  // mock 은 순수 계산이라 캐시할 이유가 없다 (API 호출도 과금도 없다)
   if (provider === "mock") return { vector: mockEmbed(text), provider, degraded: false };
   if (!process.env.EMBEDDING_API_KEY) return { vector: null, provider, degraded: true };
+
+  const cacheKey = queryCacheKey(text, vectorSpace(provider));
+  const cached = cacheGet(cacheKey);
+  if (cached) return { vector: cached, provider, degraded: false };
+
   try {
     const response = await fetch(
       provider === "voyage"
@@ -137,11 +199,10 @@ export async function embedQuery(
     ) {
       throw new Error("invalid embedding response");
     }
-    return {
-      vector: Float64Array.from(embedding as number[]),
-      provider,
-      degraded: false,
-    };
+    const vector = Float64Array.from(embedding as number[]);
+    // 검증을 통과한 벡터만 캐시한다 — 실패분을 캐시하면 장애가 캐시 수명만큼 늘어난다
+    cacheSet(cacheKey, vector);
+    return { vector, provider, degraded: false };
   } catch {
     return { vector: null, provider, degraded: true };
   }

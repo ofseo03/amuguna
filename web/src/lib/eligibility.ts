@@ -151,11 +151,41 @@ export function evaluate(r: EligibilityRules, p: Profile): EligibilityResult {
   };
 }
 
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
+export const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1_000;
 
-function kstDate(now: Date): string {
+/** 주어진 시각의 KST 달력 날짜 (YYYY-MM-DD) */
+export function kstDate(now: Date): string {
   return new Date(now.getTime() + KST_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * `programs.starts_at` / `ends_at` 를 **날짜 문자열로** 정규화한다 (SPEC §5).
+ *
+ * 두 컬럼은 Postgres `date` 타입이다 — 시각이 없는 달력 날짜이고, 공고문의
+ * "2026년 8월 14일까지"를 그대로 담는다. 그런데 이 값을 `new Date(...).toISOString()`
+ * 으로 전체 타임스탬프(`2026-08-14T00:00:00.000Z`)로 바꾸면 **UTC 자정**이라는
+ * 있지도 않은 시각이 생기고, KST 로 읽으면 그날 09:00 이 된다.
+ *
+ * 그 결과가 하루 밀림이다. 같은 공고를 KST 01:00 에 보면 D-2, 20:00 에 보면 D-1 로
+ * 나온다 — 사용자마다·시각마다 결과가 달라지는 비일관성이고, SQL 필터
+ * (`ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date`) 와도 어긋난다.
+ *
+ * 그래서 DB 경계에서 날짜만 남긴다. 이러면 `isOpen`·`dDay` 의 DATE_ONLY 경로가 항상
+ * 타고, 마감일은 그 날짜의 KST 23:59:59 까지 유효한 것으로 일관되게 취급된다.
+ */
+export function toDateString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    // 'YYYY-MM-DD' 와 'YYYY-MM-DDTHH:mm:ss...' 모두 앞 10자가 달력 날짜다
+    return DATE_ONLY.test(value.slice(0, 10)) ? value.slice(0, 10) : null;
+  }
+  if (value instanceof Date) {
+    // postgres.js 는 date 컬럼을 UTC 자정 Date 로 파싱하므로 UTC 성분을 읽는다.
+    // 로컬 성분을 읽으면 서버 타임존에 따라 하루가 밀린다.
+    return Number.isNaN(value.getTime()) ? null : value.toISOString().slice(0, 10);
+  }
+  return null;
 }
 
 /** 기간 조건 — status='active'이고 KST 기준 접수 시작일부터 마감일까지 */

@@ -42,7 +42,7 @@ npm run sync:shared  # ../shared/*.json → src/data/ 재복사
 | 벡터 검색 | 인메모리 코사인 (`src/lib/demo-store.ts`) | pgvector HNSW |
 | 스코어링 | `src/lib/scoring.ts` (동일) | `src/lib/scoring.ts` (동일) |
 | 근접탈락·완화 | `src/lib/matching.ts` (동일) | `src/lib/matching.ts` (동일) |
-| 프로필 | 서명 쿠키 (동일) | 서명 쿠키 (동일) — DB 저장 없음 |
+| 프로필 | 암호화 쿠키 (동일) | 암호화 쿠키 (동일) — DB 저장 없음 |
 
 스코어링·근거 문장·근접탈락·빈결과 완화는 **두 모드가 같은 코드를 탄다.**
 백엔드 차이는 "후보를 어디서 가져오는가" 하나뿐이다.
@@ -110,8 +110,9 @@ curl -s -b jar localhost:3000/api/programs/1
 | `src/lib/demo-store.ts` | 번들 데이터셋 로더 + 청크 임베딩 인덱스 | §7.1 |
 | `src/lib/db.ts` | Supabase 접속 (`postgres`) | — |
 | `src/lib/validation.ts` | 서버 측 입력 검증 | §8 |
-| `src/lib/session.ts` | 서명된 httpOnly 프로필 쿠키 | §8 |
-| `src/lib/rate-limit.ts` | 세션+IP 10회/분 | §8 |
+| `src/lib/session.ts` | **암호화된**(AES-256-GCM) httpOnly 프로필 쿠키 | §8 |
+| `src/lib/csrf.ts` | Origin/Sec-Fetch-Site 기반 CSRF 검증 | §8 |
+| `src/lib/rate-limit.ts` | 세션 10 / 익명 60 / IP 600 회분 삼중 상한 (환경변수로 완화·해제) | §8 |
 | `src/lib/shared-data.ts` | 팀 공통 계약 데이터 접근자 | — |
 
 수집기의 공통층은 HTTP·재시도만 담당한다. 응답 형식과 필드 매핑은 소스별 수집기가
@@ -122,7 +123,8 @@ curl -s -b jar localhost:3000/api/programs/1
 건만 상세 적재한다. JSON report의 `incremental_strategy`가 이 동작을 표시한다.
 
 공공데이터포털 전용 어댑터는 `gov24`(보조금24 JSON), `local_welfare`(지자체복지 XML
-목록·상세), `kstartup`(K-Startup JSON)이다. 세 소스는 공식 명세 fixture와 테스트에는
+목록·상세), `social_security`(중앙부처복지 XML), `kstartup`(K-Startup JSON)이며, 포털 밖
+소스로 `bizinfo`·`finlife` 가 있다. 이 소스들은 공식 명세 fixture와 테스트에는
 포함된다. T1인 `gov24`와 `local_welfare`는 기본 정기 배치 대상이며, 배포 전에 데이터셋별
 활용승인과 첫 성공 응답을 반드시 대조한다. T2인 `kstartup`은 승인 후
 `npm run ingest -- --source kstartup`처럼 소스별로 검증한다.
@@ -182,7 +184,11 @@ cp .env.example .env.local
 | `FINLIFE_API_KEY` | (없음) | 금융상품 한눈에 실 API 수집 시 |
 | `OPENROUTER_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |
 | `LLM_MODEL` | `google/gemma-4-31b-it:free` | OpenRouter 모델 ID |
-| `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 서명 키 |
+| `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 암호화 키와 세션 id 서명 키를 여기서 파생한다 |
+| `LLM_FALLBACK_MODELS` | (없음) | 기본 모델 실패 시 시도할 대체 모델 (쉼표 구분) |
+| `RATE_LIMIT_SESSION_PER_MIN` | `10` | 세션당 분당 검색 한도. `0` 이면 해제 |
+| `RATE_LIMIT_ANON_PER_MIN` | `60` | 세션 쿠키 없는 요청의 IP당 한도. `0` 이면 해제 |
+| `RATE_LIMIT_IP_PER_MIN` | `600` | IP당 분당 검색 한도(NAT 안전망). `0` 이면 해제 |
 
 ---
 

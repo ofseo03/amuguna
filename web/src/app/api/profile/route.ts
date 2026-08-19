@@ -7,12 +7,20 @@
  */
 import { NextResponse } from "next/server";
 import { readOrCreateSessionId, writeProfile } from "@/lib/session";
+import { CSRF_MESSAGE, checkCsrf } from "@/lib/csrf";
 import { validateProfile } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
+  // CSRF (§8): 크로스사이트에서 피해자의 프로필을 몰래 바꿔치기하는 것을 막는다
+  const csrf = checkCsrf(req);
+  if (!csrf.ok) {
+    console.warn(`[api/profile] CSRF 거부 (${csrf.reason})`);
+    return NextResponse.json({ ok: false, code: "csrf", message: CSRF_MESSAGE }, { status: 403 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();

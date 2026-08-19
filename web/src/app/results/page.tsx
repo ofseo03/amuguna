@@ -10,9 +10,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { NearMissItem, ProgramCard } from "@/components/ProgramCard";
-import { Disclaimer } from "@/components/SiteChrome";
+import { Disclaimer, FinancialProductNotice } from "@/components/SiteChrome";
 import Term from "@/components/Term";
-import { FORMS, FORM_LABEL } from "@/lib/forms";
+import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
 import type { MatchResponse, ProgramForm } from "@/lib/types";
 
@@ -161,6 +161,53 @@ export default function ResultsPage() {
 
   const { summary, cards, nearMisses, relaxationNotice, nextCursor, demoMode, degraded } = data;
 
+  /*
+    콜드 스타트 (SPEC §3.2).
+    첫 배포 직후나 초기 적재가 진행 중인 동안에는 DB 에 공고가 아직 없을 수 있다.
+    "내 조건에 맞는 게 없다"와 "아직 데이터가 없다"는 전혀 다른 사실인데 둘 다
+    빈 화면으로 보이면 서비스가 고장 난 것으로 읽힌다. 완화 안내·탭·근접탈락을
+    전부 걷어내고 상태만 분명히 알린다.
+  */
+  if (data.catalogEmpty) {
+    return (
+      <Shell>
+        <div
+          role="status"
+          className="rounded-xl border-2 border-brand bg-brand-soft px-6 py-10 text-center"
+        >
+          <h1 className="text-xl font-bold text-ink sm:text-2xl">
+            아직 보여드릴 지원 정보를 준비하는 중입니다
+          </h1>
+          <p className="mt-3 text-ink-2">
+            공공기관 공고를 매일 새벽에 모아 오고 있습니다. 기관별 조회 한도가 있어
+            처음 전부 채우는 데 며칠이 걸립니다.
+          </p>
+          <p className="mt-2 text-ink-2">
+            입력하신 정보({summary.profileLabel})는 그대로 보관되니, 잠시 후 다시
+            확인해 주세요.
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <Link
+              href="/sources"
+              className="rounded-lg border-2 border-brand bg-white px-5 py-3 font-semibold text-brand-dark no-underline"
+            >
+              어떤 곳에서 모으는지 보기
+            </Link>
+            <Link
+              href="/onboarding"
+              className="rounded-lg bg-brand px-5 py-3 font-semibold text-white no-underline"
+            >
+              입력 정보 수정하기
+            </Link>
+          </div>
+        </div>
+        <div className="mt-8">
+          <Disclaimer />
+        </div>
+      </Shell>
+    );
+  }
+
   return (
     <Shell>
       {/* ---------------- 매칭 요약 배너 ---------------- */}
@@ -231,6 +278,13 @@ export default function ResultsPage() {
           ))}
         </ul>
       </nav>
+
+      {/* 금소법 대응 (§8) — 대출·금융상품 탭에서는 비교·정보 제공임을 명시한다 */}
+      {tab !== "all" && isFinancialProduct(tab) && (
+        <div className="mt-4">
+          <FinancialProductNotice />
+        </div>
+      )}
 
       {/* ---------------- 카드 리스트 ---------------- */}
       <section aria-label="매칭 결과" className="mt-6">

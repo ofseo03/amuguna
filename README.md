@@ -49,4 +49,6 @@ Next.js와 독립 배치는 `web/.env.local`, GitHub Actions는 Secrets에 값�
 | `FINLIFE_API_KEY` | 금융감독원 금융상품 한눈에 API |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | `voyage` \| `openai` \| `mock` (Voyage 모델: `voyage-4-large`, 차원 1024 고정) |
 | `OPENROUTER_API_KEY` | 배치 전용 — OpenRouter로 파싱 보완 + 요약 생성 (`google/gemma-4-31b-it:free`) |
-| `SESSION_SECRET` | 프로덕션 서명 키 (32자 이상). 프로필 쿠키 서명에 쓴다 |
+| `LLM_FALLBACK_MODELS` | 기본 모델 실패 시 시도할 대체 모델 (쉼표 구분). 비우면 폴백 없음 |
+| `RATE_LIMIT_SESSION_PER_MIN` / `RATE_LIMIT_ANON_PER_MIN` / `RATE_LIMIT_IP_PER_MIN` | 검색 한도. 기본 10 / 60 / 600. `0` 은 해제 — 재배포 없이 값만 바꿔 적용된다 |
+| `SESSION_SECRET` | 프로덕션 비밀 키 (32자 이상). 프로필 쿠키 **암호화** 키와 세션 id 서명 키를 여기서 파생한다 |

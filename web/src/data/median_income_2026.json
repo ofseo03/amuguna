@@ -4,7 +4,12 @@
   "source": {
     "issuer": "보건복지부",
     "notice_no": "제2025-135호",
-    "url": "https://www.law.go.kr/LSW/admRulLsInfoP.do?admRulId=37680&efYd=0"
+    "title": "2026년 기준 중위소득 및 생계·의료급여 선정기준과 최저보장수준",
+    "url": "https://www.law.go.kr/LSW/admRulLsInfoP.do?admRulId=37680&efYd=0",
+    "effective_from": "2026-01-01",
+    "retrieved_at": "2026-08-08",
+    "_verification": "값 검증은 web/src/lib/median-income.test.mjs 가 2025년 표와 발표 인상률로 대조한다. 7인 가구 값은 고시 산정식과 40,035원 차이가 있어 원문 대조가 필요하다 — 같은 파일의 skip 된 테스트 주석 참조.",
+    "_update_cycle": "연 1회. 매년 7~8월 중앙생활보장위원회 의결 후 고시되며, 다음 해 1월 1일부터 적용된다."
   },
   "amounts": {
     "1": 2564238,
