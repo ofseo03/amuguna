@@ -1,18 +1,37 @@
 /** 표시용 포매터. 숫자 필드는 항상 DB 값을 그대로 렌더한다 (§7.5). */
 
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1_000;
+
+/**
+ * 날짜 표기 — 전 경로 KST 고정 (SPEC §5).
+ *
+ * `starts_at`·`ends_at` 은 시각이 없는 달력 날짜이므로 **문자열을 그대로 쪼갠다.**
+ * `new Date("2026-08-14")` 는 UTC 자정으로 파싱되므로, 로컬 성분(`getDate()`)으로 읽으면
+ * UTC 서쪽 브라우저에서 하루 앞 날짜가 찍힌다.
+ *
+ * 시각이 붙은 값(`fetched_at`)은 KST 로 환산해 표기한다 — 서버는 UTC, 사용자는 KST 라
+ * 로컬 성분을 그대로 쓰면 서버 렌더와 클라이언트 렌더가 어긋난다.
+ */
 export function formatDate(iso: string | null): string {
   if (!iso) return "-";
+  if (DATE_ONLY.test(iso)) {
+    const [y, m, d] = iso.split("-");
+    return `${Number(y)}. ${Number(m)}. ${Number(d)}.`;
+  }
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "-";
-  return `${d.getFullYear()}. ${d.getMonth() + 1}. ${d.getDate()}.`;
+  const kst = new Date(d.getTime() + KST_OFFSET_MS);
+  return `${kst.getUTCFullYear()}. ${kst.getUTCMonth() + 1}. ${kst.getUTCDate()}.`;
 }
 
 export function formatDateTime(iso: string | null): string {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "-";
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mm = String(d.getMinutes()).padStart(2, "0");
+  const kst = new Date(d.getTime() + KST_OFFSET_MS);
+  const hh = String(kst.getUTCHours()).padStart(2, "0");
+  const mm = String(kst.getUTCMinutes()).padStart(2, "0");
   return `${formatDate(iso)} ${hh}:${mm}`;
 }
 

@@ -16,6 +16,8 @@
     "test:ingest": "tsx --test ingest/tests/*.test.ts",
     "ingest": "node --env-file-if-exists=.env.local --import tsx ingest/cli.ts",
     "typecheck": "tsc --noEmit",
+    "coldstart:eta": "node scripts/coldstart-eta.mjs",
+    "measure:duplicates": "node scripts/measure-duplicates.mjs",
     "sync:shared": "node scripts/copy-shared.mjs"
   },
   "dependencies": {

@@ -424,7 +424,7 @@ test("CollectedProgram hashes stable fields and builds the embedding source", ()
 
 test("EligibilityRules toRow omits pipeline-only review signals", () => {
   const rules = new EligibilityRules({ age_min: 19, needs_review: true, review_reason: "llm_failed" });
-  assert.equal(rules.blocksActivation, true);
+  assert.equal(rules.incompleteExtraction, true);
   assert.equal("needs_review" in rules.toRow(), false);
   assert.equal("review_reason" in rules.toRow(), false);
   assert.deepEqual(rules.filledFields(), ["age_min"]);

@@ -9,11 +9,18 @@
  */
 import raw from "@/demo/programs.json";
 import { mockEmbed } from "./embedding";
+import { kstDate } from "./eligibility";
 import type { EligibilityRules, Program, ProgramForm } from "./types";
 
-interface RawRules extends Omit<EligibilityRules, "parse_method" | "median_income_percent_max"> {
+interface RawRules
+  extends Omit<
+    EligibilityRules,
+    "parse_method" | "median_income_percent_max" | "needs_review"
+  > {
   parse_method: string;
   median_income_percent_max?: number | null;
+  /** 데모 데이터는 손으로 라벨링했으므로 기본은 false */
+  needs_review?: boolean;
 }
 interface RawProgram {
   id: number;
@@ -40,8 +47,15 @@ interface RawProgram {
 
 const DAY = 86_400_000;
 
-function toIso(daysFromNow: number, base: Date): string {
-  return new Date(base.getTime() + daysFromNow * DAY).toISOString();
+/**
+ * 데모 마감일도 **KST 달력 날짜**로 만든다 (SPEC §5).
+ *
+ * 운영 경로의 `programs.ends_at` 이 `date` 컬럼이라 날짜 문자열로 정규화되므로,
+ * 데모가 전체 타임스탬프를 쓰면 두 경로에서 D-day 계산 분기가 갈린다.
+ * 데모에서만 재현되는(또는 데모에서만 안 잡히는) 날짜 버그를 만들지 않으려면 같아야 한다.
+ */
+function toKstDate(daysFromNow: number, base: Date): string {
+  return kstDate(new Date(base.getTime() + daysFromNow * DAY));
 }
 
 function build(): { programs: Program[]; fetchedAt: string } {
@@ -62,7 +76,7 @@ function build(): { programs: Program[]; fetchedAt: string } {
     apply_url: p.apply_url,
     apply_method: p.apply_method,
     starts_at: p.starts_at,
-    ends_at: p.demo_ends_in_days === null ? null : toIso(p.demo_ends_in_days, base),
+    ends_at: p.demo_ends_in_days === null ? null : toKstDate(p.demo_ends_in_days, base),
     is_always_open: p.is_always_open,
     source_url: p.source_url,
     fetched_at: fetchedAt,
@@ -79,6 +93,7 @@ function build(): { programs: Program[]; fetchedAt: string } {
       extra_conditions: p.rules.extra_conditions ?? [],
       parse_method: p.rules.parse_method as EligibilityRules["parse_method"],
       confidence: p.rules.confidence,
+      needs_review: Boolean(p.rules.needs_review),
     },
   }));
   return { programs, fetchedAt };

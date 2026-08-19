@@ -115,6 +115,13 @@ export interface Database {
   insertRawDocument(values: InsertRawDocument): Promise<number>;
   getProgramId(externalId: string): Promise<number | null>;
   programStatus(externalId: string): Promise<ProgramValues["status"] | null>;
+  /**
+   * 자격요건 자동 추출이 불완전하게 끝난 공고인가 (`eligibility_rules.needs_review`).
+   *
+   * 원문이 그대로여도(content_hash 동일) 이 값이 true 면 다음 회차가 파싱을 다시 시도한다 —
+   * LLM 이 잠시 죽어서 실패한 건이 영원히 불완전한 채로 남지 않게 하는 회복 경로다.
+   */
+  rulesNeedReview(externalId: string): Promise<boolean>;
   programRawDocumentId(externalId: string): Promise<number | null>;
   upsertProgram(values: ProgramValues): Promise<number>;
   touchProgram(externalId: string, fetchedAt: Date): Promise<void>;
@@ -249,6 +256,11 @@ export class InMemoryDatabase implements Database {
   async programStatus(externalId: string): Promise<ProgramValues["status"] | null> {
     const id = this.byExternal.get(externalId);
     return id === undefined ? null : this.programs.get(id)?.status ?? null;
+  }
+
+  async rulesNeedReview(externalId: string): Promise<boolean> {
+    const id = this.byExternal.get(externalId);
+    return id === undefined ? false : Boolean(this.rules.get(id)?.needsReview);
   }
 
   async programRawDocumentId(externalId: string): Promise<number | null> {
@@ -530,6 +542,16 @@ export class PostgresDatabase implements Database {
       SELECT id FROM programs WHERE external_id = ${externalId}
     `;
     return rows[0] ? Number(rows[0].id) : null;
+  }
+
+  async rulesNeedReview(externalId: string): Promise<boolean> {
+    const rows = await this.sql<{ needs_review: boolean }[]>`
+      SELECT e.needs_review
+      FROM eligibility_rules e
+      JOIN programs p ON p.id = e.program_id
+      WHERE p.external_id = ${externalId}
+    `;
+    return Boolean(rows[0]?.needs_review);
   }
 
   async programStatus(externalId: string): Promise<ProgramValues["status"] | null> {

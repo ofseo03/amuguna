@@ -138,7 +138,20 @@ export interface EligibilityRulesInput {
 }
 
 export class EligibilityRules {
-  static readonly BLOCKING_REVIEW_REASONS = new Set([
+  /**
+   * LLM 보완이 실패했거나 출력이 검증에서 거절된 상태 (SPEC §6.2).
+   *
+   * **이 상태는 공고를 숨기지 않는다.** 예전에는 `programs.status = 'needs_review'` 로
+   * 비활성화하고 임베딩까지 지웠는데, 그러면 배치 LLM(OpenRouter 무료 티어)이 흔들릴 때
+   * 신규·수정 공고가 통째로 결과에서 사라진다 — 심사 구간(9/7~9/11)에 발현되면
+   * 치명적이고, "누락이 오탐보다 비싸다"는 §7.3 의 원칙과도 정면으로 어긋난다.
+   *
+   * 검증에서 거절된 값은 애초에 반영되지 않으므로(applyFallback) 해당 필드는 NULL 로 남고,
+   * NULL 은 §7.3 에서 '조건 없음 = 통과'다. 즉 숨기지 않아도 잘못된 탈락은 생기지 않는다.
+   * 대신 `eligibility_rules.needs_review` 로 기록해 운영자는 리포트에서, 사용자는 상세 화면의
+   * "자동 추출이 불완전하니 원문을 확인하라"는 안내로 알 수 있게 한다.
+   */
+  static readonly INCOMPLETE_REVIEW_REASONS = new Set([
     "llm_failed",
     "llm_validation_rejected",
   ]);
@@ -173,8 +186,14 @@ export class EligibilityRules {
     this.review_reason = input.review_reason ?? null;
   }
 
-  get blocksActivation(): boolean {
-    return this.review_reason !== null && EligibilityRules.BLOCKING_REVIEW_REASONS.has(this.review_reason);
+  /**
+   * 자동 추출이 불완전한가. 리포트 집계와 화면 안내에만 쓰고, 노출 여부는 바꾸지 않는다.
+   */
+  get incompleteExtraction(): boolean {
+    return (
+      this.review_reason !== null &&
+      EligibilityRules.INCOMPLETE_REVIEW_REASONS.has(this.review_reason)
+    );
   }
 
   toRow(): Omit<EligibilityRulesInput, "needs_review" | "review_reason"> {

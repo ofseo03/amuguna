@@ -289,3 +289,51 @@ ingest_embedding_state · ingest_source_baselines (배치 운영 상태)
 | `eligibility_rules` 행 생성 | 명시 없음 | `programs` INSERT 시 트리거로 자동 생성 | §7.3 의 `INNER JOIN` 이 1:1 을 전제한다. 규칙이 관례가 아니라 DB 불변식이 된다 |
 | `hnsw.ef_search` | 명시 없음 | 벡터 경로에서 `p_topk` 에 맞춰 상향 | 기본값 40 이라 `LIMIT 200` 이 실제로는 top-40 이 된다 (실측) |
 | `profiles` 테이블 | §5 프로필 저장 | 저장하지 않음 (0012 에서 제거) | 매칭에 쿠키 프로필이면 충분했고, 유일한 저장 이유였던 알림을 MVP 에서 뺐다(§11). 저장하지 않으면 지킬 것도 없다 |
+
+---
+
+## 10. 콜드 스타트와 시드 스냅샷 (SPEC §3.2)
+
+### 문제
+
+"실패 시 직전 성공 스냅샷 유지"는 **직전 스냅샷이 있을 때만** 성립한다. 첫 배포에는 없다.
+게다가 중앙부처복지는 상세조회 100회/일이라 461건을 채우는 데 6일이 걸린다 —
+그 사이에 심사위원이 들어오면 빈 결과를 본다.
+
+### 진행률 확인
+
+```bash
+DATABASE_URL='postgres://...' node web/scripts/coldstart-eta.mjs
+```
+
+소스별 적재 건수와 남은 일수를 계산한다. `DATABASE_URL` 없이 돌리면 0건 기준 최악 가정으로 보여준다.
+첫 목록 호출에서 `totalCount` 를 확인하면 그 값을 스크립트의 `estimatedTotal` 에 반영한다.
+
+### 시드 스냅샷
+
+적재가 한 번 완주하면 **그 상태를 덤프해 둔다.** DB 가 날아가거나 배치가 데이터를 망가뜨렸을 때
+6일을 다시 기다리지 않고 복구하기 위한 것이다. 커스텀 도구를 두지 않고 `pg_dump` 를 쓴다 —
+스키마가 바뀌어도 따로 유지보수할 코드가 없다.
+
+```bash
+# 덤프 — 수집 결과 4개 테이블 + 임베딩 공간 상태
+pg_dump "$DATABASE_URL" \
+  --data-only --no-owner --no-privileges \
+  -t raw_documents -t programs -t eligibility_rules \
+  -t program_embeddings -t ingest_embedding_state \
+  -f seed-$(date +%F).sql
+
+# 복구 — 빈 DB에 마이그레이션을 먼저 적용한 뒤
+for f in db/migrations/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f seed-2026-09-01.sql
+```
+
+주의할 점 세 가지.
+
+- **`ingest_embedding_state` 를 빼면 안 된다.** 이 행의 `active_vector_space` 가 임베딩 벡터와
+  맞지 않으면 웹이 의도 축을 통째로 degraded 처리한다 (`src/lib/matching.ts`).
+- **`program_embedding_staging` 은 뺀다.** 재색인 중간 산물이라 복구 대상이 아니다.
+- **덤프에 개인정보가 없다.** 프로필은 서버에 저장하지 않으므로(§8) 이 덤프는 전부 공공 API
+  수집분이다. 다만 용량이 크므로(임베딩 1024차원 × 청크) 저장소는 저장소대로 확보해 둔다.
+
+심사 구간 직전(9/6)에 한 번, 그리고 적재가 처음 완주한 날 한 번 뜨는 것을 권한다.

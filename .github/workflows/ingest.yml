@@ -50,6 +50,7 @@ jobs:
       BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
       FINLIFE_API_KEY: ${{ secrets.FINLIFE_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      LLM_FALLBACK_MODELS: ${{ vars.LLM_FALLBACK_MODELS }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:
@@ -115,6 +116,7 @@ jobs:
       BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
       FINLIFE_API_KEY: ${{ secrets.FINLIFE_API_KEY }}
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      LLM_FALLBACK_MODELS: ${{ vars.LLM_FALLBACK_MODELS }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
     steps:

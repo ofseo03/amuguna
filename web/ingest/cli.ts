@@ -5,7 +5,7 @@ import { COLLECTORS, DEFAULT_SOURCE_KEYS } from "./collectors";
 import { settingsFromEnv } from "./config";
 import { InMemoryDatabase, PostgresDatabase } from "./db";
 import { Embedder } from "./embedder";
-import { LLMFallback, Summarizer } from "./llm";
+import { LLMFallback, Summarizer, fallbackModels } from "./llm";
 import { checkVolumeDrop, Pipeline, renderReport, reportToJson } from "./pipeline";
 
 const HELP = `amuguna 공공 금융정보 수집·파싱 배치
@@ -68,6 +68,14 @@ async function main(): Promise<number> {
   if (!db) throw new Error("DATABASE_URL이 필요합니다. DB 쓰기 없이 실행하려면 --dry-run을 지정하세요.");
 
   const noLlm = values["no-llm"];
+  if (!noLlm && settings.openrouter_api_key && !fallbackModels().length) {
+    // 기본 모델은 무료 티어라 예고 없이 rate limit·deprecation 이 온다. 폴백이 없으면
+    // 그 순간 신규·수정 공고의 요약이 전부 원문 첫 문장 절단으로 떨어진다 (SPEC §8).
+    console.warn(
+      "[llm] 대체 모델이 지정되지 않았습니다. LLM_FALLBACK_MODELS 에 검증된 모델 ID 를" +
+        " 쉼표로 넣어 두면 기본 모델이 죽어도 배치가 완주합니다.",
+    );
+  }
   const pipeline = new Pipeline(db, {
     embedder: new Embedder(settings),
     summarizer: new Summarizer(noLlm ? { openrouter_api_key: "" } : settings),
