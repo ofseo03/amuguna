@@ -68,6 +68,14 @@ async function main(): Promise<number> {
   if (!db) throw new Error("DATABASE_URL이 필요합니다. DB 쓰기 없이 실행하려면 --dry-run을 지정하세요.");
 
   const noLlm = values["no-llm"];
+  if (!noLlm && !settings.openrouter_api_key) {
+    // 키가 없으면 요약·절차가 전부 폴백(원문 첫 문장 절단)으로 생성된다. 호출이 0회라
+    // 실패율 경고(§8)에도 걸리지 않으므로 여기서 알리지 않으면 아무도 모르고 지나간다.
+    console.warn(
+      "[llm] OPENROUTER_API_KEY 가 없습니다. 요약과 신청 절차가 전부 폴백 문구로" +
+        " 생성됩니다 — 의도한 것이 아니면 키를 설정하거나 --no-llm 을 명시하세요.",
+    );
+  }
   if (!noLlm && settings.openrouter_api_key && !fallbackModels().length) {
     // 기본 모델은 무료 티어라 예고 없이 rate limit·deprecation 이 온다. 폴백이 없으면
     // 그 순간 신규·수정 공고의 요약이 전부 원문 첫 문장 절단으로 떨어진다 (SPEC §8).

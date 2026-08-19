@@ -15,6 +15,7 @@
  * **심사 구간 완화 스위치.** 두 한도 모두 환경변수로 덮어쓸 수 있고 매 호출마다 읽는다 —
  * 코드 변경·재배포 없이 환경변수 값만 바꿔 적용한다. `0` 은 해당 축의 제한 해제다.
  *   RATE_LIMIT_SESSION_PER_MIN=0   # 세션 한도 해제
+ *   RATE_LIMIT_ANON_PER_MIN=0      # 세션 쿠키 없는 요청의 한도 해제
  *   RATE_LIMIT_IP_PER_MIN=0        # IP 한도 해제 (= rate limit 전면 해제)
  *
  * 인메모리 고정 윈도우. 단일 인스턴스 전제이며, Vercel 다중 인스턴스에서는
@@ -26,6 +27,15 @@ const WINDOW_MS = 60_000;
 
 /** 개인 단위 실질 한도 */
 export const DEFAULT_SESSION_LIMIT = 10;
+/**
+ * 세션 쿠키가 없는 요청의 IP 단위 한도.
+ *
+ * 세션 축을 통째로 건너뛰면 쿠키를 지운 클라이언트가 IP 한도(600/분)를 그대로 쓰게 되어
+ * 과금 abuse 상한이 60배로 뛴다. 그렇다고 개인 한도(10/분)를 IP 로 물리면 그것이 곧
+ * NAT 차단이다. 정상 사용자는 프로필 발급 시 세션 쿠키가 함께 생기므로 이 경로로 오는
+ * 요청은 드물다 — 개인 한도보다는 넉넉하고 IP 한도보다는 훨씬 빡빡한 값을 둔다.
+ */
+export const DEFAULT_ANON_LIMIT = 60;
 /**
  * NAT 안전망. 한 공인 IP 뒤에 60명이 분당 10회씩 쓰는 상황까지 통과시킨다 —
  * 세션 한도가 이미 개인을 제어하므로 이 값은 "쿠키를 회전시키는 자동화"만 걸리면 된다.
@@ -117,8 +127,9 @@ export function clientIp(req: Request): string {
 /**
  * 세션 우선 + IP 안전망.
  *
- * 세션 쿠키가 없으면 세션 축을 세지 않고 IP 축만 적용한다. 세션이 없는 요청에
- * 개인 단위 한도(10회/분)를 IP 로 대신 물리면 그것이 곧 NAT 차단이기 때문이다.
+ * 세션 쿠키가 없으면 개인 한도 대신 IP 단위 익명 한도(기본 60회/분)를 쓴다.
+ * 개인 한도(10회/분)를 IP 로 대신 물리면 그것이 곧 NAT 차단이고, 반대로 축을 아예
+ * 건너뛰면 쿠키를 지우는 것만으로 IP 한도(600회/분)를 다 쓰게 된다.
  * `/api/match` 는 프로필 쿠키를 요구하고 프로필 발급 시 세션 쿠키가 함께 생기므로
  * 세션 없는 경로는 실제로는 드물다.
  */
@@ -131,13 +142,18 @@ export function checkSessionAndIpRateLimit(
   const sessionLimit = envLimit("RATE_LIMIT_SESSION_PER_MIN", DEFAULT_SESSION_LIMIT, env);
   const ipLimit = envLimit("RATE_LIMIT_IP_PER_MIN", DEFAULT_IP_LIMIT, env);
 
+  const anonLimit = envLimit("RATE_LIMIT_ANON_PER_MIN", DEFAULT_ANON_LIMIT, env);
+
   const ip = clientIp(req);
   const ipResult = checkRateLimit(`ip:${ip}`, ipLimit, now);
-  // 세션 축은 세션이 있을 때만. IP 축이 이미 막았으면 세션 카운트를 태우지 않는다.
-  const sessionResult =
-    sessionId && ipResult.allowed
+  // IP 축이 이미 막았으면 두 번째 축의 카운트를 태우지 않는다.
+  // 세션이 있으면 개인 한도로, 없으면 IP 단위 익명 한도로 센다 — 어느 쪽이든
+  // 두 번째 축이 반드시 존재해야 세션 쿠키를 지우는 것만으로 상한이 뛰지 않는다.
+  const sessionResult = !ipResult.allowed
+    ? null
+    : sessionId
       ? checkRateLimit(`session:${sessionId}`, sessionLimit, now)
-      : null;
+      : checkRateLimit(`anon:${ip}`, anonLimit, now);
 
   if (!ipResult.allowed) return { ...ipResult, scope: "ip" };
   if (sessionResult && !sessionResult.allowed) return { ...sessionResult, scope: "session" };

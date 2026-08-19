@@ -155,3 +155,32 @@ test("두 POST 라우트 모두 CSRF 검사를 거친다", async () => {
     assert.match(code, /status: 403/, `${route} 가 CSRF 거부를 403 으로 돌려주지 않는다`);
   }
 });
+
+test("http 로 접속하는 환경을 차단하지 않는다", () => {
+  // 회귀 방지: X-Forwarded-Proto 가 없을 때 스킴을 https 로 추측하면
+  // 로컬 http 개발과 사내망 IP 접속이 전부 403 이 된다. 실제로 그랬다.
+  for (const host of ["127.0.0.1:3000", "192.168.0.5:3000", "10.0.0.7:3000", "localhost:3000"]) {
+    const result = checkCsrf(request({ host, origin: `http://${host}` }));
+    assert.equal(result.ok, true, `${host} 가 차단되었다: ${result.reason}`);
+  }
+});
+
+test("스킴이 달라도 호스트가 같으면 통과한다", () => {
+  // CSRF 가 가려야 하는 것은 '어느 사이트가 보냈는가'다. 스킴 다운그레이드는
+  // HSTS 와 CSP 의 upgrade-insecure-requests 가 맡는 별개의 문제다.
+  const host = "amuguna.example";
+  assert.equal(checkCsrf(request({ host, origin: `http://${host}` })).ok, true);
+  assert.equal(checkCsrf(request({ host, origin: `https://${host}` })).ok, true);
+});
+
+test("포트가 다르면 다른 출처로 본다", () => {
+  const result = checkCsrf(request({ host: "amuguna.example:3000", origin: "https://amuguna.example:4000" }));
+  assert.equal(result.ok, false);
+});
+
+test("Origin 이 URL 형식이 아니면 거부한다", () => {
+  // 'null' 은 통과시키지만(§ 위 테스트), 파싱 불가한 쓰레기 값은 신뢰하지 않는다
+  const result = checkCsrf(request({ host: "amuguna.example", origin: "not-a-url" }));
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /형식 오류/);
+});

@@ -15,6 +15,7 @@
 import { parseArgs } from "node:util";
 import { readFile } from "node:fs/promises";
 import postgres from "postgres";
+import { prepare, similarity } from "./lib/title-similarity.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -39,44 +40,8 @@ const FLOOR = Math.min(THRESHOLD, ...SENSITIVITY);
 
 /* ------------------------------------------------------------------ 정규화 */
 
-/**
- * 제목 정규화. 같은 사업이 소스마다 다르게 표기되는 부분을 걷어낸다.
- * 예) "2026년 청년월세 한시 특별지원(2차)" / "[서울] 청년월세 한시 특별지원 사업"
- */
-function normalizeTitle(title) {
-  return (title ?? "")
-    .normalize("NFC")
-    .replace(/\d{4}\s*년도?/gu, " ") // 연도
-    .replace(/제?\s*\d+\s*차/gu, " ") // 회차
-    .replace(/[[\]()〔〕【】「」『』<>《》]/gu, " ") // 괄호류
-    .replace(/\b(사업|공고|지원사업|모집|안내|계획)\b/gu, " ") // 상투어
-    .replace(/[^\p{L}\p{N}]+/gu, "") // 남은 구두점·공백 제거
-    .toLowerCase();
-}
-
-/** 소관기관 정규화. "○○시청"/"○○시" 같은 표기 차이를 흡수한다. */
-function normalizeIssuer(issuer) {
-  return (issuer ?? "")
-    .normalize("NFC")
-    .replace(/\s+/gu, "")
-    .replace(/(청|처|부|위원회|공단|공사|원)$/u, "")
-    .toLowerCase();
-}
-
-/** 문자 bigram 집합 — 한국어 제목에서 형태소 분석기 없이 쓸 수 있는 가장 무난한 표현 */
-function bigrams(text) {
-  const set = new Set();
-  if (text.length < 2) return text ? set.add(text) && set : set;
-  for (let i = 0; i + 1 < text.length; i++) set.add(text.slice(i, i + 2));
-  return set;
-}
-
-function jaccard(a, b) {
-  if (!a.size || !b.size) return 0;
-  let shared = 0;
-  for (const gram of a) if (b.has(gram)) shared++;
-  return shared / (a.size + b.size - shared);
-}
+// 순수 함수는 scripts/lib/title-similarity.mjs 에 있다 — 이 파일은 실행형이라
+// 테스트에서 import 할 수 없어서 분리했다 (src/lib/title-similarity.test.mjs).
 
 /* ------------------------------------------------------------------ 데이터 */
 
@@ -132,12 +97,7 @@ console.log("");
 
 /* ------------------------------------------------------------------ 측정 */
 
-const prepared = rows.map((row) => ({
-  ...row,
-  normTitle: normalizeTitle(row.title),
-  normIssuer: normalizeIssuer(row.issuer),
-  grams: bigrams(normalizeTitle(row.title)),
-}));
+const prepared = rows.map(prepare);
 
 // 완전 동일 제목은 별도로 센다 — 가장 확실한 중복이고 임계치 논쟁이 없다.
 const exactGroups = new Map();
@@ -159,9 +119,7 @@ for (let i = 0; i < prepared.length; i++) {
     const a = prepared[i];
     const b = prepared[j];
     if (!a.normTitle || !b.normTitle) continue;
-    let score = jaccard(a.grams, b.grams);
-    // 소관기관이 같으면 같은 사업일 가능성이 크게 오른다
-    if (a.normIssuer && a.normIssuer === b.normIssuer) score = Math.min(1, score + 0.1);
+    const score = similarity(a, b);
     if (score >= FLOOR) {
       pairs.push({ a, b, score, crossSource: a.source_key !== b.source_key });
     }

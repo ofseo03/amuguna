@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  DEFAULT_ANON_LIMIT,
   DEFAULT_IP_LIMIT,
   DEFAULT_SESSION_LIMIT,
   checkSessionAndIpRateLimit,
@@ -60,10 +61,10 @@ test("세션을 갈아끼워 우회해도 IP 안전망에서 걸린다", () => {
   assert.equal(blocked.scope, "ip");
 });
 
-test("세션 쿠키가 없으면 IP 축만 적용한다 (세션 한도를 IP 로 대신 물리지 않는다)", () => {
+test("세션 쿠키가 없으면 개인 한도가 아니라 익명 한도를 쓴다", () => {
   const ip = "203.0.113.13";
   const now = 4_000_000;
-  // 세션 한도(10)보다 많이 보내도 IP 한도 안이면 통과해야 한다.
+  // 개인 한도(10)를 IP 로 대신 물리면 그것이 곧 NAT 차단이다. 익명 한도 안이면 통과해야 한다.
   for (let i = 0; i < DEFAULT_SESSION_LIMIT * 3; i++) {
     assert.equal(checkSessionAndIpRateLimit(null, req(ip), now, {}).allowed, true);
   }
@@ -102,4 +103,39 @@ test("차단 문구는 원인이 아니라 재시도 방법을 알린다", () =>
   assert.match(message, /17초 후에 다시 시도/);
   // 0초 후 재시도하라는 안내는 사용자에게 무의미하다
   assert.match(rateLimitMessage(0), /1초 후에 다시 시도/);
+});
+
+test("세션 쿠키를 지운다고 IP 한도를 다 쓸 수는 없다", () => {
+  // 회귀 방지: 세션이 없을 때 세션 축을 통째로 건너뛰면, 쿠키만 지우면
+  // 개인 한도(10/분) 대신 IP 한도(600/분)를 쓰게 되어 과금 abuse 상한이 60배로 뛴다.
+  const ip = "203.0.113.20";
+  const now = 6_000_000;
+  let allowed = 0;
+  for (let i = 0; i < DEFAULT_IP_LIMIT; i++) {
+    if (checkSessionAndIpRateLimit(null, req(ip), now, {}).allowed) allowed++;
+  }
+  assert.equal(allowed, DEFAULT_ANON_LIMIT, `익명 요청이 ${allowed}회 통과했다`);
+  assert.ok(DEFAULT_ANON_LIMIT < DEFAULT_IP_LIMIT);
+
+  const blocked = checkSessionAndIpRateLimit(null, req(ip), now, {});
+  assert.equal(blocked.allowed, false);
+});
+
+test("익명 한도는 개인 한도보다 넉넉하다 (세션 없는 NAT 사용자 보호)", () => {
+  // 개인 한도를 IP 로 물리면 그것이 곧 NAT 차단이다. 익명 한도는 그 사이 값이어야 한다.
+  assert.ok(DEFAULT_ANON_LIMIT > DEFAULT_SESSION_LIMIT);
+  const ip = "203.0.113.21";
+  const now = 7_000_000;
+  for (let i = 0; i < DEFAULT_SESSION_LIMIT * 3; i++) {
+    assert.equal(checkSessionAndIpRateLimit(null, req(ip), now, {}).allowed, true);
+  }
+});
+
+test("익명 한도도 환경변수로 조절된다", () => {
+  const env = { RATE_LIMIT_ANON_PER_MIN: "2" };
+  const ip = "203.0.113.22";
+  const now = 8_000_000;
+  assert.equal(checkSessionAndIpRateLimit(null, req(ip), now, env).allowed, true);
+  assert.equal(checkSessionAndIpRateLimit(null, req(ip), now, env).allowed, true);
+  assert.equal(checkSessionAndIpRateLimit(null, req(ip), now, env).allowed, false);
 });

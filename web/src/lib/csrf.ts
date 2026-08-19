@@ -44,26 +44,36 @@ export function checkCsrf(req: Request): CsrfResult {
   const origin = req.headers.get("origin");
   if (!origin || origin === "null") return { ok: true };
 
-  const expected = requestOrigin(req);
-  if (!expected) return { ok: true };
-  if (origin !== expected) {
-    return { ok: false, reason: `origin=${origin} expected=${expected}` };
+  const expectedHost = requestHost(req);
+  if (!expectedHost) return { ok: true };
+
+  // **스킴이 아니라 호스트로 비교한다.**
+  // 프록시가 `X-Forwarded-Proto` 를 주지 않는 환경(로컬 http, LAN IP 접속)에서 스킴을
+  // 추측하면 정상 요청을 403 으로 막는다. 실제로 http://127.0.0.1:3000 과 사내망 IP
+  // 접속이 전부 차단됐다. 스킴 다운그레이드는 HSTS 와 `upgrade-insecure-requests`
+  // (next.config.ts CSP) 가 막는 문제이고, CSRF 가 가려야 하는 것은 **어느 사이트가
+  // 요청을 보냈는가**이므로 호스트 비교로 충분하다.
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return { ok: false, reason: `origin=${origin} (형식 오류)` };
+  }
+  if (originHost !== expectedHost) {
+    return { ok: false, reason: `origin=${originHost} expected=${expectedHost}` };
   }
   return { ok: true };
 }
 
 /**
- * 이 요청이 도달한 실제 출처.
+ * 이 요청이 도달한 호스트.
  *
  * Vercel 등 프록시 뒤에서는 `req.url` 의 호스트가 내부 주소일 수 있으므로
- * `X-Forwarded-Host`/`X-Forwarded-Proto` 를 우선한다. 두 헤더는 플랫폼이 설정하는
- * 값이라 클라이언트가 임의로 덮어쓸 수 없다.
+ * `X-Forwarded-Host` 를 우선한다. 이 헤더는 플랫폼이 설정하는 값이라
+ * 클라이언트가 임의로 덮어쓸 수 없다.
  */
-function requestOrigin(req: Request): string | null {
-  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
-  if (!host) return null;
-  const proto = req.headers.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
-  return `${proto}://${host}`;
+function requestHost(req: Request): string | null {
+  return req.headers.get("x-forwarded-host") ?? req.headers.get("host");
 }
 
 /** 거부 시 사용자에게 보이는 문구 — 공격 여부를 단정하지 않고 재시도를 안내한다 */

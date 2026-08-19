@@ -115,3 +115,20 @@ test("공고문에 섞인 스크립트는 값으로만 취급된다", () => {
   assert.equal(externalHttpUrl("  javascript:alert(1)"), null);
   assert.equal(externalHttpUrl("https://www.gov.kr/a?b=1"), "https://www.gov.kr/a?b=1");
 });
+
+test("소스 파일에 제어 문자가 섞여 있지 않다", async () => {
+  // 회귀 방지: 캐시 키 구분자로 리터럴 NUL 을 쓴 적이 있는데, 그러면 git 이 파일을
+  // 바이너리로 취급해 diff 가 통째로 안 보인다 — 리뷰가 불가능해진다.
+  const offenders = [];
+  for (const [path, code] of SOURCES) {
+    // 허용: 탭·개행·캐리지리턴
+    const bad = [...code].filter((ch) => {
+      const cp = ch.codePointAt(0);
+      return cp < 0x20 && cp !== 0x09 && cp !== 0x0a && cp !== 0x0d;
+    });
+    if (bad.length) {
+      offenders.push(`${path}: ${bad.map((c) => `U+${c.codePointAt(0).toString(16).padStart(4, "0")}`).join(", ")}`);
+    }
+  }
+  assert.deepEqual(offenders, [], `제어 문자가 있는 파일:\n${offenders.join("\n")}`);
+});

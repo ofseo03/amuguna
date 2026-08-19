@@ -112,7 +112,7 @@ curl -s -b jar localhost:3000/api/programs/1
 | `src/lib/validation.ts` | 서버 측 입력 검증 | §8 |
 | `src/lib/session.ts` | **암호화된**(AES-256-GCM) httpOnly 프로필 쿠키 | §8 |
 | `src/lib/csrf.ts` | Origin/Sec-Fetch-Site 기반 CSRF 검증 | §8 |
-| `src/lib/rate-limit.ts` | 세션 10회/분 + IP 600회/분 이중 상한 (환경변수로 완화·해제) | §8 |
+| `src/lib/rate-limit.ts` | 세션 10 / 익명 60 / IP 600 회분 삼중 상한 (환경변수로 완화·해제) | §8 |
 | `src/lib/shared-data.ts` | 팀 공통 계약 데이터 접근자 | — |
 
 수집기의 공통층은 HTTP·재시도만 담당한다. 응답 형식과 필드 매핑은 소스별 수집기가
@@ -187,6 +187,7 @@ cp .env.example .env.local
 | `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 암호화 키와 세션 id 서명 키를 여기서 파생한다 |
 | `LLM_FALLBACK_MODELS` | (없음) | 기본 모델 실패 시 시도할 대체 모델 (쉼표 구분) |
 | `RATE_LIMIT_SESSION_PER_MIN` | `10` | 세션당 분당 검색 한도. `0` 이면 해제 |
+| `RATE_LIMIT_ANON_PER_MIN` | `60` | 세션 쿠키 없는 요청의 IP당 한도. `0` 이면 해제 |
 | `RATE_LIMIT_IP_PER_MIN` | `600` | IP당 분당 검색 한도(NAT 안전망). `0` 이면 해제 |
 
 ---

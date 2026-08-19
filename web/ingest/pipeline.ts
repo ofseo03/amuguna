@@ -3,7 +3,8 @@ import { CollectorError } from "./collectors/base";
 import type { Database, ProgramValues, RuleValues } from "./db";
 import { Embedder } from "./embedder";
 import { applyFallback, LLMFallback, Summarizer } from "./llm";
-import type { CollectedProgram, EligibilityRules } from "./models";
+import type { CollectedProgram } from "./models";
+import { EligibilityRules } from "./models";
 import {
   computeConfidence,
   eligibilitySourceText,
@@ -161,12 +162,18 @@ export class Pipeline {
     const contentHash = program.contentHash();
     const previousHash = await db.latestContentHash(program.external_id);
     const existingId = await db.getProgramId(program.external_id);
-    // 원문이 그대로여도 자동 추출이 불완전했던 건은 다시 파싱한다 —
+    // 원문이 그대로여도 **재시도해서 나아질 수 있는** 사유로 실패한 건은 다시 파싱한다 —
     // LLM 이 잠시 죽어서 실패한 건이 영원히 불완전한 채로 남지 않게 하는 회복 경로다.
+    //
+    // `needs_review` 플래그가 아니라 사유로 판정하는 것이 중요하다. 그 플래그는
+    // llm_unavailable(키 없음)·llm_no_fields(뽑을 게 없었음) 처럼 원문이 같으면 결과도
+    // 같은 사유에도 켜지므로, 플래그로 판정하면 무변경 공고를 매 회차 재파싱·재임베딩한다.
     const retryNeedsReview =
       existingId !== null &&
       previousHash === contentHash &&
-      (await db.rulesNeedReview(program.external_id));
+      EligibilityRules.INCOMPLETE_REVIEW_REASONS.has(
+        (await db.ruleReviewReason(program.external_id)) ?? "",
+      );
 
     if (existingId !== null && previousHash === contentHash && !retryNeedsReview) {
       const restored = await db.reactivateProgram(program.external_id, now);

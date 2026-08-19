@@ -328,3 +328,59 @@ test("수집기 장애는 여전히 직전 스냅샷을 유지한다 (회귀 방
   await ingest.runSource(new Broken([]));
   assert.equal(db.programs.get(1)?.status, "active");
 });
+
+test("재시도해도 나아지지 않는 사유는 무변경 공고를 다시 파싱하지 않는다", async () => {
+  // 회귀 방지: retryNeedsReview 를 `needs_review` 플래그로 판정하면
+  // llm_unavailable(키 없음)·llm_no_fields(뽑을 게 없었음) 처럼 원문이 같으면 결과도 같은
+  // 사유까지 걸려, 무변경 공고를 매 회차 재파싱·재임베딩하게 된다 — 증분 수집의
+  // 비용 이점이 통째로 사라지는 조용한 실패 모드다.
+  for (const reason of ["llm_unavailable", "llm_no_fields"]) {
+    const db = new InMemoryDatabase();
+    const first = new Pipeline(db, {
+      embedder: new Embedder(settings),
+      llm: null,
+      dryRun: true,
+    });
+    await first.runSource(new FakeCollector([collected()]));
+    db.rules.get(1)!.needsReview = true;
+    db.rules.get(1)!.reviewReason = reason;
+
+    const second = new Pipeline(db, {
+      embedder: new Embedder(settings),
+      llm: null,
+      dryRun: true,
+    });
+    await second.runSource(new FakeCollector([collected()]));
+
+    assert.equal(second.report.totals.unchanged, 1, `${reason}: 무변경으로 처리되지 않았다`);
+    assert.equal(second.report.totals.updated, 0, `${reason}: 불필요하게 재파싱했다`);
+    assert.equal(db.rawDocuments.length, 1, `${reason}: 원문 버전이 늘었다`);
+  }
+});
+
+test("재시도로 나아질 수 있는 사유는 무변경 공고도 다시 파싱한다", async () => {
+  // LLM 이 잠시 죽어서 실패한 건은 다음 회차가 회복시켜야 한다.
+  for (const reason of ["llm_failed", "llm_validation_rejected"]) {
+    const db = new InMemoryDatabase();
+    const first = new Pipeline(db, {
+      embedder: new Embedder(settings),
+      llm: null,
+      dryRun: true,
+    });
+    await first.runSource(new FakeCollector([collected()]));
+    db.rules.get(1)!.needsReview = true;
+    db.rules.get(1)!.reviewReason = reason;
+
+    const retry = new Pipeline(db, {
+      embedder: new Embedder(settings),
+      llm: null,
+      dryRun: true,
+    });
+    await retry.runSource(new FakeCollector([collected()]));
+
+    assert.equal(retry.report.totals.updated, 1, `${reason}: 재시도하지 않았다`);
+    // 원문은 그대로이므로 새 버전을 쌓지 않는다
+    assert.equal(db.rawDocuments.length, 1, `${reason}: 원문 버전이 늘었다`);
+    assert.equal(db.rules.get(1)?.reviewReason, null, `${reason}: 사유가 정리되지 않았다`);
+  }
+});
