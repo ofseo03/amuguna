@@ -1,4 +1,5 @@
 import Link from "next/link";
+import HeroVisual from "@/components/HeroVisual";
 import { isDbConfigured } from "@/lib/db";
 
 // 데모 모드 배너가 배포 환경의 실제 환경변수를 반영해야 하므로 요청 시 렌더한다.
@@ -10,7 +11,7 @@ export default function LandingPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4">
-      <section className="py-16 sm:py-24">
+      <section className="pt-12 pb-14 sm:pt-16">
         <p className="mb-4 inline-block rounded-full bg-brand-soft px-3 py-1 text-sm font-semibold text-brand-dark">
           회원가입 없음 · 익명 이용
         </p>
@@ -47,6 +48,11 @@ export default function LandingPage() {
             근접탈락 로직은 실제와 동일합니다.
           </p>
         )}
+
+        {/* 카피가 말한 "흩어진 것 → 내 것만" 을 그림으로 한 번 더 보여준다 */}
+        <div className="mt-12">
+          <HeroVisual />
+        </div>
       </section>
 
       <section className="border-t border-line py-14">
