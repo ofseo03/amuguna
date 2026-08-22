@@ -1,0 +1,374 @@
+/**
+ * 랜딩 첫 화면 히어로 비주얼 (SPEC §9 화면 1).
+ *
+ * 시안(흩어진 출처 → 내 맞춤 리포트 → 법적 고지/보안)을 이미지가 아니라 마크업으로 짰다.
+ * 래스터 이미지로 넣지 않은 이유:
+ *  - 카드 안의 글자가 진짜 텍스트라야 글자 크기 토글(html[data-fontsize])을 따라 커진다.
+ *    고령층 대상 서비스에서 히어로만 글자가 안 커지면 그 화면부터 이탈한다 (§8).
+ *  - 스크린리더가 읽고, 브라우저 번역·검색·복사가 되고, 색 대비를 토큰으로 보장할 수 있다.
+ *  - 고해상도 대응(2x/3x)이나 다크모드 대체 이미지가 필요 없다.
+ *
+ * 장식(리본·후광·방패)만 aria-hidden 인 인라인 SVG 다.
+ */
+
+type Accent = "blue" | "teal" | "green" | "violet" | "plum";
+
+/** 토큰 조합을 한 곳에 모아둔다 — 배지·아이콘 타일·체크가 같은 색을 쓰게 하려고. */
+const ACCENT: Record<Accent, { tile: string; icon: string; check: string; ribbon: string }> = {
+  blue: {
+    tile: "bg-brand-soft",
+    icon: "text-brand",
+    check: "bg-brand-soft text-brand",
+    ribbon: "var(--brand)",
+  },
+  teal: {
+    tile: "bg-accent-teal-soft",
+    icon: "text-accent-teal",
+    check: "bg-accent-teal-soft text-accent-teal",
+    ribbon: "var(--accent-teal)",
+  },
+  green: {
+    tile: "bg-ok-soft",
+    icon: "text-ok",
+    check: "bg-ok-soft text-ok",
+    ribbon: "var(--ok)",
+  },
+  violet: {
+    tile: "bg-accent-violet-soft",
+    icon: "text-accent-violet",
+    check: "bg-accent-violet-soft text-accent-violet",
+    ribbon: "var(--accent-violet)",
+  },
+  plum: {
+    tile: "bg-accent-plum-soft",
+    icon: "text-accent-plum",
+    check: "bg-accent-plum-soft text-accent-plum",
+    ribbon: "var(--accent-plum)",
+  },
+};
+
+type IconName = "megaphone" | "bank" | "receipt" | "link" | "gavel";
+
+/**
+ * 카테고리 5종.
+ *
+ * example 문구는 실제 공고를 흉내낸 예시이되 특정 금융회사 상품명은 쓰지 않는다 —
+ * 히어로에 상품명이 박히면 비교·안내가 아니라 권유·광고로 읽힐 여지가 생긴다
+ * (SiteChrome 의 금융소비자보호법 고지와 같은 이유).
+ */
+const CATEGORIES: {
+  label: string;
+  icon: IconName;
+  accent: Accent;
+  example: string;
+}[] = [
+  { label: "지원금", icon: "megaphone", accent: "blue", example: "청년 일자리 도약장려금" },
+  { label: "대출", icon: "bank", accent: "teal", example: "버팀목 전세자금대출 한도" },
+  { label: "세금", icon: "receipt", accent: "green", example: "연말정산 환급 대상 공제" },
+  { label: "금융상품", icon: "link", accent: "violet", example: "ISA 비과세 한도 비교" },
+  { label: "법령", icon: "gavel", accent: "plum", example: "청년 주거지원 개정 사항" },
+];
+
+/** 배지 열을 시안처럼 활 모양으로 밀어낸다 (가운데가 가장 왼쪽). */
+const ARC_OFFSET = ["14", "5", "0", "5", "14"];
+
+export default function HeroVisual() {
+  return (
+    <div
+      className="relative overflow-hidden rounded-3xl border border-line-soft bg-gradient-to-br from-bg-soft via-white to-brand-soft/60 px-4 py-8 sm:px-8 sm:py-12"
+      role="img"
+      aria-label="흩어져 있는 지원금·대출·세금·금융상품·법령 정보가 하나의 맞춤 리포트로 모이고, 자격 근거와 법적 고지가 함께 표시되는 화면 예시"
+    >
+      <Glow />
+
+      {/* 내부 요소는 위 role=img 의 설명으로 갈음한다 — 스크린리더가 장식 텍스트까지 읽지 않도록 */}
+      <div aria-hidden="true" className="relative">
+        {/* lg 미만: 출처를 칩으로 가로 배치. lg 이상: 왼쪽 배지 열 + 리본 */}
+        <SourceChips />
+
+        <div className="lg:grid lg:grid-cols-[minmax(0,13rem)_minmax(0,1fr)_minmax(0,12rem)] lg:items-center lg:gap-x-6">
+          <SourceBadges />
+          <div className="relative">
+            <Ribbons />
+            <ReportCard />
+          </div>
+          <TrustStack />
+        </div>
+      </div>
+
+      <p className="relative mt-6 text-sm text-ink-3 lg:mt-8">
+        <span className="font-semibold text-ink-2">예시 화면입니다.</span> 실제
+        결과는 입력한 조건에 따라 달라지며, 카드마다 원문 링크와 수집 시각을 함께
+        표시합니다.
+      </p>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- 장식 */
+
+function Glow() {
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+      <div className="absolute -left-16 top-4 h-56 w-56 rounded-full bg-brand/5 blur-3xl" />
+      <div className="absolute -right-10 bottom-0 h-64 w-64 rounded-full bg-accent-violet/5 blur-3xl" />
+    </div>
+  );
+}
+
+/**
+ * 배지에서 리포트 카드로 흘러드는 리본. lg 이상에서만 그린다.
+ *
+ * 배지 열 위로 넘어와도 글자를 덮지 않도록 z-0 에 깔고, 배지·카드는 z-10 으로 올린다.
+ */
+function Ribbons() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 240 320"
+      preserveAspectRatio="none"
+      className="pointer-events-none absolute inset-y-0 -left-52 z-0 hidden h-full w-52 lg:block"
+    >
+      <defs>
+        {/*
+         * gradientUnits 를 userSpaceOnUse 로 둔다 (기본값 objectBoundingBox 가 아니라).
+         *  - 가운데 리본은 완전한 수평선이라 bbox 높이가 0 이다. objectBoundingBox 는
+         *    이때 퇴화(degenerate)해서 스펙상 해당 도형이 아예 그려지지 않는다.
+         *  - 겸사겸사 5개 리본의 페이드인 지점이 각자의 bbox 가 아니라 같은 x 에 맞는다.
+         */}
+        {CATEGORIES.map((c, i) => (
+          <linearGradient
+            key={c.label}
+            id={`ribbon-${i}`}
+            gradientUnits="userSpaceOnUse"
+            x1="0"
+            y1="0"
+            x2="240"
+            y2="0"
+          >
+            <stop offset="0%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0" />
+            <stop offset="45%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0.42" />
+          </linearGradient>
+        ))}
+      </defs>
+      {/*
+       * 각 배지 높이(y0)에서 카드 왼쪽 모서리(x=240)로 모여든다.
+       * 끝점을 완전히 겹치지 않게 벌려 둔다 — 겹치면 나중에 그린 리본이 앞의 것을 덮어
+       * 5개 중 몇 개가 사라진 것처럼 보인다. 카드가 끝을 가리므로 벌어진 티는 안 난다.
+       */}
+      {[26, 93, 160, 227, 294].map((y0, i) => {
+        const yEnd = 160 + (i - 2) * 30;
+        return (
+          <path
+            key={y0}
+            d={`M0 ${y0} C ${90 + i * 6} ${y0}, ${120 + i * 5} ${yEnd}, 240 ${yEnd}`}
+            fill="none"
+            stroke={`url(#ribbon-${i})`}
+            strokeWidth="10"
+            strokeLinecap="round"
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+/* ------------------------------------------------------------ 출처 배지 */
+
+function SourceBadges() {
+  return (
+    <ul className="relative z-10 hidden lg:flex lg:flex-col lg:gap-4">
+      {CATEGORIES.map((c, i) => (
+        <li
+          key={c.label}
+          className="flex items-center gap-3"
+          style={{ marginLeft: `${ARC_OFFSET[i]}%` }}
+        >
+          <span
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line-soft bg-white shadow-sm ${ACCENT[c.accent].icon}`}
+          >
+            <Icon name={c.icon} />
+          </span>
+          <span className="text-base font-bold text-ink">{c.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** 좁은 화면용 — 배지 열 대신 칩 한 줄로 접는다. */
+function SourceChips() {
+  return (
+    <ul className="mb-6 flex flex-wrap justify-center gap-2 lg:hidden">
+      {CATEGORIES.map((c) => (
+        <li
+          key={c.label}
+          className={`flex items-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-1.5 text-sm font-semibold text-ink ${ACCENT[c.accent].icon}`}
+        >
+          <Icon name={c.icon} small />
+          <span className="text-ink">{c.label}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/* ---------------------------------------------------------- 리포트 카드 */
+
+function ReportCard() {
+  return (
+    // lg 에서는 열 왼쪽에 붙인다 — 가운데 정렬하면 리본 끝과 카드 사이가 떠서 흐름이 끊긴다
+    <div className="relative z-10 mx-auto max-w-sm rounded-2xl border border-line-soft bg-white p-4 shadow-lg sm:p-5 lg:mx-0">
+      <p className="mb-4 flex flex-wrap items-baseline gap-x-2 text-lg font-bold text-ink">
+        내 맞춤 리포트
+        <span className="text-sm font-normal text-ink-3">조건이 겹치는 것만</span>
+      </p>
+
+      <ul className="flex flex-col gap-2.5">
+        {CATEGORIES.map((c) => {
+          const a = ACCENT[c.accent];
+          return (
+            <li
+              key={c.label}
+              className="flex items-center gap-3 rounded-xl border border-line-soft bg-bg-soft px-3 py-2.5"
+            >
+              <span
+                className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${a.tile} ${a.icon}`}
+              >
+                <Icon name={c.icon} small />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold text-ink">{c.label}</span>
+                <span className="block truncate text-sm text-ink-3">{c.example}</span>
+              </span>
+              <span
+                className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${a.check}`}
+              >
+                <CheckMark />
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/* -------------------------------------------------- 보안 · 법적 고지 스택 */
+
+function TrustStack() {
+  return (
+    <div className="mt-6 flex items-center justify-center gap-4 lg:mt-0 lg:flex-col lg:items-stretch lg:gap-0">
+      <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-soft to-accent-violet-soft text-brand lg:h-20 lg:w-20 lg:translate-y-4 lg:self-center lg:rounded-3xl">
+        <ShieldLock />
+      </span>
+
+      <div className="relative rounded-xl border border-line-soft bg-white p-3 shadow-sm lg:pt-5">
+        <p className="text-sm font-bold text-ink">법적 고지 · 근거</p>
+        <ul className="mt-2 flex flex-col gap-1.5">
+          {["자격 근거 표시", "원문 출처 링크", "권유 아닌 비교 안내"].map((t) => (
+            <li key={t} className="flex items-center gap-2 text-sm text-ink-2">
+              <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-ok-soft text-ok">
+                <CheckMark />
+              </span>
+              {t}
+            </li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- 아이콘 */
+
+const ICON_PATHS: Record<IconName, React.ReactNode> = {
+  megaphone: (
+    <>
+      <path d="M4 9.5h3.2L14 5.5v13l-6.8-4H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z" />
+      <path d="M17.5 9a4 4 0 0 1 0 6" />
+      <path d="M7.5 14.5 9 20" />
+    </>
+  ),
+  bank: (
+    <>
+      <path d="M3 9.5 12 4l9 5.5" />
+      <path d="M5.5 10v8M10 10v8m4 0v-8m4.5 0v8" />
+      <path d="M3 20h18" />
+    </>
+  ),
+  receipt: (
+    <>
+      <path d="M6 3h12v18l-3-1.7L12 21l-3-1.7L6 21V3Z" />
+      <path d="M9 8h6M9 12h6M9 16h3" />
+    </>
+  ),
+  link: (
+    <>
+      <path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2" />
+      <path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2" />
+    </>
+  ),
+  gavel: (
+    <>
+      <path d="m13.5 3.5 5 5-2.5 2.5-5-5z" />
+      <path d="m12.2 7.8-6.7 6.7" />
+      <path d="M4 21h9" />
+      <path d="m7 17.5 2.5-2.5" />
+    </>
+  ),
+};
+
+function Icon({ name, small = false }: { name: IconName; small?: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={small ? "h-5 w-5" : "h-6 w-6"}
+    >
+      {ICON_PATHS[name]}
+    </svg>
+  );
+}
+
+function CheckMark() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-3 w-3"
+    >
+      <path d="m5 13 4.5 4.5L19 7" />
+    </svg>
+  );
+}
+
+function ShieldLock() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-8 w-8 lg:h-10 lg:w-10"
+    >
+      <path d="M12 3 20 6v6c0 4.4-3.2 7.9-8 9-4.8-1.1-8-4.6-8-9V6l8-3Z" />
+      <path d="M9.6 11.5V10a2.4 2.4 0 0 1 4.8 0v1.5" />
+      <rect x="8.8" y="11.5" width="6.4" height="4.6" rx="1" />
+    </svg>
+  );
+}

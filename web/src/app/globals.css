@@ -33,6 +33,18 @@
   --danger: #b42318; /* 6.3:1 */
   --danger-soft: #fdecea;
 
+  /*
+   * 카테고리 구분용 보조색 (지원금·대출·세금·금융상품·법령).
+   * 색만으로 뜻을 전달하지 않는다 — 항상 라벨과 아이콘이 함께 붙는다 (§8).
+   * 흰 배경 대비는 모두 4.5:1 이상이라 작은 글자·체크 표시에 그대로 써도 된다.
+   */
+  --accent-teal: #0a6a88; /* 5.6:1 */
+  --accent-teal-soft: #e3f3f8;
+  --accent-violet: #5733c2; /* 8.1:1 */
+  --accent-violet-soft: #eeeafc;
+  --accent-plum: #7c2b8c; /* 7.6:1 */
+  --accent-plum-soft: #f8eaf7;
+
   --focus: #1a4fd6;
 }
 
@@ -54,6 +66,12 @@
   --color-warn-soft: var(--warn-soft);
   --color-danger: var(--danger);
   --color-danger-soft: var(--danger-soft);
+  --color-accent-teal: var(--accent-teal);
+  --color-accent-teal-soft: var(--accent-teal-soft);
+  --color-accent-violet: var(--accent-violet);
+  --color-accent-violet-soft: var(--accent-violet-soft);
+  --color-accent-plum: var(--accent-plum);
+  --color-accent-plum-soft: var(--accent-plum-soft);
 }
 
 html {
