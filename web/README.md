@@ -156,9 +156,15 @@ OpenRouter API를 호출하는 독립 Node 배치(`ingest/`)에서만 읽는다.
 `../shared/*.json` (행정구역 코드 · 직업 대분류 12종 · 소득분위 라벨 · 2026 기준중위소득표)이
 단일 출처다. **원본은 수정하지 않는다.**
 
-`scripts/copy-shared.mjs` 가 `predev` / `prebuild` 훅에서 `src/data/` 로 복사한다.
+`scripts/copy-shared.mjs` 가 `predev` / `prebuild` / `preingest` 훅에서 `src/data/` 로 복사한다.
 저장소 루트 밖을 import 하지 않게 하려는 것이고, `web/` 만 떼어 배포해도 동작한다
 (원본이 없으면 기존 복사본을 그대로 쓴다).
+
+웹(`src/lib/shared-data.ts`)과 수집 배치(`ingest/llm.ts`, `ingest/dictionaries.ts`) 모두
+이 복사본만 읽는다. **`web/` 안에서 `../../shared` 를 직접 참조하면 안 된다** — 저장소
+전체를 clone 하는 배포에서는 통과하지만 `web/` 만 떼어낸 배포에서 빌드가 깨진다.
+복사본(`src/data/*.json`)은 커밋되어 있고, 4개 파일 중 하나라도 원본과 어긋나면
+`ingest/tests/parser.test.ts` 의 동기화 테스트가 잡는다 (`npm run sync:shared` 로 갱신).
 
 ---
 

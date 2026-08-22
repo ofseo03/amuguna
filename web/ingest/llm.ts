@@ -1,5 +1,5 @@
-import occupationsData from "../../shared/occupations.json";
-import regionsData from "../../shared/regions.json";
+import occupationsData from "../src/data/occupations.json";
+import regionsData from "../src/data/regions.json";
 
 export const LLM_MODEL = process.env.LLM_MODEL ?? "google/gemma-4-31b-it:free";
 export const SUMMARY_MAX_CHARS = 40;
