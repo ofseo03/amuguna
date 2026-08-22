@@ -24,6 +24,8 @@ import {
 import { MAX_QUERY_LEN } from "@/lib/validation";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
 import Term from "@/components/Term";
+import StepTrail from "@/components/StepTrail";
+import PrivacyAssurance from "@/components/PrivacyAssurance";
 import type { Gender } from "@/lib/types";
 
 const TOTAL_STEPS = 6;
@@ -130,9 +132,9 @@ export default function OnboardingPage() {
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
-      {/* 진행바 */}
+      {/* 진행 표시 — 남은 질문이 무엇인지까지 보여준다 */}
       <div className="mb-8">
-        <div className="mb-2 flex items-baseline justify-between">
+        <div className="mb-3 flex items-baseline justify-between">
           <p className="text-sm font-semibold text-brand">
             {step} / {TOTAL_STEPS} 단계
           </p>
@@ -140,19 +142,7 @@ export default function OnboardingPage() {
             처음으로
           </Link>
         </div>
-        <div
-          role="progressbar"
-          aria-valuenow={step}
-          aria-valuemin={1}
-          aria-valuemax={TOTAL_STEPS}
-          aria-label="입력 진행 상황"
-          className="h-2 w-full overflow-hidden rounded-full bg-bg-sunken"
-        >
-          <div
-            className="h-full rounded-full bg-brand transition-all"
-            style={{ width: `${(step / TOTAL_STEPS) * 100}%` }}
-          />
-        </div>
+        <StepTrail step={step} total={TOTAL_STEPS} />
       </div>
 
       <h1 className="mb-1 text-2xl font-bold text-ink sm:text-3xl">
@@ -517,6 +507,8 @@ export default function OnboardingPage() {
           )}
         </div>
       </form>
+
+      <PrivacyAssurance />
     </div>
   );
 }

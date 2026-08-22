@@ -12,6 +12,7 @@ import Link from "next/link";
 import { NearMissItem, ProgramCard } from "@/components/ProgramCard";
 import { Disclaimer, FinancialProductNotice } from "@/components/SiteChrome";
 import Term from "@/components/Term";
+import StepTrail from "@/components/StepTrail";
 import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
 import type { MatchResponse, ProgramForm } from "@/lib/types";
@@ -114,14 +115,20 @@ export default function ResultsPage() {
   if (error?.noProfile) {
     return (
       <Shell>
-        <div className="rounded-xl border border-line bg-bg-soft p-8 text-center">
+        <div className="rounded-2xl border border-line-soft bg-gradient-to-br from-bg-soft via-white to-brand-soft/40 p-8 text-center">
           <h1 className="text-xl font-bold text-ink">먼저 기본 정보가 필요합니다</h1>
           <p className="mt-2 text-ink-2">
             나이·지역·소득 등 6단계를 입력하시면 결과를 보여드립니다.
           </p>
+
+          {/* 6단계가 어떤 질문인지 미리 보여준다 — 무엇을 묻는지 알면 시작 문턱이 낮다 */}
+          <div className="mx-auto mt-8 max-w-md">
+            <StepTrail step={0} total={6} />
+          </div>
+
           <Link
             href="/onboarding"
-            className="mt-6 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"
+            className="mt-8 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"
           >
             정보 입력하러 가기
           </Link>
