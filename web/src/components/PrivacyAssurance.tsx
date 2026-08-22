@@ -20,7 +20,7 @@ const POINTS = [
 
 export default function PrivacyAssurance() {
   return (
-    <aside className="mt-10 rounded-2xl border border-line-soft bg-gradient-to-br from-bg-soft via-white to-brand-soft/40 p-5 sm:p-6">
+    <aside className="mt-10 rounded-lg border border-line bg-bg-soft p-5 sm:p-6">
       <div className="flex items-start gap-4">
         <span
           aria-hidden="true"
@@ -57,7 +57,7 @@ export default function PrivacyAssurance() {
             ))}
           </ul>
           <p className="mt-3 text-sm">
-            <Link href="/privacy" className="text-brand hover:underline">
+            <Link href="/privacy" className="inline-block py-1 text-brand hover:underline">
               개인정보처리방침 자세히 보기
             </Link>
           </p>

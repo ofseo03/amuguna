@@ -17,15 +17,13 @@ import Icon, { CheckMark } from "./visual/Icon";
 /** 배지 열을 시안처럼 활 모양으로 밀어낸다 (가운데가 가장 왼쪽). */
 const ARC_OFFSET = ["14", "5", "0", "5", "14"];
 
-export default function HeroVisual() {
+export default function HeroVisual({ className = "" }: { className?: string }) {
   return (
     <div
-      className="relative overflow-hidden rounded-3xl border border-line-soft bg-gradient-to-br from-bg-soft via-white to-brand-soft/60 px-4 py-8 sm:px-8 sm:py-12"
+      className={`relative overflow-hidden rounded-lg border border-line bg-bg-soft px-4 py-8 sm:px-8 sm:py-12 ${className}`}
       role="img"
       aria-label="흩어져 있는 지원금·대출·세금·금융상품·법령 정보가 하나의 맞춤 리포트로 모이고, 자격 근거와 법적 고지가 함께 표시되는 화면 예시"
     >
-      <Glow />
-
       {/* 내부 요소는 위 role=img 의 설명으로 갈음한다 — 스크린리더가 장식 텍스트까지 읽지 않도록 */}
       <div aria-hidden="true" className="relative">
         {/* lg 미만: 출처를 칩으로 가로 배치. lg 이상: 왼쪽 배지 열 + 리본 */}
@@ -51,15 +49,6 @@ export default function HeroVisual() {
 }
 
 /* ---------------------------------------------------------------- 장식 */
-
-function Glow() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-      <div className="absolute -left-16 top-4 h-56 w-56 rounded-full bg-brand/5 blur-3xl" />
-      <div className="absolute -right-10 bottom-0 h-64 w-64 rounded-full bg-accent-violet/5 blur-3xl" />
-    </div>
-  );
-}
 
 /**
  * 배지에서 리포트 카드로 흘러드는 리본. lg 이상에서만 그린다.
@@ -131,7 +120,7 @@ function SourceBadges() {
           style={{ marginLeft: `${ARC_OFFSET[i]}%` }}
         >
           <span
-            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line-soft bg-white shadow-sm ${ACCENT[c.accent].icon}`}
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line bg-bg ${ACCENT[c.accent].icon}`}
           >
             <Icon name={c.icon} size="lg" />
           </span>
@@ -149,7 +138,7 @@ function SourceChips() {
       {CATEGORIES.map((c) => (
         <li
           key={c.label}
-          className={`flex items-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-1.5 text-sm font-semibold ${ACCENT[c.accent].icon}`}
+          className={`flex items-center gap-1.5 rounded-full border border-line-soft bg-bg px-3 py-1.5 text-sm font-semibold ${ACCENT[c.accent].icon}`}
         >
           <Icon name={c.icon} />
           <span className="text-ink">{c.label}</span>
@@ -164,7 +153,7 @@ function SourceChips() {
 function ReportCard() {
   return (
     // lg 에서는 열 왼쪽에 붙인다 — 가운데 정렬하면 리본 끝과 카드 사이가 떠서 흐름이 끊긴다
-    <div className="relative z-10 mx-auto max-w-sm rounded-2xl border border-line-soft bg-white p-4 shadow-lg sm:p-5 lg:mx-0">
+    <div className="relative z-10 mx-auto max-w-sm rounded-lg border border-line bg-bg p-4 sm:p-5 lg:mx-0">
       <p className="mb-4 flex flex-wrap items-baseline gap-x-2 text-lg font-bold text-ink">
         내 맞춤 리포트
         <span className="text-sm font-normal text-ink-3">조건이 겹치는 것만</span>
@@ -205,11 +194,11 @@ function ReportCard() {
 function TrustStack() {
   return (
     <div className="mt-6 flex items-center justify-center gap-4 lg:mt-0 lg:flex-col lg:items-stretch lg:gap-0">
-      <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-soft to-accent-violet-soft text-brand lg:h-20 lg:w-20 lg:translate-y-4 lg:self-center lg:rounded-3xl">
+      <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-brand-soft text-brand lg:h-20 lg:w-20 lg:translate-y-4 lg:self-center">
         <ShieldLock />
       </span>
 
-      <div className="relative rounded-xl border border-line-soft bg-white p-3 shadow-sm lg:pt-5">
+      <div className="relative rounded-lg border border-line bg-bg p-3 lg:pt-5">
         <p className="text-sm font-bold text-ink">법적 고지 · 근거</p>
         <ul className="mt-2 flex flex-col gap-1.5">
           {["자격 근거 표시", "원문 출처 링크", "권유 아닌 비교 안내"].map((t) => (

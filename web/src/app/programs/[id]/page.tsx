@@ -56,7 +56,7 @@ export default async function ProgramDetailPage({ params }: Props) {
   return (
     <article className="mx-auto max-w-3xl px-4 py-8">
       <nav aria-label="이동" className="mb-6">
-        <Link href="/results" className="text-ink-2 underline hover:text-brand">
+        <Link href="/results" className="inline-block py-1.5 text-ink-2 underline hover:text-brand">
           ← 결과 목록으로
         </Link>
       </nav>
@@ -67,7 +67,7 @@ export default async function ProgramDetailPage({ params }: Props) {
           {FORM_LABEL[program.form]}
         </span>
         <span className="text-ink-3">{issuerLevelLabel(program.issuer_level)}</span>
-        <span aria-hidden="true" className="text-line">·</span>
+        <span aria-hidden="true" className="text-ink-3">·</span>
         <span className="text-ink-3">{program.issuer}</span>
       </div>
 
@@ -244,7 +244,7 @@ export default async function ProgramDetailPage({ params }: Props) {
               {extras.map((e, i) => (
                 <li
                   key={`${e.label}-${i}`}
-                  className="rounded-lg border border-line bg-white px-4 py-3"
+                  className="rounded-lg border border-line bg-bg px-4 py-3"
                 >
                   {/* □ 같은 글립 대신 도형으로 그린다 — 글꼴마다 모양이 달라지고
                       스크린리더가 "하얀 사각형" 으로 읽는다 (§8) */}
@@ -271,7 +271,7 @@ export default async function ProgramDetailPage({ params }: Props) {
           </h2>
           <ol className="mt-4 grid gap-3">
             {program.apply_steps.map((s, i) => (
-              <li key={i} className="flex gap-4 rounded-lg border border-line bg-white p-4">
+              <li key={i} className="flex gap-4 rounded-lg border border-line bg-bg p-4">
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand font-bold text-white">
                   {i + 1}
                 </span>
@@ -299,7 +299,7 @@ export default async function ProgramDetailPage({ params }: Props) {
         <h2 id="source" className="text-xl font-bold text-ink">
           출처
         </h2>
-        <div className="mt-3 rounded-xl border border-line bg-white p-5">
+        <div className="mt-3 rounded-xl border border-line bg-bg p-5">
           <p className="text-ink-2">
             <span className="font-semibold text-ink">원문</span>{" "}
             {sourceUrl ? (
@@ -307,7 +307,7 @@ export default async function ProgramDetailPage({ params }: Props) {
                 href={sourceUrl}
                 target="_blank"
                 rel="noopener noreferrer nofollow"
-                className="break-all underline hover:text-brand"
+                className="inline-block break-all py-1 underline hover:text-brand"
               >
                 {program.source_url}
               </a>
@@ -352,7 +352,7 @@ export default async function ProgramDetailPage({ params }: Props) {
 
 function Fact({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="bg-white px-5 py-4">
+    <div className="bg-bg px-5 py-4">
       <dt className="text-sm font-semibold text-ink-3">{label}</dt>
       <dd className="mt-1 text-ink">{value}</dd>
     </div>

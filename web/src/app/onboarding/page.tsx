@@ -131,14 +131,14 @@ export default function OnboardingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-4 py-8">
+    <div className="mx-auto max-w-2xl px-5 py-10 sm:px-8">
       {/* 진행 표시 — 남은 질문이 무엇인지까지 보여준다 */}
       <div className="mb-8">
         <div className="mb-3 flex items-baseline justify-between">
           <p className="text-sm font-semibold text-brand">
             {step} / {TOTAL_STEPS} 단계
           </p>
-          <Link href="/" className="text-sm text-ink-3 underline hover:text-brand">
+          <Link href="/" className="inline-block py-1.5 text-sm text-ink-3 underline hover:text-brand">
             처음으로
           </Link>
         </div>
@@ -175,7 +175,7 @@ export default function OnboardingPage() {
                 value={age}
                 onChange={(e) => setAge(e.target.value)}
                 aria-describedby="age-help"
-                className="w-40 rounded-lg border-2 border-line bg-white px-4 py-3 text-2xl font-bold text-ink focus:border-brand"
+                className="w-40 rounded-lg border-2 border-line bg-bg px-4 py-3 text-2xl font-bold text-ink focus:border-brand"
               />
               <span className="text-xl text-ink-2">세</span>
             </div>
@@ -253,7 +253,7 @@ export default function OnboardingPage() {
                   setSidoCode(e.target.value);
                   setSigunguCode("");
                 }}
-                className="mt-2 w-full rounded-lg border-2 border-line bg-white px-4 py-3 text-lg text-ink focus:border-brand"
+                className="mt-2 w-full rounded-lg border-2 border-line bg-bg px-4 py-3 text-lg text-ink focus:border-brand"
               >
                 <option value="">선택해 주세요</option>
                 {SIDO.map((s) => (
@@ -274,7 +274,7 @@ export default function OnboardingPage() {
                 disabled={!sidoCode}
                 onChange={(e) => setSigunguCode(e.target.value)}
                 aria-describedby="sigungu-help"
-                className="mt-2 w-full rounded-lg border-2 border-line bg-white px-4 py-3 text-lg text-ink focus:border-brand disabled:bg-bg-sunken disabled:text-ink-3"
+                className="mt-2 w-full rounded-lg border-2 border-line bg-bg px-4 py-3 text-lg text-ink focus:border-brand disabled:bg-bg-sunken disabled:text-ink-3"
               >
                 <option value="">
                   {sidoCode ? "선택해 주세요" : "시·도를 먼저 선택해 주세요"}
@@ -351,7 +351,7 @@ export default function OnboardingPage() {
                     max={20}
                     value={householdSize}
                     onChange={(e) => setHouseholdSize(e.target.value)}
-                    className="mt-2 w-full rounded-lg border-2 border-line bg-white px-4 py-3 text-ink focus:border-brand"
+                    className="mt-2 w-full rounded-lg border-2 border-line bg-bg px-4 py-3 text-ink focus:border-brand"
                   />
                 </label>
                 <label className="font-semibold text-ink">
@@ -364,7 +364,7 @@ export default function OnboardingPage() {
                     step="0.1"
                     value={monthlyIncome}
                     onChange={(e) => setMonthlyIncome(e.target.value)}
-                    className="mt-2 w-full rounded-lg border-2 border-line bg-white px-4 py-3 text-ink focus:border-brand"
+                    className="mt-2 w-full rounded-lg border-2 border-line bg-bg px-4 py-3 text-ink focus:border-brand"
                   />
                 </label>
               </div>
@@ -403,7 +403,7 @@ export default function OnboardingPage() {
               autoFocus
               onChange={(e) => setQuery(e.target.value)}
               aria-describedby="query-help query-count"
-              className="mt-3 w-full rounded-lg border-2 border-line bg-white px-4 py-3 text-lg text-ink focus:border-brand"
+              className="mt-3 w-full rounded-lg border-2 border-line bg-bg px-4 py-3 text-lg text-ink focus:border-brand"
               placeholder="예) 보증금 올려달래서 대출 알아봐요"
             />
             <div className="mt-2 flex items-start justify-between gap-4">
@@ -444,7 +444,7 @@ export default function OnboardingPage() {
                         setQuery(ex);
                         queryRef.current?.focus();
                       }}
-                      className="w-full rounded-lg border border-line bg-white px-4 py-3 text-left text-ink-2 transition-colors hover:border-brand hover:bg-brand-soft"
+                      className="w-full rounded-lg border border-line bg-bg px-4 py-3 text-left text-ink-2 transition-colors hover:border-brand hover:bg-brand-soft"
                     >
                       · {ex}
                     </button>
@@ -469,7 +469,7 @@ export default function OnboardingPage() {
           <button
             type="button"
             onClick={() => (step > 1 ? setStep(step - 1) : router.push("/"))}
-            className="rounded-lg border-2 border-line bg-white px-5 py-3 font-semibold text-ink-2 transition-colors hover:bg-bg-sunken"
+            className="rounded-lg border-2 border-line bg-bg px-5 py-3 font-semibold text-ink-2 transition-colors hover:bg-bg-sunken"
           >
             {step > 1 ? "← 뒤로" : "← 처음으로"}
           </button>
@@ -496,7 +496,7 @@ export default function OnboardingPage() {
                 type="button"
                 disabled={submitting}
                 onClick={() => void submit("")}
-                className="rounded-lg border-2 border-line bg-white px-6 py-3 font-semibold text-ink-2 underline transition-colors hover:bg-bg-sunken"
+                className="rounded-lg border-2 border-line bg-bg px-6 py-3 font-semibold text-ink-2 underline transition-colors hover:bg-bg-sunken"
               >
                 건너뛰기
               </button>
@@ -534,7 +534,7 @@ function ChoiceButton({
       className={`flex cursor-pointer items-center gap-3 rounded-lg border-2 px-4 py-3 transition-colors ${
         checked
           ? "border-brand bg-brand-soft"
-          : "border-line bg-white hover:border-ink-3"
+          : "border-line bg-bg hover:border-ink-3"
       } ${align === "center" ? "justify-center text-center" : ""}`}
     >
       <input

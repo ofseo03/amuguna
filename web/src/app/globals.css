@@ -1,42 +1,61 @@
 @import "tailwindcss";
 
 /*
- * 접근성 (SPEC §8):
- *  - 모든 본문 색은 배경 대비 WCAG AA(4.5:1) 이상을 만족하도록 고른 값이다.
- *    회색 계열을 gray-400/500 까지 내리지 않는다 — 고령층 대상 서비스에서 가장 흔한 실패다.
+ * 디자인 언어: 사진(여기서는 삽화) 우선 + UI 후퇴.
+ * 전면 타일이 밝은 면 ↔ 어두운 면으로 번갈아 나오고, 색이 바뀌는 것 자체가 구분선이다.
+ * 강조색은 파랑 하나뿐이고, 그림자는 "제품 렌더"에만 딱 한 종류 쓴다.
+ *
+ * 접근성 (SPEC §8) — 디자인 언어보다 우선한다:
+ *  - 모든 본문 색은 배경 대비 WCAG AA(4.5:1) 이상이다. 실제로 계산해서 고른 값이고,
+ *    회색 계열을 그 아래로 내리지 않는다. 고령층 대상 서비스에서 가장 흔한 실패다.
  *  - 글자 크기 토글은 html[data-fontsize] 로 루트 font-size 를 바꾼다.
- *    Tailwind 가 rem 기반이므로 여백·행간까지 함께 커진다 (글자만 커져 레이아웃이 깨지지 않는다).
+ *    그래서 타이포 램프를 px 가 아니라 rem/em 으로 잡았다 — px 로 박으면 토글이 죽는다.
+ *
+ * 원본 디자인 명세에서 의도적으로 벗어난 지점 (근거는 각 토큰 옆에):
+ *  1. muted 회색 #7a7a7a (4.29:1) 를 쓰지 않는다. AA 미달이다.
+ *  2. 10px 미세 법적고지 / 12px 내비 링크를 쓰지 않는다. 본문 최소 14px 로 올렸다.
+ *  3. 타이포 크기를 px 가 아니라 rem 으로 환산했다.
  */
 
 :root {
   color-scheme: light;
 
-  --bg: #ffffff;
-  --bg-soft: #f6f8fb;
-  --bg-sunken: #eef2f7;
+  /* ---------------------------------------------------------------- 면 */
+  --bg: #ffffff; /* canvas */
+  --bg-soft: #f5f5f7; /* parchment — 밝은 타일 교대용 */
+  --bg-sunken: #ededf0;
+  --surface-pearl: #fafafc; /* 2차 버튼 바탕. parchment 위에서도 버튼으로 읽히게 */
 
-  --ink: #101828; /* 16.1:1 */
-  --ink-2: #344054; /* 10.4:1 */
-  --ink-3: #4a5567; /*  7.6:1 — 최소 본문 색. 이보다 밝게 내리지 않는다 */
+  --tile-1: #272729; /* 어두운 타일 기본 */
+  --tile-2: #2a2a2c; /* 어두운 타일이 연달아 올 때의 미세한 단차 */
+  --tile-3: #252527; /* 스택 맨 아래 */
+  --surface-black: #000000; /* 전역 내비 — 순수 검정은 여기서만 */
 
-  --line: #d7dde5;
-  --line-soft: #e7ebf0;
+  /* -------------------------------------------------------------- 글자 */
+  --ink: #1d1d1f; /* 16.8:1 — 순검정 대신. 인쇄물이 아니라 사진처럼 보이게 */
+  --ink-2: #37373a; /* 11.9:1 */
+  --ink-3: #55555a; /*  7.4:1 — 최소 본문 색. 이보다 밝게 내리지 않는다 */
+  --on-dark: #ffffff; /* 14.9:1 on tile-1 */
+  --on-dark-muted: #cccccc; /*  9.3:1 on tile-1 */
 
-  --brand: #1a4fd6; /* 6.6:1 */
-  --brand-dark: #143da8;
-  --brand-soft: #eaf0ff;
+  /* -------------------------------------------------------------- 강조 */
+  --brand: #0066cc; /* 5.6:1 — 유일한 상호작용 색 */
+  --brand-dark: #004fa3; /* 7.9:1 — 눌림/hover */
+  --brand-focus: #0071e3; /* 키보드 포커스 링 */
+  --brand-on-dark: #2997ff; /* 4.9:1 on tile-1. 어두운 면의 본문 링크 전용 */
+  --brand-soft: #e8f1fc;
 
-  --ok: #04724d; /* 5.6:1 */
+  /* -------------------------------------------------------------- 상태 */
+  --ok: #04724d; /* 6.0:1 */
   --ok-soft: #e6f4ee;
-  --warn: #9a5b00; /* 5.1:1 */
+  --warn: #9a5b00; /* 5.4:1 */
   --warn-soft: #fdf3e3;
-  --danger: #b42318; /* 6.3:1 */
+  --danger: #b42318; /* 6.6:1 */
   --danger-soft: #fdecea;
 
   /*
-   * 카테고리 구분용 보조색 (지원금·대출·세금·금융상품·법령).
-   * 색만으로 뜻을 전달하지 않는다 — 항상 라벨과 아이콘이 함께 붙는다 (§8).
-   * 흰 배경 대비는 모두 4.5:1 이상이라 작은 글자·체크 표시에 그대로 써도 된다.
+   * 카테고리 구분용 보조색. 색만으로 뜻을 전달하지 않는다 — 항상 라벨·아이콘이 함께 붙는다.
+   * 강조색(파랑)은 "누를 수 있는 것" 전용이라 여기 섞지 않는다.
    */
   --accent-teal: #0a6a88; /* 5.6:1 */
   --accent-teal-soft: #e3f3f8;
@@ -45,20 +64,33 @@
   --accent-plum: #7c2b8c; /* 7.6:1 */
   --accent-plum-soft: #f8eaf7;
 
-  --focus: #1a4fd6;
+  /* ------------------------------------------------------------ 실선 */
+  --line: #e0e0e0; /* hairline */
+  --line-soft: #ededed;
+
+  --focus: #0071e3;
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-bg-soft: var(--bg-soft);
   --color-bg-sunken: var(--bg-sunken);
+  --color-surface-pearl: var(--surface-pearl);
+  --color-tile-1: var(--tile-1);
+  --color-tile-2: var(--tile-2);
+  --color-tile-3: var(--tile-3);
+  --color-surface-black: var(--surface-black);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
+  --color-on-dark: var(--on-dark);
+  --color-on-dark-muted: var(--on-dark-muted);
   --color-line: var(--line);
   --color-line-soft: var(--line-soft);
   --color-brand: var(--brand);
   --color-brand-dark: var(--brand-dark);
+  --color-brand-focus: var(--brand-focus);
+  --color-brand-on-dark: var(--brand-on-dark);
   --color-brand-soft: var(--brand-soft);
   --color-ok: var(--ok);
   --color-ok-soft: var(--ok-soft);
@@ -72,6 +104,17 @@
   --color-accent-violet-soft: var(--accent-violet-soft);
   --color-accent-plum: var(--accent-plum);
   --color-accent-plum-soft: var(--accent-plum-soft);
+
+  /*
+   * 반지름 문법은 셋뿐이다: 8 / 11 / 18 / pill.
+   * Tailwind 기본 스케일을 이 셋으로 눌러 두면 중간값이 섞여 들어올 수 없다.
+   */
+  --radius-sm: 8px;
+  --radius-md: 11px;
+  --radius-lg: 18px;
+  --radius-xl: 18px;
+  --radius-2xl: 18px;
+  --radius-3xl: 18px;
 }
 
 html {
@@ -88,17 +131,133 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family:
-    "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR",
-    system-ui, -apple-system, "Segoe UI", sans-serif;
-  line-height: 1.65;
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "Pretendard", system-ui, "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans KR", "Segoe UI", sans-serif;
+  /* 본문 17px — 16px 이 아니다. 훑는 속도가 아니라 읽는 속도가 된다 */
+  font-size: 1.0625rem;
+  line-height: 1.47;
+  letter-spacing: -0.022em;
   /* 한글은 단어 중간 줄바꿈이 자연스럽지 않다 */
   word-break: keep-all;
   overflow-wrap: break-word;
 }
 
+/*
+ * 타이포 램프.
+ *
+ * 크기는 전부 rem, 자간은 전부 em 이다 — 글자 크기 토글을 따라 비율 그대로 커진다.
+ * 굵기 사다리는 300 / 400 / 600 / 700 이고 500 은 쓰지 않는다.
+ * 큰 글자에는 자간을 살짝 조인다(-0.005 ~ -0.022em). 그게 이 언어의 헤드라인 박자다.
+ */
+.t-hero {
+  font-size: 1.75rem;
+  font-weight: 600;
+  line-height: 1.07;
+  letter-spacing: -0.005em;
+}
+.t-display {
+  font-size: 1.625rem;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.t-section {
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.011em;
+}
+.t-lead {
+  font-size: 1.1875rem;
+  font-weight: 400;
+  line-height: 1.3;
+  letter-spacing: 0.007em;
+}
+.t-lead-airy {
+  font-size: 1.125rem;
+  font-weight: 300;
+  line-height: 1.5;
+}
+.t-tagline {
+  font-size: 1.125rem;
+  font-weight: 600;
+  line-height: 1.24;
+  letter-spacing: 0.011em;
+}
+
+@media (min-width: 640px) {
+  .t-hero {
+    font-size: 2.125rem;
+  }
+  .t-display {
+    font-size: 2rem;
+  }
+  .t-section {
+    font-size: 1.75rem;
+  }
+  .t-lead {
+    font-size: 1.375rem;
+  }
+  .t-lead-airy {
+    font-size: 1.3125rem;
+  }
+  .t-tagline {
+    font-size: 1.1875rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .t-hero {
+    font-size: 3rem;
+  }
+  .t-display {
+    font-size: 2.5rem;
+  }
+  .t-section {
+    font-size: 2.125rem;
+  }
+  .t-lead {
+    font-size: 1.5rem;
+  }
+  .t-lead-airy {
+    font-size: 1.5rem;
+  }
+  .t-tagline {
+    font-size: 1.3125rem;
+  }
+}
+
+@media (min-width: 1280px) {
+  .t-hero {
+    font-size: 3.5rem;
+  }
+}
+
+/*
+ * 제품 그림자 — 이 시스템에 존재하는 유일한 그림자다.
+ * 삽화(제품 렌더)가 면 위에 놓일 때만 쓴다. 카드·버튼·글자에는 쓰지 않는다.
+ * 위계는 그림자가 아니라 면의 색이 바뀌는 것으로 만든다.
+ */
+.shadow-product {
+  box-shadow: rgba(0, 0, 0, 0.22) 3px 5px 30px 0;
+}
+
+/* 사진/타일 위에 떠 있는 얇은 띠 */
+.frosted {
+  background: color-mix(in srgb, var(--bg-soft) 80%, transparent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* 눌림 상태는 시스템 전체가 같은 동작을 쓴다 */
+.press:active {
+  transform: scale(0.95);
+}
+
 /* 키보드 포커스는 절대 지우지 않는다 (§8 접근성) */
 :focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 2px solid var(--focus);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -108,12 +267,20 @@ body {
   outline: none;
 }
 
+/* 어두운 면 위에서는 포커스 링도 밝아야 보인다 */
+.on-dark :focus-visible {
+  outline-color: var(--brand-on-dark);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+  .press:active {
+    transform: none;
   }
 }
 
@@ -130,7 +297,7 @@ body {
   background: var(--brand);
   color: #fff;
   padding: 0.6rem 1rem;
-  border-radius: 6px;
+  border-radius: 9999px;
 }
 
 /* 행정용어 툴팁 (§8 접근성) — 마우스 hover 뿐 아니라 키보드 focus 로도 열린다 */

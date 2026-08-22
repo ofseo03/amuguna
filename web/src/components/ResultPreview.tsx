@@ -18,12 +18,12 @@ const CHECKLIST = [
   { ok: false, label: "무주택 세대주", value: "확인 필요" },
 ];
 
-export default function ResultPreview() {
+export default function ResultPreview({ className = "" }: { className?: string }) {
   return (
     <div
       role="img"
       aria-label="결과 카드 예시. 카드에 매칭 근거 문장과 조건 배지가 붙고, 상세 화면에는 항목별 자격 체크리스트가 표시되며, 조건이 하나만 어긋난 지원은 따로 안내되고, 모든 카드에 원문 링크와 수집 시각이 함께 표시된다."
-      className="rounded-2xl border border-line-soft bg-gradient-to-br from-bg-soft via-white to-ok-soft/40 px-4 py-8 sm:px-8"
+      className={`rounded-lg border border-line bg-bg-soft px-4 py-8 sm:px-8 ${className}`}
     >
       <div aria-hidden="true" className="mx-auto grid max-w-4xl gap-4 lg:grid-cols-2">
         <MatchCard />
@@ -44,13 +44,13 @@ export default function ResultPreview() {
 /** 매칭 근거가 붙은 결과 카드 */
 function MatchCard() {
   return (
-    <div className="rounded-xl border border-line bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-line bg-bg p-5">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <span className="rounded bg-bg-sunken px-2 py-0.5 font-semibold text-ink-2">
           지원금
         </span>
         <span className="text-ink-3">중앙부처</span>
-        <span className="text-line">·</span>
+        <span aria-hidden="true" className="text-ink-3">·</span>
         <span className="text-ink-3">고용노동부</span>
         <span className="ml-auto rounded bg-bg-sunken px-2 py-0.5 font-bold text-ink-2">
           마감 D-24
@@ -74,7 +74,7 @@ function MatchCard() {
           {["만 28세", "서울 거주", "소득 3분위"].map((b) => (
             <li
               key={b}
-              className="rounded-full bg-ok-soft px-2.5 py-0.5 text-sm font-medium text-ok"
+              className="rounded-full bg-ok-soft px-2.5 py-0.5 text-sm font-semibold text-ok"
             >
               {b}
             </li>
@@ -99,7 +99,7 @@ function MatchCard() {
 /** 상세 화면의 자격 체크리스트 */
 function Checklist() {
   return (
-    <div className="rounded-xl border border-line bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-line bg-bg p-5">
       <p className="font-bold text-ink">자격 체크리스트</p>
       <ul className="mt-3 flex flex-col gap-2">
         {CHECKLIST.map((c) => (

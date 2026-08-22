@@ -12,7 +12,7 @@ export default function NotFound() {
       <div className="mt-8 flex flex-wrap justify-center gap-3">
         <Link
           href="/"
-          className="rounded-lg border-2 border-line bg-white px-5 py-3 font-semibold text-ink-2 no-underline hover:bg-bg-sunken"
+          className="rounded-lg border-2 border-line bg-bg px-5 py-3 font-semibold text-ink-2 no-underline hover:bg-bg-sunken"
         >
           처음으로
         </Link>

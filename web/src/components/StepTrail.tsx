@@ -45,7 +45,7 @@ export default function StepTrail({
                     ? "bg-ok-soft text-ok"
                     : current
                       ? "bg-brand text-white"
-                      : "border border-line bg-white text-ink-3"
+                      : "border border-line bg-bg text-ink-3"
                 }`}
               >
                 {done ? (
@@ -58,7 +58,7 @@ export default function StepTrail({
                 )}
               </span>
               <span
-                className={`truncate text-center text-xs sm:text-sm ${
+                className={`truncate text-center text-sm ${
                   current ? "font-bold text-brand" : "text-ink-3"
                 }`}
               >

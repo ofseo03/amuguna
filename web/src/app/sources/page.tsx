@@ -153,8 +153,8 @@ export default async function SourcesPage() {
   const stats = await sourceStats();
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-10">
-      <h1 className="text-3xl font-bold text-ink">데이터 출처와 갱신 주기</h1>
+    <div className="mx-auto max-w-3xl px-5 py-12 sm:px-8">
+      <h1 className="t-section text-ink">데이터 출처와 갱신 주기</h1>
       <p className="mt-3 text-ink-2">
         본 서비스는 정부·지방자치단체·공공기관이 공개한 데이터를 수집해
         제공합니다. 외부 데이터 사용 사실을 아래와 같이 공개합니다.
@@ -180,7 +180,7 @@ export default async function SourcesPage() {
         <h2 className="text-xl font-bold text-ink">수집 소스 목록</h2>
         <ul className="mt-4 grid gap-3">
           {SOURCES.map((s) => (
-            <li key={s.name} className="rounded-xl border border-line bg-white p-5">
+            <li key={s.name} className="rounded-xl border border-line bg-bg p-5">
               <div className="flex flex-wrap items-center gap-2">
                 <span
                   className={`rounded px-2 py-0.5 text-sm font-bold ${
@@ -211,7 +211,7 @@ export default async function SourcesPage() {
                 href={s.url}
                 target="_blank"
                 rel="noopener noreferrer nofollow"
-                className="mt-2 inline-flex items-start gap-1.5 break-all text-sm underline hover:text-brand"
+                className="mt-2 inline-flex items-start gap-1.5 break-all py-1 text-sm underline hover:text-brand"
               >
                 {/* 새 창으로 열린다는 걸 아이콘으로 함께 알린다 (§8) */}
                 <span aria-hidden="true" className="mt-0.5 shrink-0">
@@ -272,7 +272,7 @@ export default async function SourcesPage() {
       </section>
 
       <p className="mt-10">
-        <Link href="/privacy" className="underline hover:text-brand">
+        <Link href="/privacy" className="inline-block py-1 underline hover:text-brand">
           ← 개인정보처리방침 보기
         </Link>
       </p>
