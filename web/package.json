@@ -14,6 +14,7 @@
     "lint": "eslint",
     "test": "tsx --test src/lib/*.test.mjs ingest/tests/*.test.ts",
     "test:ingest": "tsx --test ingest/tests/*.test.ts",
+    "preingest": "node scripts/copy-shared.mjs",
     "ingest": "node --env-file-if-exists=.env.local --import tsx ingest/cli.ts",
     "typecheck": "tsc --noEmit",
     "coldstart:eta": "node scripts/coldstart-eta.mjs",

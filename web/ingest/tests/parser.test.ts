@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 
 import { normalizeText } from "../dictionaries";
@@ -235,10 +235,24 @@ test("shared dictionaries and Korean normalization keep the parser contract", ()
   assert.equal(normalizeText(" 가\u00a0  나\r\n\r\n\r\n다 "), "가 나\n\n다");
 });
 
-test("the full region contract stays valid and synced", () => {
-  const source = readFileSync(new URL("../../../shared/regions.json", import.meta.url), "utf8");
-  const copy = readFileSync(new URL("../../src/data/regions.json", import.meta.url), "utf8");
-  assert.equal(copy, source);
+// 웹과 배치가 모두 src/data/ 복사본만 읽으므로(§ web/README.md 팀 공통 계약 데이터),
+// 복사본이 원본에서 밀리면 파서 동의어·지역 코드가 조용히 옛 값으로 돈다.
+// 저장소 전체를 clone 한 환경에서만 대조할 수 있다 — web/ 만 떼어낸 트리에서는 건너뛴다.
+test("every shared contract file is synced into src/data", (t) => {
+  const sharedRoot = new URL("../../../shared/", import.meta.url);
+  if (!existsSync(sharedRoot)) {
+    t.skip("../../shared 없음 — web/ 만 떼어낸 트리");
+    return;
+  }
+  for (const name of ["regions.json", "occupations.json", "income_deciles.json", "median_income_2026.json"]) {
+    const source = readFileSync(new URL(name, sharedRoot), "utf8");
+    const copy = readFileSync(new URL(`../../src/data/${name}`, import.meta.url), "utf8");
+    assert.equal(copy, source, `${name} 복사본이 원본과 다르다 — npm run sync:shared`);
+  }
+});
+
+test("the full region contract stays valid", () => {
+  const source = readFileSync(new URL("../../src/data/regions.json", import.meta.url), "utf8");
   const data = JSON.parse(source) as {
     sido: Array<{ code: string }>;
     sigungu: Array<{ code: string; sido: string }>;

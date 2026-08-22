@@ -9,9 +9,15 @@ type OccupationData = {
   categories: Array<{ code: string; synonyms: string[] }>;
 };
 
+/**
+ * 계약 데이터는 `/shared/*.json` 이 원본이지만, 여기서는 `web/src/data/` 의 복사본을 읽는다.
+ * `web/` 만 떼어 배포하면 저장소 루트가 없어 원본 경로가 해석되지 않기 때문이다
+ * (웹 코드가 `src/lib/shared-data.ts` 에서 같은 복사본을 쓰는 것과 같은 이유).
+ * 복사본은 `preingest` / `predev` / `prebuild` 훅의 `scripts/copy-shared.mjs` 가 갱신한다.
+ */
 function load<T>(name: string): T {
   return JSON.parse(
-    readFileSync(new URL(`../../shared/${name}`, import.meta.url), "utf8"),
+    readFileSync(new URL(`../src/data/${name}`, import.meta.url), "utf8"),
   ) as T;
 }
 
