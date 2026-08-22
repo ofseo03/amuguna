@@ -10,8 +10,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { NearMissItem, ProgramCard } from "@/components/ProgramCard";
-import { Disclaimer, FinancialProductNotice } from "@/components/SiteChrome";
+import { Disclaimer, FinancialProductNotice, SubNav } from "@/components/SiteChrome";
 import Term from "@/components/Term";
+import StepTrail from "@/components/StepTrail";
 import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
 import type { MatchResponse, ProgramForm } from "@/lib/types";
@@ -113,15 +114,21 @@ export default function ResultsPage() {
 
   if (error?.noProfile) {
     return (
-      <Shell>
-        <div className="rounded-xl border border-line bg-bg-soft p-8 text-center">
+      <Shell subNav={false}>
+        <div className="rounded-lg border border-line bg-bg-soft p-8 text-center">
           <h1 className="text-xl font-bold text-ink">먼저 기본 정보가 필요합니다</h1>
           <p className="mt-2 text-ink-2">
             나이·지역·소득 등 6단계를 입력하시면 결과를 보여드립니다.
           </p>
+
+          {/* 6단계가 어떤 질문인지 미리 보여준다 — 무엇을 묻는지 알면 시작 문턱이 낮다 */}
+          <div className="mx-auto mt-8 max-w-md">
+            <StepTrail step={0} />
+          </div>
+
           <Link
             href="/onboarding"
-            className="mt-6 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"
+            className="mt-8 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"
           >
             정보 입력하러 가기
           </Link>
@@ -138,7 +145,7 @@ export default function ResultsPage() {
           <button
             type="button"
             onClick={() => navigate(tab, cursor)}
-            className="mt-4 rounded-lg border-2 border-danger bg-white px-5 py-2 font-semibold text-danger"
+            className="mt-4 rounded-lg border-2 border-danger bg-bg px-5 py-2 font-semibold text-danger"
           >
             다시 시도
           </button>
@@ -189,7 +196,7 @@ export default function ResultsPage() {
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             <Link
               href="/sources"
-              className="rounded-lg border-2 border-brand bg-white px-5 py-3 font-semibold text-brand-dark no-underline"
+              className="rounded-lg border-2 border-brand bg-bg px-5 py-3 font-semibold text-brand-dark no-underline"
             >
               어떤 곳에서 모으는지 보기
             </Link>
@@ -248,7 +255,7 @@ export default function ResultsPage() {
       {relaxationNotice && (
         <p
           role="status"
-          className="mt-3 rounded-lg border border-brand bg-white px-4 py-3 text-ink-2"
+          className="mt-3 rounded-lg border border-brand bg-bg px-4 py-3 text-ink-2"
         >
           <strong className="text-brand-dark">안내</strong> · {relaxationNotice}
         </p>
@@ -307,7 +314,7 @@ export default function ResultsPage() {
           <button
             type="button"
             onClick={nextPage}
-            className="rounded-lg border-2 border-line bg-white px-4 py-2 font-semibold text-ink-2"
+            className="rounded-lg border-2 border-line bg-bg px-4 py-2 font-semibold text-ink-2"
           >
             다음 →
           </button>
@@ -336,7 +343,7 @@ export default function ResultsPage() {
       <div className="mt-12 flex flex-wrap gap-3">
         <Link
           href="/onboarding"
-          className="rounded-lg border-2 border-line bg-white px-5 py-3 font-semibold text-ink-2 no-underline hover:bg-bg-sunken"
+          className="rounded-lg border-2 border-line bg-bg px-5 py-3 font-semibold text-ink-2 no-underline hover:bg-bg-sunken"
         >
           조건 다시 입력하기
         </Link>
@@ -349,8 +356,32 @@ export default function ResultsPage() {
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
-  return <div className="mx-auto max-w-4xl px-4 py-8">{children}</div>;
+/**
+ * subNav 는 결과가 실제로 있을 때만 띄운다 — 프로필이 없어 입력을 권하는 화면에서는
+ * "조건 수정" 이 바로 아래 CTA 와 겹쳐 같은 말을 두 번 하게 된다.
+ */
+function Shell({
+  children,
+  subNav = true,
+}: {
+  children: React.ReactNode;
+  subNav?: boolean;
+}) {
+  return (
+    <>
+      {subNav && (
+      <SubNav title="내 결과">
+        <Link
+          href="/onboarding"
+          className="press rounded-full bg-brand px-[1.375rem] py-[0.5rem] text-sm text-white no-underline hover:bg-brand-dark"
+        >
+          조건 수정
+        </Link>
+      </SubNav>
+      )}
+      <div className="mx-auto max-w-4xl px-5 py-10 sm:px-8">{children}</div>
+    </>
+  );
 }
 
 function TabButton({
@@ -376,7 +407,7 @@ function TabButton({
         className={`rounded-lg border-2 px-4 py-2 font-semibold transition-colors ${
           active
             ? "border-brand bg-brand text-white"
-            : "border-line bg-white text-ink-2 hover:border-ink-3"
+            : "border-line bg-bg text-ink-2 hover:border-ink-3"
         } disabled:cursor-not-allowed disabled:border-line-soft disabled:bg-bg-soft disabled:text-ink-3`}
       >
         {label}{" "}

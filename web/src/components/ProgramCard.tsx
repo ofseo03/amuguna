@@ -9,13 +9,13 @@ export function ProgramCard({ card }: { card: MatchCard }) {
   const urgent = isUrgent(card.dDay);
 
   return (
-    <li className="rounded-xl border border-line bg-white p-5 transition-shadow hover:shadow-md">
+    <li className="rounded-lg border border-line bg-bg p-5 transition-colors hover:border-ink-3">
       <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
         <span className="rounded bg-bg-sunken px-2 py-0.5 font-semibold text-ink-2">
           {FORM_LABEL[p.form]}
         </span>
         <span className="text-ink-3">{issuerLevelLabel(p.issuer_level)}</span>
-        <span aria-hidden="true" className="text-line">
+        <span aria-hidden="true" className="text-ink-3">
           ·
         </span>
         <span className="text-ink-3">{p.issuer}</span>
@@ -31,7 +31,7 @@ export function ProgramCard({ card }: { card: MatchCard }) {
       <h3 className="text-lg font-bold leading-snug text-ink">
         <Link
           href={`/programs/${p.id}`}
-          className="no-underline hover:text-brand hover:underline"
+          className="inline-block py-0.5 no-underline hover:text-brand hover:underline"
         >
           {p.title}
         </Link>
@@ -55,7 +55,7 @@ export function ProgramCard({ card }: { card: MatchCard }) {
           {card.badges.map((b) => (
             <li
               key={b}
-              className="rounded-full bg-ok-soft px-2.5 py-0.5 text-sm font-medium text-ok"
+              className="rounded-full bg-ok-soft px-2.5 py-0.5 text-sm font-semibold text-ok"
             >
               {b}
             </li>
@@ -72,7 +72,7 @@ export function NearMissItem({ card }: { card: NearMissCard }) {
   return (
     <li className="rounded-xl border border-warn bg-warn-soft p-4">
       <div className="mb-1 flex flex-wrap items-center gap-2 text-sm text-ink-3">
-        <span className="rounded bg-white px-2 py-0.5 font-semibold text-ink-2">
+        <span className="rounded bg-bg px-2 py-0.5 font-semibold text-ink-2">
           {FORM_LABEL[p.form]}
         </span>
         <span>{p.issuer}</span>
@@ -83,7 +83,7 @@ export function NearMissItem({ card }: { card: NearMissCard }) {
       <h3 className="font-bold text-ink">
         <Link
           href={`/programs/${p.id}`}
-          className="no-underline hover:text-brand hover:underline"
+          className="inline-block py-0.5 no-underline hover:text-brand hover:underline"
         >
           {p.title}
         </Link>

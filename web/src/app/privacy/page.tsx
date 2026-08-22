@@ -193,7 +193,7 @@ export default function PrivacyPage() {
       </Section>
 
       <p className="mt-10">
-        <Link href="/sources" className="underline hover:text-brand">
+        <Link href="/sources" className="inline-block py-1 underline hover:text-brand">
           데이터 출처와 갱신 주기 보기 →
         </Link>
       </p>

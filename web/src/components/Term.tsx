@@ -49,7 +49,7 @@ export default function Term({ name, desc, children }: TermProps) {
       <span
         id={id}
         role="tooltip"
-        className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-64 rounded-lg border border-line bg-white p-3 text-sm font-normal leading-relaxed text-ink-2 shadow-lg group-hover:block group-focus-within:block"
+        className="pointer-events-none absolute left-0 top-full z-20 mt-1 hidden w-64 rounded-lg border border-line bg-bg p-3 text-sm font-normal leading-relaxed text-ink-2 shadow-lg group-hover:block group-focus-within:block"
       >
         {text}
       </span>

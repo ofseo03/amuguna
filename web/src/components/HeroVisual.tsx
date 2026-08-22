@@ -1,3 +1,6 @@
+import { ACCENT, CATEGORIES } from "./visual/accents";
+import Icon, { CheckMark } from "./visual/Icon";
+
 /**
  * 랜딩 첫 화면 히어로 비주얼 (SPEC §9 화면 1).
  *
@@ -11,76 +14,16 @@
  * 장식(리본·후광·방패)만 aria-hidden 인 인라인 SVG 다.
  */
 
-type Accent = "blue" | "teal" | "green" | "violet" | "plum";
-
-/** 토큰 조합을 한 곳에 모아둔다 — 배지·아이콘 타일·체크가 같은 색을 쓰게 하려고. */
-const ACCENT: Record<Accent, { tile: string; icon: string; check: string; ribbon: string }> = {
-  blue: {
-    tile: "bg-brand-soft",
-    icon: "text-brand",
-    check: "bg-brand-soft text-brand",
-    ribbon: "var(--brand)",
-  },
-  teal: {
-    tile: "bg-accent-teal-soft",
-    icon: "text-accent-teal",
-    check: "bg-accent-teal-soft text-accent-teal",
-    ribbon: "var(--accent-teal)",
-  },
-  green: {
-    tile: "bg-ok-soft",
-    icon: "text-ok",
-    check: "bg-ok-soft text-ok",
-    ribbon: "var(--ok)",
-  },
-  violet: {
-    tile: "bg-accent-violet-soft",
-    icon: "text-accent-violet",
-    check: "bg-accent-violet-soft text-accent-violet",
-    ribbon: "var(--accent-violet)",
-  },
-  plum: {
-    tile: "bg-accent-plum-soft",
-    icon: "text-accent-plum",
-    check: "bg-accent-plum-soft text-accent-plum",
-    ribbon: "var(--accent-plum)",
-  },
-};
-
-type IconName = "megaphone" | "bank" | "receipt" | "link" | "gavel";
-
-/**
- * 카테고리 5종.
- *
- * example 문구는 실제 공고를 흉내낸 예시이되 특정 금융회사 상품명은 쓰지 않는다 —
- * 히어로에 상품명이 박히면 비교·안내가 아니라 권유·광고로 읽힐 여지가 생긴다
- * (SiteChrome 의 금융소비자보호법 고지와 같은 이유).
- */
-const CATEGORIES: {
-  label: string;
-  icon: IconName;
-  accent: Accent;
-  example: string;
-}[] = [
-  { label: "지원금", icon: "megaphone", accent: "blue", example: "청년 일자리 도약장려금" },
-  { label: "대출", icon: "bank", accent: "teal", example: "버팀목 전세자금대출 한도" },
-  { label: "세금", icon: "receipt", accent: "green", example: "연말정산 환급 대상 공제" },
-  { label: "금융상품", icon: "link", accent: "violet", example: "ISA 비과세 한도 비교" },
-  { label: "법령", icon: "gavel", accent: "plum", example: "청년 주거지원 개정 사항" },
-];
-
 /** 배지 열을 시안처럼 활 모양으로 밀어낸다 (가운데가 가장 왼쪽). */
 const ARC_OFFSET = ["14", "5", "0", "5", "14"];
 
-export default function HeroVisual() {
+export default function HeroVisual({ className = "" }: { className?: string }) {
   return (
     <div
-      className="relative overflow-hidden rounded-3xl border border-line-soft bg-gradient-to-br from-bg-soft via-white to-brand-soft/60 px-4 py-8 sm:px-8 sm:py-12"
+      className={`relative overflow-hidden rounded-lg border border-line bg-bg-soft px-4 py-8 sm:px-8 sm:py-12 ${className}`}
       role="img"
       aria-label="흩어져 있는 지원금·대출·세금·금융상품·법령 정보가 하나의 맞춤 리포트로 모이고, 자격 근거와 법적 고지가 함께 표시되는 화면 예시"
     >
-      <Glow />
-
       {/* 내부 요소는 위 role=img 의 설명으로 갈음한다 — 스크린리더가 장식 텍스트까지 읽지 않도록 */}
       <div aria-hidden="true" className="relative">
         {/* lg 미만: 출처를 칩으로 가로 배치. lg 이상: 왼쪽 배지 열 + 리본 */}
@@ -106,15 +49,6 @@ export default function HeroVisual() {
 }
 
 /* ---------------------------------------------------------------- 장식 */
-
-function Glow() {
-  return (
-    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-      <div className="absolute -left-16 top-4 h-56 w-56 rounded-full bg-brand/5 blur-3xl" />
-      <div className="absolute -right-10 bottom-0 h-64 w-64 rounded-full bg-accent-violet/5 blur-3xl" />
-    </div>
-  );
-}
 
 /**
  * 배지에서 리포트 카드로 흘러드는 리본. lg 이상에서만 그린다.
@@ -146,9 +80,9 @@ function Ribbons() {
             x2="240"
             y2="0"
           >
-            <stop offset="0%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0" />
-            <stop offset="45%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0.3" />
-            <stop offset="100%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0.42" />
+            <stop offset="0%" stopColor={ACCENT[c.accent].raw} stopOpacity="0" />
+            <stop offset="45%" stopColor={ACCENT[c.accent].raw} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={ACCENT[c.accent].raw} stopOpacity="0.42" />
           </linearGradient>
         ))}
       </defs>
@@ -186,9 +120,9 @@ function SourceBadges() {
           style={{ marginLeft: `${ARC_OFFSET[i]}%` }}
         >
           <span
-            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line-soft bg-white shadow-sm ${ACCENT[c.accent].icon}`}
+            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line bg-bg ${ACCENT[c.accent].icon}`}
           >
-            <Icon name={c.icon} />
+            <Icon name={c.icon} size="lg" />
           </span>
           <span className="text-base font-bold text-ink">{c.label}</span>
         </li>
@@ -204,9 +138,9 @@ function SourceChips() {
       {CATEGORIES.map((c) => (
         <li
           key={c.label}
-          className={`flex items-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-1.5 text-sm font-semibold text-ink ${ACCENT[c.accent].icon}`}
+          className={`flex items-center gap-1.5 rounded-full border border-line-soft bg-bg px-3 py-1.5 text-sm font-semibold ${ACCENT[c.accent].icon}`}
         >
-          <Icon name={c.icon} small />
+          <Icon name={c.icon} />
           <span className="text-ink">{c.label}</span>
         </li>
       ))}
@@ -219,7 +153,7 @@ function SourceChips() {
 function ReportCard() {
   return (
     // lg 에서는 열 왼쪽에 붙인다 — 가운데 정렬하면 리본 끝과 카드 사이가 떠서 흐름이 끊긴다
-    <div className="relative z-10 mx-auto max-w-sm rounded-2xl border border-line-soft bg-white p-4 shadow-lg sm:p-5 lg:mx-0">
+    <div className="relative z-10 mx-auto max-w-sm rounded-lg border border-line bg-bg p-4 sm:p-5 lg:mx-0">
       <p className="mb-4 flex flex-wrap items-baseline gap-x-2 text-lg font-bold text-ink">
         내 맞춤 리포트
         <span className="text-sm font-normal text-ink-3">조건이 겹치는 것만</span>
@@ -236,7 +170,7 @@ function ReportCard() {
               <span
                 className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${a.tile} ${a.icon}`}
               >
-                <Icon name={c.icon} small />
+                <Icon name={c.icon} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-bold text-ink">{c.label}</span>
@@ -260,11 +194,11 @@ function ReportCard() {
 function TrustStack() {
   return (
     <div className="mt-6 flex items-center justify-center gap-4 lg:mt-0 lg:flex-col lg:items-stretch lg:gap-0">
-      <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-soft to-accent-violet-soft text-brand lg:h-20 lg:w-20 lg:translate-y-4 lg:self-center lg:rounded-3xl">
+      <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-md bg-brand-soft text-brand lg:h-20 lg:w-20 lg:translate-y-4 lg:self-center">
         <ShieldLock />
       </span>
 
-      <div className="relative rounded-xl border border-line-soft bg-white p-3 shadow-sm lg:pt-5">
+      <div className="relative rounded-lg border border-line bg-bg p-3 lg:pt-5">
         <p className="text-sm font-bold text-ink">법적 고지 · 근거</p>
         <ul className="mt-2 flex flex-col gap-1.5">
           {["자격 근거 표시", "원문 출처 링크", "권유 아닌 비교 안내"].map((t) => (
@@ -278,79 +212,6 @@ function TrustStack() {
         </ul>
       </div>
     </div>
-  );
-}
-
-/* ------------------------------------------------------------- 아이콘 */
-
-const ICON_PATHS: Record<IconName, React.ReactNode> = {
-  megaphone: (
-    <>
-      <path d="M4 9.5h3.2L14 5.5v13l-6.8-4H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z" />
-      <path d="M17.5 9a4 4 0 0 1 0 6" />
-      <path d="M7.5 14.5 9 20" />
-    </>
-  ),
-  bank: (
-    <>
-      <path d="M3 9.5 12 4l9 5.5" />
-      <path d="M5.5 10v8M10 10v8m4 0v-8m4.5 0v8" />
-      <path d="M3 20h18" />
-    </>
-  ),
-  receipt: (
-    <>
-      <path d="M6 3h12v18l-3-1.7L12 21l-3-1.7L6 21V3Z" />
-      <path d="M9 8h6M9 12h6M9 16h3" />
-    </>
-  ),
-  link: (
-    <>
-      <path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2" />
-      <path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2" />
-    </>
-  ),
-  gavel: (
-    <>
-      <path d="m13.5 3.5 5 5-2.5 2.5-5-5z" />
-      <path d="m12.2 7.8-6.7 6.7" />
-      <path d="M4 21h9" />
-      <path d="m7 17.5 2.5-2.5" />
-    </>
-  ),
-};
-
-function Icon({ name, small = false }: { name: IconName; small?: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={small ? "h-5 w-5" : "h-6 w-6"}
-    >
-      {ICON_PATHS[name]}
-    </svg>
-  );
-}
-
-function CheckMark() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-3 w-3"
-    >
-      <path d="m5 13 4.5 4.5L19 7" />
-    </svg>
   );
 }
 
