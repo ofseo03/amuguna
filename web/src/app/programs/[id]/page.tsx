@@ -1,6 +1,6 @@
 /**
  * 상세 화면 (SPEC §9 화면 4).
- * 자격 체크리스트(내 프로필 대조 ✅/❌) · extra_conditions 추가 확인 필요 · 금액/기한 ·
+ * 자격 체크리스트(내 프로필 대조: 충족/미충족) · extra_conditions 추가 확인 필요 · 금액/기한 ·
  * 신청 절차 3단계 · 원문 링크 + 수집 시각 · 참고용 고지.
  *
  * 서버 컴포넌트 — 세션 쿠키의 프로필을 직접 읽어 대조한다.
@@ -11,6 +11,7 @@ import type { Metadata } from "next";
 import { getProgram } from "@/lib/matching";
 import { checklist, DIMENSION_LABEL, dDay, evaluate } from "@/lib/eligibility";
 import { readProfile } from "@/lib/session";
+import StatusMark from "@/components/visual/StatusMark";
 import { FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import {
   dDayLabel,
@@ -84,15 +85,26 @@ export default async function ProgramDetailPage({ params }: Props) {
               : "border-warn bg-warn-soft"
           }`}
         >
-          <p className="text-lg font-bold">
+          <p className="flex items-center gap-2.5 text-lg font-bold">
             {ev.violations === 0 && ev.unknownDimensions.length === 0 ? (
-              <span className="text-ok">✅ 입력하신 정보로는 대상에 해당합니다</span>
+              <>
+                <StatusMark status="pass" />
+                <span className="text-ok">입력하신 정보로는 대상에 해당합니다</span>
+              </>
             ) : ev.violations === 0 ? (
-              <span className="text-warn">⚠️ 입력하지 않은 조건을 추가로 확인해 주세요</span>
+              <>
+                <StatusMark status="unknown" />
+                <span className="text-warn">
+                  입력하지 않은 조건을 추가로 확인해 주세요
+                </span>
+              </>
             ) : (
-              <span className="text-warn">
-                ⚠️ 조건 {ev.violations}개가 맞지 않습니다
-              </span>
+              <>
+                <StatusMark status="unknown" />
+                <span className="text-warn">
+                  조건 {ev.violations}개가 맞지 않습니다
+                </span>
+              </>
             )}
           </p>
           <p className="mt-1 text-sm text-ink-2">
@@ -108,11 +120,17 @@ export default async function ProgramDetailPage({ params }: Props) {
         말없이 보여주면 자동 판정을 과신하게 된다.
       */}
       {program.rules.needs_review && (
-        <p className="mt-6 rounded-xl border-2 border-warn bg-warn-soft px-5 py-4 text-ink-2">
-          <span className="font-bold text-warn">⚠️ 자격요건 자동 추출이 불완전합니다.</span>{" "}
-          아래 체크리스트에 나오지 않는 조건이 공고문에 더 있을 수 있습니다. 신청 전에
-          반드시 아래 <strong className="text-ink">출처</strong>의 원문을 확인해 주세요.
-        </p>
+        <div className="mt-6 flex gap-3 rounded-xl border-2 border-warn bg-warn-soft px-5 py-4 text-ink-2">
+          <StatusMark status="unknown" className="mt-0.5 h-6 w-6" />
+          <p>
+            <span className="font-bold text-warn">
+              자격요건 자동 추출이 불완전합니다.
+            </span>{" "}
+            아래 체크리스트에 나오지 않는 조건이 공고문에 더 있을 수 있습니다. 신청
+            전에 반드시 아래 <strong className="text-ink">출처</strong>의 원문을
+            확인해 주세요.
+          </p>
+        </div>
       )}
 
       {!profile && (
@@ -178,12 +196,18 @@ export default async function ProgramDetailPage({ params }: Props) {
                       : "border-danger bg-danger-soft"
                 }`}
               >
-                <span aria-hidden="true" className="text-lg">
-                  {!c.constrained ? "➖" : c.unknown ? "⚠️" : c.pass ? "✅" : "❌"}
-                </span>
-                <span className="sr-only">
-                  {!c.constrained ? "조건 없음" : c.unknown ? "추가 확인 필요" : c.pass ? "충족" : "미충족"}
-                </span>
+                <StatusMark
+                  status={
+                    !c.constrained
+                      ? "none"
+                      : c.unknown
+                        ? "unknown"
+                        : c.pass
+                          ? "pass"
+                          : "fail"
+                  }
+                  label
+                />
                 <span className="w-20 font-semibold text-ink">
                   {DIMENSION_LABEL[c.dimension]}
                 </span>
@@ -194,9 +218,11 @@ export default async function ProgramDetailPage({ params }: Props) {
               </li>
             ))}
           </ul>
-          <p className="mt-3 text-sm text-ink-3">
-            ➖ 는 이 지원에 해당 조건이 없다는 뜻입니다. 조건이 없으면 통과로
-            봅니다.
+          <p className="mt-3 flex items-center gap-2 text-sm text-ink-3">
+            <StatusMark status="none" className="h-5 w-5" />
+            <span>
+              이 지원에 해당 조건이 없다는 뜻입니다. 조건이 없으면 통과로 봅니다.
+            </span>
           </p>
         </section>
       )}
@@ -220,7 +246,15 @@ export default async function ProgramDetailPage({ params }: Props) {
                   key={`${e.label}-${i}`}
                   className="rounded-lg border border-line bg-white px-4 py-3"
                 >
-                  <p className="font-semibold text-ink">□ {e.label}</p>
+                  {/* □ 같은 글립 대신 도형으로 그린다 — 글꼴마다 모양이 달라지고
+                      스크린리더가 "하얀 사각형" 으로 읽는다 (§8) */}
+                  <p className="flex items-center gap-2.5 font-semibold text-ink">
+                    <span
+                      aria-hidden="true"
+                      className="h-4 w-4 shrink-0 rounded border-2 border-line"
+                    />
+                    {e.label}
+                  </p>
                   <p className="mt-1 text-sm text-ink-2">{e.text}</p>
                 </li>
               ))}

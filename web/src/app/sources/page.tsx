@@ -4,6 +4,7 @@ import Link from "next/link";
 import { getSql, isDbConfigured } from "@/lib/db";
 import { demoFetchedAt, demoPrograms } from "@/lib/demo-store";
 import { formatDateTime } from "@/lib/format";
+import Icon from "@/components/visual/Icon";
 
 export const metadata: Metadata = {
   title: "데이터 출처·갱신 주기",
@@ -210,9 +211,14 @@ export default async function SourcesPage() {
                 href={s.url}
                 target="_blank"
                 rel="noopener noreferrer nofollow"
-                className="mt-2 inline-block break-all text-sm underline hover:text-brand"
+                className="mt-2 inline-flex items-start gap-1.5 break-all text-sm underline hover:text-brand"
               >
-                {s.url}
+                {/* 새 창으로 열린다는 걸 아이콘으로 함께 알린다 (§8) */}
+                <span aria-hidden="true" className="mt-0.5 shrink-0">
+                  <Icon name="external" size="sm" />
+                </span>
+                <span>{s.url}</span>
+                <span className="sr-only">(새 창으로 열림)</span>
               </a>
             </li>
           ))}
