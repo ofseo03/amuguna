@@ -24,11 +24,12 @@ import {
 import { MAX_QUERY_LEN } from "@/lib/validation";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
 import Term from "@/components/Term";
-import StepTrail from "@/components/StepTrail";
+import StepTrail, { STEP_LABELS } from "@/components/StepTrail";
 import PrivacyAssurance from "@/components/PrivacyAssurance";
 import type { Gender } from "@/lib/types";
 
-const TOTAL_STEPS = 6;
+/** 단계 수는 StepTrail 의 라벨 목록에서 파생한다 — 두 곳이 어긋나지 않게 */
+const TOTAL_STEPS = STEP_LABELS.length;
 
 const STEP_TITLES = [
   "나이를 알려주세요",
@@ -142,7 +143,7 @@ export default function OnboardingPage() {
             처음으로
           </Link>
         </div>
-        <StepTrail step={step} total={TOTAL_STEPS} />
+        <StepTrail step={step} />
       </div>
 
       <h1 className="mb-1 text-2xl font-bold text-ink sm:text-3xl">

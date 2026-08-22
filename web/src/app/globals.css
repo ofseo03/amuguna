@@ -119,6 +119,8 @@
 
 html {
   font-size: 16px;
+  /* 고정 헤더(+2단 내비) 아래로 앵커·포커스 대상이 숨지 않게 */
+  scroll-padding-top: 7rem;
 }
 html[data-fontsize="large"] {
   font-size: 18.5px;
@@ -256,10 +258,14 @@ body {
 }
 
 /* 키보드 포커스는 절대 지우지 않는다 (§8 접근성) */
+/*
+ * border-radius 를 여기서 주지 않는다 — 이 규칙은 레이어 밖이라 @layer utilities 보다
+ * 우선해서, rounded-full 알약이 포커스 순간 각지게 잘린다. outline 은 요소 자신의
+ * radius 를 따라 그려지므로 지정할 필요도 없다.
+ */
 :focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
-  border-radius: 4px;
 }
 
 /* 마우스 클릭 시에만 outline 억제 */

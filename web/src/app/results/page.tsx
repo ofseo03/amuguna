@@ -114,7 +114,7 @@ export default function ResultsPage() {
 
   if (error?.noProfile) {
     return (
-      <Shell>
+      <Shell subNav={false}>
         <div className="rounded-lg border border-line bg-bg-soft p-8 text-center">
           <h1 className="text-xl font-bold text-ink">먼저 기본 정보가 필요합니다</h1>
           <p className="mt-2 text-ink-2">
@@ -123,7 +123,7 @@ export default function ResultsPage() {
 
           {/* 6단계가 어떤 질문인지 미리 보여준다 — 무엇을 묻는지 알면 시작 문턱이 낮다 */}
           <div className="mx-auto mt-8 max-w-md">
-            <StepTrail step={0} total={6} />
+            <StepTrail step={0} />
           </div>
 
           <Link
@@ -356,9 +356,20 @@ export default function ResultsPage() {
   );
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+/**
+ * subNav 는 결과가 실제로 있을 때만 띄운다 — 프로필이 없어 입력을 권하는 화면에서는
+ * "조건 수정" 이 바로 아래 CTA 와 겹쳐 같은 말을 두 번 하게 된다.
+ */
+function Shell({
+  children,
+  subNav = true,
+}: {
+  children: React.ReactNode;
+  subNav?: boolean;
+}) {
   return (
     <>
+      {subNav && (
       <SubNav title="내 결과">
         <Link
           href="/onboarding"
@@ -367,6 +378,7 @@ function Shell({ children }: { children: React.ReactNode }) {
           조건 수정
         </Link>
       </SubNav>
+      )}
       <div className="mx-auto max-w-4xl px-5 py-10 sm:px-8">{children}</div>
     </>
   );

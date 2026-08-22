@@ -13,22 +13,18 @@ import { CheckMark } from "./visual/Icon";
  * 아래 막대는 같은 정보의 중복이므로 장식으로 내린다 (§8).
  */
 
-const STEP_LABELS = ["나이", "성별", "직업", "지역", "소득", "원하는 것"];
+/** 단계 이름이자 개수의 단일 출처. 온보딩의 TOTAL_STEPS 는 이 길이를 쓴다. */
+export const STEP_LABELS = ["나이", "성별", "직업", "지역", "소득", "원하는 것"] as const;
 
-export default function StepTrail({
-  step,
-  total,
-}: {
-  step: number;
-  total: number;
-}) {
+export default function StepTrail({ step }: { step: number }) {
+  const total = STEP_LABELS.length;
   return (
     <div>
       <ol
         aria-label="입력 단계"
         className="flex items-start justify-between gap-1"
       >
-        {STEP_LABELS.slice(0, total).map((label, i) => {
+        {STEP_LABELS.map((label, i) => {
           const n = i + 1;
           const done = n < step;
           const current = n === step;

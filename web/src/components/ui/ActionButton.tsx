@@ -56,8 +56,13 @@ export default function ActionButton({
   children,
   ...rest
 }: Props & Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "className" | "children">) {
+  // 기본 type 을 button 으로 둔다 — 없으면 form 안에서 submit 으로 동작해 마법사가 넘어간다
   return (
-    <button className={`${BASE} ${VARIANT[variant]} ${className}`} {...rest}>
+    <button
+      type="button"
+      className={`${BASE} ${VARIANT[variant]} ${className}`}
+      {...rest}
+    >
       {children}
     </button>
   );

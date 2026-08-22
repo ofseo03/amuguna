@@ -10,7 +10,7 @@ import FontSizeToggle from "./FontSizeToggle";
 export function SiteHeader() {
   return (
     <header className="on-dark sticky top-0 z-50 bg-surface-black">
-      <div className="mx-auto flex max-w-[68rem] items-center justify-between gap-3 px-5 py-1 sm:px-8">
+      <div className="mx-auto flex max-w-[68rem] flex-wrap items-center justify-between gap-x-3 px-5 py-1 sm:px-8">
         <Link
           href="/"
           className="flex min-h-[2.75rem] items-baseline gap-x-2 py-1 text-on-dark no-underline"

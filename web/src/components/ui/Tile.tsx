@@ -38,7 +38,7 @@ export default function Tile({
     <section className={`${TONE[tone]} ${className}`} {...rest}>
       {/* 세로 여백은 rem — 글자를 키우면 여백도 함께 커져야 밀도가 유지된다 */}
       <div
-        className={`mx-auto max-w-[68rem] px-5 py-14 sm:px-8 sm:py-20 lg:py-[5rem] ${innerClassName}`}
+        className={`mx-auto max-w-[68rem] px-5 py-14 sm:px-8 sm:py-20 ${innerClassName}`}
       >
         {children}
       </div>
