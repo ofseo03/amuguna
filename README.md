@@ -52,3 +52,21 @@ Next.js와 독립 배치는 `web/.env.local`, GitHub Actions는 Secrets에 값�
 | `LLM_FALLBACK_MODELS` | 기본 모델 실패 시 시도할 대체 모델 (쉼표 구분). 비우면 폴백 없음 |
 | `RATE_LIMIT_SESSION_PER_MIN` / `RATE_LIMIT_ANON_PER_MIN` / `RATE_LIMIT_IP_PER_MIN` | 검색 한도. 기본 10 / 60 / 600. `0` 은 해제 — 재배포 없이 값만 바꿔 적용된다 |
 | `SESSION_SECRET` | 프로덕션 비밀 키 (32자 이상). 프로필 쿠키 **암호화** 키와 세션 id 서명 키를 여기서 파생한다 |
+
+## 배포 (Vercel)
+
+**Root Directory 를 반드시 `web` 으로 지정한다.** 저장소 루트에는 `package.json` 이 없고
+Next.js 앱은 `web/` 에 있다. 루트를 그대로 두면 Vercel 이 빌드할 앱을 찾지 못해 배포에
+라우트가 하나도 생기지 않고, 모든 주소가 Vercel 자체 `404: NOT_FOUND` 페이지를 띄운다
+(앱이 뜬 상태의 404 는 `web/src/app/not-found.tsx` 의 한국어 화면이므로 구분된다).
+
+1. 저장소를 import → **Settings → Build & Deployment → Root Directory = `web`**
+2. Framework Preset 은 Next.js 자동 감지. Build / Output 은 기본값 그대로 둔다
+3. Environment Variables 에 최소 `SESSION_SECRET` 을 넣는다 — 없으면 화면은 뜨지만
+   온보딩 저장이 500 으로 실패한다
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+   ```
+4. `DATABASE_URL` 은 나중에 추가해도 된다. 없는 동안에는 데모 모드로 정상 서비스된다
+
+자세한 항목은 [web/README.md](web/README.md#vercel-배포).
