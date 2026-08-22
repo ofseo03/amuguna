@@ -1,5 +1,9 @@
 import Link from "next/link";
 import HeroVisual from "@/components/HeroVisual";
+import IntersectionDiagram from "@/components/IntersectionDiagram";
+import ResultPreview from "@/components/ResultPreview";
+import Icon from "@/components/visual/Icon";
+import type { IconName } from "@/components/visual/accents";
 import { isDbConfigured } from "@/lib/db";
 
 // 데모 모드 배너가 배포 환경의 실제 환경변수를 반영해야 하므로 요청 시 렌더한다.
@@ -62,16 +66,19 @@ export default function LandingPage() {
         <div className="mt-8 grid gap-6 sm:grid-cols-3">
           <Card
             n="01"
+            icon="scatter"
             title="흩어져 있습니다"
             body="지원 정보는 부처·지자체·공공기관 사이트에 따로 올라옵니다. 어디를 봐야 할지부터 막힙니다."
           />
           <Card
             n="02"
+            icon="funnel"
             title="자격이 조합형입니다"
             body="'만 19~34세, 중위소득 150% 이하, 무주택, 6개월 이상 거주' — 공고문을 끝까지 읽어야 내가 대상인지 압니다."
           />
           <Card
             n="03"
+            icon="person"
             title="필요한 사람일수록 어렵습니다"
             body="고령층·저소득층일수록 찾기 어려운데, 지원이 가장 필요한 것도 그분들입니다."
           />
@@ -84,6 +91,10 @@ export default function LandingPage() {
           자격만 맞추면 관계없는 정보가 수백 건 쏟아지고, 검색어만 맞추면 대상도
           아닌 것을 권하게 됩니다. 두 축이 겹치는 지점만 보여드립니다.
         </p>
+        <div className="mt-8">
+          <IntersectionDiagram />
+        </div>
+
         <div className="mt-8 grid gap-6 sm:grid-cols-2">
           <div className="rounded-xl border border-line bg-bg-soft p-6">
             <h3 className="text-lg font-bold text-ink">
@@ -110,14 +121,18 @@ export default function LandingPage() {
 
       <section className="border-t border-line py-14">
         <h2 className="text-2xl font-bold text-ink">이렇게 알려드립니다</h2>
-        <ul className="mt-6 grid gap-4 sm:grid-cols-2">
+        <div className="mt-8">
+          <ResultPreview />
+        </div>
+
+        <ul className="mt-8 grid gap-4 sm:grid-cols-2">
           <Bullet>
             카드마다 <strong>왜 매칭됐는지</strong> — &ldquo;만 28세 · 서울 거주 ·
             3분위 조건에 해당합니다&rdquo;
           </Bullet>
           <Bullet>
             상세 화면에 <strong>자격 체크리스트</strong> — 항목별로 내 정보와
-            대조해 ✅ / ❌ 표시
+            대조해 충족·미충족을 표시
           </Bullet>
           <Bullet>
             조건이 <strong>하나만 어긋난 지원</strong>도 따로 알려드립니다 —
@@ -141,11 +156,26 @@ export default function LandingPage() {
   );
 }
 
-function Card({ n, title, body }: { n: string; title: string; body: string }) {
+function Card({
+  n,
+  icon,
+  title,
+  body,
+}: {
+  n: string;
+  icon: IconName;
+  title: string;
+  body: string;
+}) {
   return (
     <div className="rounded-xl border border-line p-6">
-      <span className="text-sm font-bold text-brand">{n}</span>
-      <h3 className="mt-2 text-lg font-bold text-ink">{title}</h3>
+      <div className="flex items-center gap-3">
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand-soft text-brand">
+          <Icon name={icon} size="lg" />
+        </span>
+        <span className="text-sm font-bold text-brand">{n}</span>
+      </div>
+      <h3 className="mt-3 text-lg font-bold text-ink">{title}</h3>
       <p className="mt-2 text-ink-2">{body}</p>
     </div>
   );

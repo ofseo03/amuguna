@@ -1,3 +1,6 @@
+import { ACCENT, CATEGORIES } from "./visual/accents";
+import Icon, { CheckMark } from "./visual/Icon";
+
 /**
  * 랜딩 첫 화면 히어로 비주얼 (SPEC §9 화면 1).
  *
@@ -10,64 +13,6 @@
  *
  * 장식(리본·후광·방패)만 aria-hidden 인 인라인 SVG 다.
  */
-
-type Accent = "blue" | "teal" | "green" | "violet" | "plum";
-
-/** 토큰 조합을 한 곳에 모아둔다 — 배지·아이콘 타일·체크가 같은 색을 쓰게 하려고. */
-const ACCENT: Record<Accent, { tile: string; icon: string; check: string; ribbon: string }> = {
-  blue: {
-    tile: "bg-brand-soft",
-    icon: "text-brand",
-    check: "bg-brand-soft text-brand",
-    ribbon: "var(--brand)",
-  },
-  teal: {
-    tile: "bg-accent-teal-soft",
-    icon: "text-accent-teal",
-    check: "bg-accent-teal-soft text-accent-teal",
-    ribbon: "var(--accent-teal)",
-  },
-  green: {
-    tile: "bg-ok-soft",
-    icon: "text-ok",
-    check: "bg-ok-soft text-ok",
-    ribbon: "var(--ok)",
-  },
-  violet: {
-    tile: "bg-accent-violet-soft",
-    icon: "text-accent-violet",
-    check: "bg-accent-violet-soft text-accent-violet",
-    ribbon: "var(--accent-violet)",
-  },
-  plum: {
-    tile: "bg-accent-plum-soft",
-    icon: "text-accent-plum",
-    check: "bg-accent-plum-soft text-accent-plum",
-    ribbon: "var(--accent-plum)",
-  },
-};
-
-type IconName = "megaphone" | "bank" | "receipt" | "link" | "gavel";
-
-/**
- * 카테고리 5종.
- *
- * example 문구는 실제 공고를 흉내낸 예시이되 특정 금융회사 상품명은 쓰지 않는다 —
- * 히어로에 상품명이 박히면 비교·안내가 아니라 권유·광고로 읽힐 여지가 생긴다
- * (SiteChrome 의 금융소비자보호법 고지와 같은 이유).
- */
-const CATEGORIES: {
-  label: string;
-  icon: IconName;
-  accent: Accent;
-  example: string;
-}[] = [
-  { label: "지원금", icon: "megaphone", accent: "blue", example: "청년 일자리 도약장려금" },
-  { label: "대출", icon: "bank", accent: "teal", example: "버팀목 전세자금대출 한도" },
-  { label: "세금", icon: "receipt", accent: "green", example: "연말정산 환급 대상 공제" },
-  { label: "금융상품", icon: "link", accent: "violet", example: "ISA 비과세 한도 비교" },
-  { label: "법령", icon: "gavel", accent: "plum", example: "청년 주거지원 개정 사항" },
-];
 
 /** 배지 열을 시안처럼 활 모양으로 밀어낸다 (가운데가 가장 왼쪽). */
 const ARC_OFFSET = ["14", "5", "0", "5", "14"];
@@ -146,9 +91,9 @@ function Ribbons() {
             x2="240"
             y2="0"
           >
-            <stop offset="0%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0" />
-            <stop offset="45%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0.3" />
-            <stop offset="100%" stopColor={ACCENT[c.accent].ribbon} stopOpacity="0.42" />
+            <stop offset="0%" stopColor={ACCENT[c.accent].raw} stopOpacity="0" />
+            <stop offset="45%" stopColor={ACCENT[c.accent].raw} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={ACCENT[c.accent].raw} stopOpacity="0.42" />
           </linearGradient>
         ))}
       </defs>
@@ -188,7 +133,7 @@ function SourceBadges() {
           <span
             className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-line-soft bg-white shadow-sm ${ACCENT[c.accent].icon}`}
           >
-            <Icon name={c.icon} />
+            <Icon name={c.icon} size="lg" />
           </span>
           <span className="text-base font-bold text-ink">{c.label}</span>
         </li>
@@ -204,9 +149,9 @@ function SourceChips() {
       {CATEGORIES.map((c) => (
         <li
           key={c.label}
-          className={`flex items-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-1.5 text-sm font-semibold text-ink ${ACCENT[c.accent].icon}`}
+          className={`flex items-center gap-1.5 rounded-full border border-line-soft bg-white px-3 py-1.5 text-sm font-semibold ${ACCENT[c.accent].icon}`}
         >
-          <Icon name={c.icon} small />
+          <Icon name={c.icon} />
           <span className="text-ink">{c.label}</span>
         </li>
       ))}
@@ -236,7 +181,7 @@ function ReportCard() {
               <span
                 className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${a.tile} ${a.icon}`}
               >
-                <Icon name={c.icon} small />
+                <Icon name={c.icon} />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-sm font-bold text-ink">{c.label}</span>
@@ -278,79 +223,6 @@ function TrustStack() {
         </ul>
       </div>
     </div>
-  );
-}
-
-/* ------------------------------------------------------------- 아이콘 */
-
-const ICON_PATHS: Record<IconName, React.ReactNode> = {
-  megaphone: (
-    <>
-      <path d="M4 9.5h3.2L14 5.5v13l-6.8-4H4a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1Z" />
-      <path d="M17.5 9a4 4 0 0 1 0 6" />
-      <path d="M7.5 14.5 9 20" />
-    </>
-  ),
-  bank: (
-    <>
-      <path d="M3 9.5 12 4l9 5.5" />
-      <path d="M5.5 10v8M10 10v8m4 0v-8m4.5 0v8" />
-      <path d="M3 20h18" />
-    </>
-  ),
-  receipt: (
-    <>
-      <path d="M6 3h12v18l-3-1.7L12 21l-3-1.7L6 21V3Z" />
-      <path d="M9 8h6M9 12h6M9 16h3" />
-    </>
-  ),
-  link: (
-    <>
-      <path d="M10.5 13.5a4 4 0 0 0 5.7 0l2.3-2.3a4 4 0 0 0-5.7-5.7l-1.2 1.2" />
-      <path d="M13.5 10.5a4 4 0 0 0-5.7 0l-2.3 2.3a4 4 0 0 0 5.7 5.7l1.2-1.2" />
-    </>
-  ),
-  gavel: (
-    <>
-      <path d="m13.5 3.5 5 5-2.5 2.5-5-5z" />
-      <path d="m12.2 7.8-6.7 6.7" />
-      <path d="M4 21h9" />
-      <path d="m7 17.5 2.5-2.5" />
-    </>
-  ),
-};
-
-function Icon({ name, small = false }: { name: IconName; small?: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={small ? "h-5 w-5" : "h-6 w-6"}
-    >
-      {ICON_PATHS[name]}
-    </svg>
-  );
-}
-
-function CheckMark() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-3 w-3"
-    >
-      <path d="m5 13 4.5 4.5L19 7" />
-    </svg>
   );
 }
 
