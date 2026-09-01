@@ -8,8 +8,8 @@
  * 접근성 (SPEC §8) — 디자인 언어보다 우선한다:
  *  - 모든 본문 색은 배경 대비 WCAG AA(4.5:1) 이상이다. 실제로 계산해서 고른 값이고,
  *    회색 계열을 그 아래로 내리지 않는다. 고령층 대상 서비스에서 가장 흔한 실패다.
- *  - 글자 크기 토글은 html[data-fontsize] 로 루트 font-size 를 바꾼다.
- *    그래서 타이포 램프를 px 가 아니라 rem/em 으로 잡았다 — px 로 박으면 토글이 죽는다.
+ *  - 화면 크기 슬라이더는 --screen-zoom 배율로 루트 font-size 를 바꾼다.
+ *    그래서 타이포 램프를 px 가 아니라 rem/em 으로 잡았다 — px 로 박으면 슬라이더가 죽는다.
  *
  * 원본 디자인 명세에서 의도적으로 벗어난 지점 (근거는 각 토큰 옆에):
  *  1. muted 회색 #7a7a7a (4.29:1) 를 쓰지 않는다. AA 미달이다.
@@ -118,15 +118,13 @@
 }
 
 html {
-  font-size: 16px;
+  /*
+   * 화면 크기 슬라이더가 --screen-zoom 하나만 움직인다 (1 = 100%).
+   * 스크립트가 페인트 전에 값을 넣고, 넣지 못하면 fallback 1 로 기본 크기가 된다.
+   */
+  font-size: calc(16px * var(--screen-zoom, 1));
   /* 고정 헤더(+2단 내비) 아래로 앵커·포커스 대상이 숨지 않게 */
   scroll-padding-top: 7rem;
-}
-html[data-fontsize="large"] {
-  font-size: 18.5px;
-}
-html[data-fontsize="xlarge"] {
-  font-size: 21px;
 }
 
 body {
@@ -310,4 +308,57 @@ body {
 .term {
   border-bottom: 1px dotted var(--ink-3);
   cursor: help;
+}
+
+/*
+ * 화면 크기 슬라이더 (§8 접근성).
+ *
+ * 치수를 전부 px 로 잡는다 — 이 슬라이더가 키우는 배율을 자기도 따라가면
+ * 끄는 손가락 밑에서 손잡이가 달아난다. 조절 도구만은 제자리에 있어야 한다.
+ * 손잡이는 28px, 잡는 영역은 44px 로 둔다 (터치 최소 영역).
+ */
+.zoom-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 44px;
+  background: transparent;
+  cursor: pointer;
+}
+.zoom-slider::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+}
+.zoom-slider::-moz-range-track {
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+}
+.zoom-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  /* (트랙 10px - 손잡이 28px) / 2 */
+  margin-top: -9px;
+  border-radius: 9999px;
+  background: var(--brand);
+  border: 3px solid #fff;
+  box-shadow: rgba(0, 0, 0, 0.28) 0 1px 4px 0;
+}
+.zoom-slider::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 9999px;
+  background: var(--brand);
+  border: 3px solid #fff;
+  box-shadow: rgba(0, 0, 0, 0.28) 0 1px 4px 0;
+}
+.zoom-slider:active::-webkit-slider-thumb {
+  background: var(--brand-dark);
+}
+.zoom-slider:active::-moz-range-thumb {
+  background: var(--brand-dark);
 }

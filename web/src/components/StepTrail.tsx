@@ -53,8 +53,13 @@ export default function StepTrail({ step }: { step: number }) {
                   n
                 )}
               </span>
+              {/*
+                w-full 이 없으면 truncate 든 줄바꿈이든 걸 곳이 없어 라벨이 제 칸을 넘어
+                옆 단계와 겹친다 ("원하는 것"). 화면을 키울수록 눈에 띈다.
+                말줄임 대신 두 줄로 흘린다 — 고령층에게 "원하는…" 은 읽히지 않는다.
+              */}
               <span
-                className={`truncate text-center text-sm ${
+                className={`w-full text-center text-sm leading-tight ${
                   current ? "font-bold text-brand" : "text-ink-3"
                 }`}
               >
