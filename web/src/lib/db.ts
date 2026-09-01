@@ -6,6 +6,7 @@
  */
 import { readFileSync } from "node:fs";
 import postgres from "postgres";
+import { SUPABASE_ROOT_CA_2021 } from "@/lib/supabase-ca";
 
 export type Sql = ReturnType<typeof postgres>;
 
@@ -17,8 +18,8 @@ export function isDbConfigured(): boolean {
 
 /**
  * CA 체인 + 호스트명 검증. Supabase 풀러 인증서가 시스템 CA 로 검증되지 않으면
- * `PGSSLROOTCERT` 에 CA 번들 경로를 주어 우회한다 — libpq 와 같은 변수명이라
- * TypeScript 배치(web/ingest/db.ts)와 한 값으로 맞출 수 있다. 없으면 시스템 CA 로 검증한다.
+ * `PGSSLROOTCERT`의 CA 번들을 우선 사용한다. Vercel처럼 파일 경로를 제공하지 않는
+ * 런타임에서는 번들한 Supabase 공식 Root 2021 CA를 사용한다.
  */
 function dsnSslMode(dsn: string): string | null {
   try {
@@ -29,21 +30,33 @@ function dsnSslMode(dsn: string): string | null {
   }
 }
 
-function isLocalDsn(dsn: string): boolean {
+function dsnHost(dsn: string): string {
   try {
-    return ["localhost", "127.0.0.1", "[::1]"].includes(new URL(dsn).hostname);
+    return new URL(dsn).hostname;
   } catch {
     const match = /(?:^|\s)host\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+))/iu.exec(dsn);
-    const host = match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
-    return ["localhost", "127.0.0.1", "::1"].includes(host) || host.startsWith("/");
+    return match?.[1] ?? match?.[2] ?? match?.[3] ?? "";
   }
+}
+
+function isLocalDsn(dsn: string): boolean {
+  const host = dsnHost(dsn);
+  return ["localhost", "127.0.0.1", "::1", "[::1]"].includes(host) || host.startsWith("/");
+}
+
+function isSupabaseDsn(dsn: string): boolean {
+  const host = dsnHost(dsn).toLowerCase();
+  return host.endsWith(".supabase.com") || host.endsWith(".supabase.co");
 }
 
 export function sslOption(dsn: string, env: NodeJS.ProcessEnv = process.env) {
   if (dsnSslMode(dsn) !== null || isLocalDsn(dsn)) return undefined;
   const caPath = env.PGSSLROOTCERT;
-  if (!caPath) return "verify-full" as const;
-  return { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true };
+  if (caPath) return { ca: readFileSync(caPath, "utf8"), rejectUnauthorized: true };
+  if (isSupabaseDsn(dsn)) {
+    return { ca: SUPABASE_ROOT_CA_2021, rejectUnauthorized: true };
+  }
+  return "verify-full" as const;
 }
 
 export function getSql(): Sql | null {
