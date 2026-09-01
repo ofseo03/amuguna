@@ -142,12 +142,13 @@ NFC 정규화 → 소문자화 → 코드포인트 시퀀스
 L2 정규화
 ```
 
-### 요청 경로에 LLM이 없다
+### 질의가 있는 최초 검색 결과의 실시간 답변
 
-SPEC §7.5 그대로다. 한 줄 요약과 신청 절차 3단계는 수집 배치가 미리 만들어 DB에 넣고,
-매칭 근거 문장은 `eligibility_rules` 의 매칭된 필드로 **템플릿 조립**한다.
-따라서 웹 요청 경로에는 OpenRouter API 키를 쓰지 않는다. `OPENROUTER_API_KEY`는
-OpenRouter API를 호출하는 독립 Node 배치(`ingest/`)에서만 읽는다.
+수집 배치는 정규식 파싱과 결정형 카드 문구만 만든다. `POST /api/match`의 **질의가 있는
+최초 전체 검색**(`form=all`, 첫 페이지)만 OpenRouter에 질의 문장과 상위 5건의 공개
+메타데이터(제목·기관·요약·혜택·마감·원문 URL)를 보내 답변 하나를 만든다. 프로필·쿠키·원문
+본문은 보내지 않고 답변을 저장하지 않는다. 탭·페이지 이동은 이 답변을 재사용한다. 최초
+응답은 OpenRouter를 최대 12초 기다리지만, 실패해도 카드 결과를 함께 반환한다.
 
 ---
 
@@ -160,7 +161,7 @@ OpenRouter API를 호출하는 독립 Node 배치(`ingest/`)에서만 읽는다.
 저장소 루트 밖을 import 하지 않게 하려는 것이고, `web/` 만 떼어 배포해도 동작한다
 (원본이 없으면 기존 복사본을 그대로 쓴다).
 
-웹(`src/lib/shared-data.ts`)과 수집 배치(`ingest/llm.ts`, `ingest/dictionaries.ts`) 모두
+웹(`src/lib/shared-data.ts`)과 수집 배치(`ingest/dictionaries.ts`) 모두
 이 복사본만 읽는다. **`web/` 안에서 `../../shared` 를 직접 참조하면 안 된다** — 저장소
 전체를 clone 하는 배포에서는 통과하지만 `web/` 만 떼어낸 배포에서 빌드가 깨진다.
 복사본(`src/data/*.json`)은 커밋되어 있고, 4개 파일 중 하나라도 원본과 어긋나면
@@ -171,7 +172,8 @@ OpenRouter API를 호출하는 독립 Node 배치(`ingest/`)에서만 읽는다.
 ## 환경변수
 
 Next.js와 독립 배치의 로컬 실연동 값은 `web/.env.local`에 둔다. `npm run ingest`도
-이 파일을 자동으로 읽으며, GitHub Actions에서는 Secrets/Variables로 주입한다. Node.js
+이 파일을 자동으로 읽는다. 수집 키는 GitHub Actions Secrets/Variables로, OpenRouter 키는
+Vercel 환경변수로 주입한다. Node.js
 **22.9.0 이상**이 필요하다. 배치 스크립트는 이 버전부터 제공되는 Node 내장
 `--env-file-if-exists`를 사용하므로 별도 wrapper는 두지 않는다.
 
@@ -188,10 +190,9 @@ cp .env.example .env.local
 | `DATA_GO_KR_API_KEY` | (없음) | 공공데이터포털 소스 실수집 시. 데이터셋별 활용신청 필요 |
 | `BIZINFO_API_KEY` | (없음) | 기업마당 실 API 수집 시 |
 | `FINLIFE_API_KEY` | (없음) | 금융상품 한눈에 실 API 수집 시 |
-| `OPENROUTER_API_KEY` | (없음) | `ingest/` 파싱 보완·요약 시 |
-| `LLM_MODEL` | `google/gemma-4-31b-it:free` | OpenRouter 모델 ID |
+| `OPENROUTER_API_KEY` | (없음) | Vercel 런타임의 질의가 있는 최초 전체 검색 실시간 답변에만 사용 |
+| `LLM_MODEL` | `google/gemma-4-31b-it:free` | 위 실시간 답변의 OpenRouter 모델 ID |
 | `SESSION_SECRET` | 개발용 고정값 | **배포 시 필수.** 프로필 쿠키 암호화 키와 세션 id 서명 키를 여기서 파생한다 |
-| `LLM_FALLBACK_MODELS` | (없음) | 기본 모델 실패 시 시도할 대체 모델 (쉼표 구분) |
 | `RATE_LIMIT_SESSION_PER_MIN` | `10` | 세션당 분당 검색 한도. `0` 이면 해제 |
 | `RATE_LIMIT_ANON_PER_MIN` | `60` | 세션 쿠키 없는 요청의 IP당 한도. `0` 이면 해제 |
 | `RATE_LIMIT_IP_PER_MIN` | `600` | IP당 분당 검색 한도(NAT 안전망). `0` 이면 해제 |
@@ -207,7 +208,8 @@ cp .env.example .env.local
    ```bash
    node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
    ```
-4. DB를 붙일 준비가 되면 `DATABASE_URL` 을 추가하고 재배포한다.
+4. DB를 붙일 준비가 되면 `DATABASE_URL` 을 추가하고 재배포한다. 실시간 답변을 켜려면
+   Vercel에 `OPENROUTER_API_KEY`와 선택적으로 `LLM_MODEL`도 추가한다.
    변수가 없는 동안에는 데모 모드로 정상 서비스된다.
 
 > `prebuild` 훅이 `../shared` 를 읽으므로 저장소 전체를 clone 하는 기본 설정이면 그대로 동작한다.

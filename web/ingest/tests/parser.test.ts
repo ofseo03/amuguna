@@ -14,7 +14,6 @@ import {
   eligibilitySourceText,
   parseEligibility,
   parseProgram,
-  resolveParseMethod,
 } from "../parser";
 
 type Expected = Partial<EligibilityRules>;
@@ -208,13 +207,7 @@ test("evidence, parse method, and confidence preserve parser diagnostics", () =>
       parseEligibility("만 19세 이상").confidence,
   );
 
-  const mixed = new EligibilityRules({
-    age_min: 19,
-    income_decile_max: 5,
-    parse_evidence: { age_min: { method: "regex" }, income_decile_max: { method: "llm" } },
-  });
-  assert.equal(resolveParseMethod(mixed.parse_evidence), "mixed");
-  assert.equal(computeConfidence(mixed), 0.672);
+  assert.equal(computeConfidence(new EligibilityRules({ age_min: 19, income_decile_max: 5 })), 0.867);
 });
 
 test("shared dictionaries and Korean normalization keep the parser contract", () => {
@@ -422,7 +415,7 @@ test("CollectedProgram hashes stable fields and builds the embedding source", ()
     eligibility_text: "만 19세 이상",
   });
   const volatile = new CollectedProgram({ ...base.toDict(), source_url: "https://example.test/2", raw_body: { views: 9 } });
-  assert.equal(PARSER_HASH_PREFIX, "parser-v3:");
+  assert.equal(PARSER_HASH_PREFIX, "parser-v4:");
   assert.equal(base.contentHash(), volatile.contentHash());
   assert.equal(
     base.contentHash(),
@@ -438,7 +431,6 @@ test("CollectedProgram hashes stable fields and builds the embedding source", ()
 
 test("EligibilityRules toRow omits pipeline-only review signals", () => {
   const rules = new EligibilityRules({ age_min: 19, needs_review: true, review_reason: "llm_failed" });
-  assert.equal(rules.incompleteExtraction, true);
   assert.equal("needs_review" in rules.toRow(), false);
   assert.equal("review_reason" in rules.toRow(), false);
   assert.deepEqual(rules.filledFields(), ["age_min"]);

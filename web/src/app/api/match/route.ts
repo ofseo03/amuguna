@@ -2,11 +2,12 @@
  * POST /api/match — 카드 리스트(스코어순) + 근접탈락 + 완화 단계 + 페이지 커서 (SPEC §9).
  *
  * 자유입력은 이 요청 시점에만 사용하고 저장하지 않는다 (§8).
- * 요청 경로에 LLM 은 없다 (§7.5) — 임베딩 1회 + 조회 1회가 전부다.
+ * 질의가 있는 최초 전체 검색은 매칭 결과 상위 5건으로 실시간 AI 안내를 1회 생성한다.
  * Rate limit: 익명 세션 + IP 기준 10회/분 (§8).
  */
 import { NextResponse } from "next/server";
 import { runMatch } from "@/lib/matching";
+import { generateLiveAnswer } from "@/lib/live-answer";
 import { readProfile, readSessionId, upgradeProfileCookie } from "@/lib/session";
 import { CSRF_MESSAGE, checkCsrf } from "@/lib/csrf";
 import { checkSessionAndIpRateLimit, rateLimitMessage } from "@/lib/rate-limit";
@@ -16,7 +17,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  // CSRF (§8): 검색 1회 = 임베딩 API 과금 1회이므로 크로스사이트 호출은 곧 비용이다
+  // CSRF (§8): 검색은 임베딩·OpenRouter 비용을 만들 수 있으므로 크로스사이트 호출을 막는다
   const csrf = checkCsrf(req);
   if (!csrf.ok) {
     console.warn(`[api/match] CSRF 거부 (${csrf.reason})`);
@@ -71,15 +72,29 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, errors: cursor.errors }, { status: 400 });
   }
 
+  const form = validateForm(body.form);
+  const started = Date.now();
   try {
     const result = await runMatch({
       profile,
       query: q.value,
-      form: validateForm(body.form),
+      form,
       cursor: cursor.value,
     });
+    const ai = await generateLiveAnswer({
+      query: q.value,
+      form,
+      cursor: cursor.value,
+      cards: result.cards,
+    });
     return NextResponse.json(
-      { ok: true, ...result },
+      {
+        ok: true,
+        ...result,
+        aiAnswer: ai.text,
+        aiAnswerStatus: ai.status,
+        tookMs: Date.now() - started,
+      },
       {
         headers: {
           "X-RateLimit-Limit": String(rl.limit),

@@ -17,10 +17,10 @@ export default function PrivacyPage() {
         설계 원칙으로 삼습니다. 회원가입이 없고, 이름·전화번호·주민등록번호를
         수집하지 않습니다. 입력하신 인적사항은 <strong>브라우저 쿠키에만</strong>{" "}
         담기며 데이터베이스에 저장하지 않습니다. 다만 &ldquo;원하는 것&rdquo;
-        입력 문장은 의미 검색을 위해 외부 임베딩 서비스로 전송됩니다 — 자세한
+        입력 문장은 의미 검색과 최초 결과 답변을 위해 외부 서비스로 전송됩니다 — 자세한
         내용은 아래 3항을 확인해 주세요.
       </p>
-      <p className="mt-2 text-sm text-ink-3">최종 개정일: 2026년 8월 17일</p>
+      <p className="mt-2 text-sm text-ink-3">최종 개정일: 2026년 9월 1일</p>
 
       <Section title="1. 수집하는 정보">
         <div className="mb-4 rounded-xl border-2 border-brand bg-brand-soft p-5">
@@ -101,23 +101,24 @@ export default function PrivacyPage() {
         </div>
         <div className="mt-4 rounded-xl border-2 border-warn bg-warn-soft p-5">
           <p className="font-bold text-warn">
-            다만 문장의 뜻을 파악하기 위해 외부 임베딩 서비스로 전송됩니다.
+            다만 문장의 뜻을 파악하기 위해 외부 서비스로 전송됩니다.
           </p>
           <p className="mt-2">
-            &ldquo;원하는 것&rdquo; 문장은 의미가 비슷한 공고를 찾기 위해 벡터로
-            바꿔야 하고, 이 변환은 외부 사업자의 API 를 호출해 이루어집니다.
+            &ldquo;원하는 것&rdquo; 문장은 의미가 비슷한 공고를 찾기 위한 벡터 변환과,
+            최초 검색 결과를 설명하는 답변 생성에 쓰입니다.
             저장은 하지 않지만 <strong>전송은 일어납니다.</strong> 그래서 민감한
             내용을 적지 마시기를 거듭 권합니다.
           </p>
           <ul className="mt-3 list-disc pl-6">
-            <li>전송 대상: 임베딩 API 제공사 (Voyage AI 또는 OpenAI, 운영 설정에 따름)</li>
-            <li>전송 항목: &ldquo;원하는 것&rdquo; 입력 문장 (인적사항은 보내지 않습니다)</li>
-            <li>목적: 문장을 벡터로 변환해 의미가 가까운 공고를 찾기 위함</li>
+            <li>전송 대상: 임베딩 API 제공사(Voyage AI 또는 OpenAI)와 OpenRouter</li>
+            <li>전송 항목: 임베딩에는 &ldquo;원하는 것&rdquo; 문장, OpenRouter에는 그 문장과 질의가 있는 최초 검색 상위 5건의 공개 공고 메타데이터</li>
+            <li>전송하지 않는 항목: 인적사항, 프로필 쿠키, 공고 원문 본문</li>
+            <li>목적: 의미가 가까운 공고 검색 및 그 결과에 대한 답변 생성</li>
             <li>해당 사업자의 보관 정책은 각 사업자의 약관을 따르며 본 서비스가 통제하지 않습니다</li>
           </ul>
           <p className="mt-3 text-sm">
-            공고 요약·신청 절차 문구를 만드는 언어모델 호출은 수집 배치에서만
-            일어나며, 사용자 입력이 그 경로로 전달되지 않습니다.
+            OpenRouter 답변은 질의가 있는 최초 전체 검색에서만 만들고 서버·데이터베이스에 저장하지
+            않습니다. 탭·페이지 이동에서는 새 호출을 하지 않습니다.
           </p>
         </div>
       </Section>
@@ -129,9 +130,8 @@ export default function PrivacyPage() {
         </ul>
         <p className="mt-3">
           수집한 정보를 광고·마케팅에 사용하지 않으며, 판매하지 않습니다.
-          인적사항을 외부에 제공하는 경로는 없습니다. 유일한 외부 전송은 위 3항의
-          &ldquo;원하는 것&rdquo; 문장을 벡터로 바꾸기 위한 임베딩 API 호출이며,
-          그 목적 외에는 사용하지 않습니다.
+          인적사항을 외부에 제공하는 경로는 없습니다. 외부 전송은 위 3항의 임베딩 API와
+          질의가 있는 최초 검색의 OpenRouter 호출뿐이며, 그 목적 외에는 사용하지 않습니다.
         </p>
       </Section>
 
@@ -167,7 +167,7 @@ export default function PrivacyPage() {
           <li>모든 전송값 서버 측 재검증 (나이 0~120, 지역코드 화이트리스트, 소득분위 1~10, 기준중위소득 비율, 자유입력 200자)</li>
           <li>Content-Security-Policy 등 보안 헤더 적용</li>
           <li>익명 세션 + IP 기준 검색 횟수 제한</li>
-          <li>사용자 입력이 대규모 언어모델(LLM)에 전달되는 경로가 없습니다 — 요약·절차는 수집 배치에서 미리 생성한 값입니다</li>
+          <li>OpenRouter에는 질의가 있는 최초 검색의 질의와 공개 공고 메타데이터만 전송하며, 프로필·쿠키·공고 원문 본문은 전송하지 않고 생성 답변은 서버·데이터베이스에 저장하지 않음</li>
         </ul>
       </Section>
 

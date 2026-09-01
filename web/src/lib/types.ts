@@ -48,11 +48,9 @@ export interface EligibilityRules {
   parse_method: "regex" | "llm" | "mixed";
   confidence: number;
   /**
-   * 자격요건 자동 추출이 불완전하게 끝났는가 (SPEC §6.2).
+   * 자격요건 자동 추출 결과에 원문 확인이 필요한가 (SPEC §6.2).
    *
-   * 이 값이 true 여도 공고는 정상 노출한다 — 배치 LLM 장애로 공고가 사라지는 편이
-   * 훨씬 비싸고, 추출 실패 필드는 NULL(= 조건 없음 = 통과)로 남아 잘못된 탈락을
-   * 만들지 않기 때문이다(§7.3). 대신 상세 화면에 원문 확인 안내를 띄운다.
+   * 이 값이 true 여도 공고는 정상 노출하고 상세 화면에 원문 확인 안내를 띄운다.
    */
   needs_review: boolean;
 }
@@ -62,7 +60,7 @@ export interface Program {
   id: number;
   external_id: string;
   title: string;
-  /** 배치 LLM 생성 (§7.5) */
+  /** 수집 시 결정형으로 생성한 한 줄 요약 */
   summary: string;
   body_text: string;
   form: ProgramForm;
@@ -79,7 +77,7 @@ export interface Program {
   source_url: string;
   fetched_at: string;
   status: "active" | "expired" | "needs_review";
-  /** 배치 LLM 생성 3단계 (§7.5) */
+  /** 수집 시 결정형으로 생성한 3단계 신청 절차 */
   apply_steps: string[];
   rules: EligibilityRules;
 }
@@ -150,6 +148,8 @@ export type RelaxationStage =
   | "intent_dropped"
   | "near_miss_only";
 
+export type AiAnswerStatus = "ok" | "not_requested" | "unavailable";
+
 export interface MatchResponse {
   /** 매칭 요약 배너용 */
   summary: {
@@ -178,5 +178,8 @@ export interface MatchResponse {
   catalogEmpty: boolean;
   /** 임베딩 실패 등으로 의도 축이 빠진 경우 (§8 신뢰성) */
   degraded: boolean;
+  /** 최초 검색 결과 상위 5건을 근거로 실시간 생성한 전체 안내 */
+  aiAnswer: string | null;
+  aiAnswerStatus: AiAnswerStatus;
   tookMs: number;
 }
