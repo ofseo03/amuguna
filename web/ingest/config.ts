@@ -13,7 +13,6 @@ export interface Settings {
   data_go_kr_api_key: string;
   bizinfo_api_key: string;
   finlife_api_key: string;
-  openrouter_api_key: string;
   embedding_provider: string;
   embedding_api_key: string;
   mock_embeddings: boolean;
@@ -33,7 +32,6 @@ export function settingsFromEnv(env: NodeJS.ProcessEnv = process.env): Settings 
     data_go_kr_api_key: envValue(env, "DATA_GO_KR_API_KEY"),
     bizinfo_api_key: envValue(env, "BIZINFO_API_KEY"),
     finlife_api_key: envValue(env, "FINLIFE_API_KEY"),
-    openrouter_api_key: envValue(env, "OPENROUTER_API_KEY"),
     embedding_provider: forcedMock ? "mock" : provider,
     embedding_api_key: embeddingKey,
     mock_embeddings: forcedMock || provider === "mock" || !embeddingKey,

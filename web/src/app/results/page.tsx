@@ -15,7 +15,7 @@ import Term from "@/components/Term";
 import StepTrail from "@/components/StepTrail";
 import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
-import type { MatchResponse, ProgramForm } from "@/lib/types";
+import type { AiAnswerStatus, MatchResponse, ProgramForm } from "@/lib/types";
 
 type Tab = ProgramForm | "all";
 type Payload = MatchResponse & { ok: true };
@@ -27,6 +27,8 @@ export default function ResultsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; noProfile?: boolean } | null>(null);
   const [query, setQuery] = useState<string | null>(null);
+  const [aiAnswer, setAiAnswer] = useState<string | null>(null);
+  const [aiAnswerStatus, setAiAnswerStatus] = useState<AiAnswerStatus>("not_requested");
 
   const cache = useRef(new Map<string, Payload>());
 
@@ -74,6 +76,11 @@ export default function ResultsPage() {
     setQuery(q);
     if (outcome.kind === "ok") {
       setData(outcome.payload);
+      // 탭·페이지 응답은 not_requested 이므로 최초 전체 검색의 안내를 그대로 유지한다.
+      if (outcome.payload.aiAnswerStatus !== "not_requested") {
+        setAiAnswer(outcome.payload.aiAnswer);
+        setAiAnswerStatus(outcome.payload.aiAnswerStatus);
+      }
       setError(null);
     } else {
       setError({ message: outcome.message, noProfile: outcome.noProfile });
@@ -237,6 +244,27 @@ export default function ResultsPage() {
           응답 {data.tookMs}ms · 자유입력은 저장되지 않습니다.
         </p>
       </div>
+
+      {aiAnswerStatus === "ok" && aiAnswer && (
+        <section
+          aria-labelledby="ai-answer-heading"
+          className="mt-4 rounded-xl border border-brand bg-bg px-5 py-4"
+        >
+          <h2 id="ai-answer-heading" className="text-lg font-bold text-ink">
+            검색 결과를 바탕으로 한 AI 안내
+          </h2>
+          <p className="mt-2 whitespace-pre-line text-ink-2">{aiAnswer}</p>
+          <p className="mt-3 text-sm text-ink-3">
+            자격 여부와 신청 조건은 반드시 해당 기관의 공고 원문에서 확인해 주세요.
+          </p>
+        </section>
+      )}
+
+      {aiAnswerStatus === "unavailable" && (
+        <p role="status" className="mt-3 rounded-lg border border-warn bg-warn-soft px-4 py-2 text-sm text-ink-2">
+          AI 안내를 불러오지 못했지만, 아래 매칭 결과는 정상적으로 확인할 수 있습니다.
+        </p>
+      )}
 
       {demoMode && (
         <p className="mt-3 rounded-lg border border-warn bg-warn-soft px-4 py-2 text-sm text-ink-2">

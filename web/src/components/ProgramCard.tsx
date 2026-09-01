@@ -45,7 +45,7 @@ export function ProgramCard({ card }: { card: MatchCard }) {
         </p>
       )}
 
-      {/* 매칭 근거 — 템플릿 조립 (§7.5, LLM 미사용) */}
+      {/* 매칭 근거 — 저장된 문구가 아니라 요청 시점에 템플릿으로 조립한다 */}
       <div className="mt-4 border-t border-line-soft pt-3">
         <p className="mb-2 text-sm text-ink-2">
           <span className="font-semibold text-ok">매칭 근거</span> ·{" "}

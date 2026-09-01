@@ -59,7 +59,7 @@ jobs:
         if: always()
         env:
           MOCK_EMBEDDINGS: "1"
-        run: npm run --prefix web ingest -- --fixtures --dry-run --no-llm
+        run: npm run --prefix web ingest -- --fixtures --dry-run
 
   # 마이그레이션은 코드 검증으로 안 잡힌다. 실제 Postgres 에 순서대로 부어 봐야
   # 순서 의존성·FK 의존성·중복 생성이 드러난다.

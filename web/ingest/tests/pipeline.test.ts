@@ -70,7 +70,7 @@ class FakeCollector extends Collector {
 }
 
 function pipeline(db: InMemoryDatabase, embedder = new Embedder(settings)) {
-  return new Pipeline(db, { embedder, llm: null, dryRun: true });
+  return new Pipeline(db, { embedder, dryRun: true });
 }
 
 const LABEL_FIELDS = [
@@ -345,23 +345,6 @@ test("failed reindex keeps the prior active vector space until a complete retry"
   }
 });
 
-test("unchanged needs_review records are reparsed without another raw version", async () => {
-  const db = new InMemoryDatabase();
-  const original = program();
-  await pipeline(db).runSource(new FakeCollector([original]));
-  db.programs.get(1)!.status = "needs_review";
-  db.rules.get(1)!.needsReview = true;
-  db.rules.get(1)!.reviewReason = "llm_failed";
-  assert.equal((await db.knownExternalIds("fake")).has(original.external_id), false);
-
-  const retry = pipeline(db);
-  await retry.runSource(new FakeCollector([original]));
-  assert.equal(db.programs.get(1)?.status, "active");
-  assert.equal(db.rawDocuments.length, 1);
-  assert.equal(retry.report.totals.updated, 1);
-  assert.equal(db.rules.get(1)?.reviewReason, null);
-});
-
 test("reconciliation expires active records but preserves needs_review records", async () => {
   const db = new InMemoryDatabase();
   const ingest = pipeline(db);
@@ -407,7 +390,7 @@ test("expired programs are not resurrected by a reindex", async () => {
 test("CLI exits non-zero when every fetched record rolls back", () => {
   const result = spawnSync(
     process.execPath,
-    ["--import", "tsx", "ingest/cli.ts", "--fixtures", "--dry-run", "--no-llm"],
+    ["--import", "tsx", "ingest/cli.ts", "--fixtures", "--dry-run"],
     {
       cwd: webRoot,
       env: {
@@ -415,7 +398,6 @@ test("CLI exits non-zero when every fetched record rolls back", () => {
         EMBEDDING_PROVIDER: "openai",
         EMBEDDING_API_KEY: "",
         MOCK_EMBEDDINGS: "",
-        OPENROUTER_API_KEY: "",
         DATABASE_URL: "",
       },
       encoding: "utf8",
@@ -433,7 +415,6 @@ test("CLI exits non-zero on a source volume drop", () => {
       "ingest/cli.ts",
       "--fixtures",
       "--dry-run",
-      "--no-llm",
       "--source",
       "bizinfo",
       "--previous-counts",

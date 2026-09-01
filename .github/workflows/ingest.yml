@@ -1,7 +1,7 @@
 # amuguna 수집 배치 (SPEC §3.2)
 #
-# * 1일 1회 심야 배치. 공공 API 호출은 여기서만 일어난다 — 사용자 요청 경로는 DB 조회와
-#   의도 문장 임베딩 1회가 전부다 (§7.5, 요청 경로에 LLM 없음).
+# * 1일 1회 심야 배치. 공공 API 호출과 정규식 기반 정규화는 여기서만 일어난다.
+#   사용자 요청의 OpenRouter 답변은 Vercel 런타임에서만 호출한다.
 # * 주 1회(일요일) 전량 대조로 원본에서 조용히 내려간 상시 공고를 expired 처리한다.
 #
 # 시간대: GitHub cron 은 **UTC**다. KST = UTC+9 이므로 심야 KST 는 전날 18:xx UTC.
@@ -49,8 +49,6 @@ jobs:
       DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
       BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
       FINLIFE_API_KEY: ${{ secrets.FINLIFE_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      LLM_FALLBACK_MODELS: ${{ vars.LLM_FALLBACK_MODELS }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
       PGSSLROOTCERT: ${{ github.workspace }}/prod-ca-2021.crt
@@ -119,8 +117,6 @@ jobs:
       DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
       BIZINFO_API_KEY: ${{ secrets.BIZINFO_API_KEY }}
       FINLIFE_API_KEY: ${{ secrets.FINLIFE_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      LLM_FALLBACK_MODELS: ${{ vars.LLM_FALLBACK_MODELS }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
       PGSSLROOTCERT: ${{ github.workspace }}/prod-ca-2021.crt

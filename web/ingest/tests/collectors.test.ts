@@ -337,7 +337,6 @@ test("an empty malformed envelope is an error, not a successful last page", asyn
       data_go_kr_api_key: "test-key",
       bizinfo_api_key: "",
       finlife_api_key: "",
-      openrouter_api_key: "",
       embedding_provider: "mock",
       embedding_api_key: "",
       mock_embeddings: true,

@@ -9,24 +9,25 @@
 ## 구조
 
 ```
-[배치]  T1 Open API/픽스처 → regex 파싱(+LLM 보완) → eligibility_rules
+[배치]  T1 Open API/픽스처 → regex 파싱 → eligibility_rules
                             → 청크 임베딩 → program_embeddings (pgvector)
-                            → 요약·절차 생성(LLM) → programs
+                            → 결정형 요약·절차 → programs
 
 [요청]  프로필 → SQL 자격 필터(A) ∩ 의도 임베딩 top-k(B) → 스코어링 → 카드
-        (요청 경로에 LLM 없음 — 요약은 배치 사전 생성, 근거는 템플릿)
+        → 질의가 있는 최초 전체 검색에 한해 상위 5건 공개 메타데이터 기반 OpenRouter 답변
 ```
 
 | 디렉터리 | 내용 |
 |---|---|
 | `db/` | Postgres 마이그레이션 — 스키마(§5), `match_programs` 교차검증·근접탈락 RPC(§7.3/7.6). 개인정보 테이블은 없다(§8). [db/README.md](db/README.md) |
 | `ingest/` | API 응답 봉투·목록/상세 조인을 재현한 픽스처 JSON 6종 |
-| `web/` | Next.js + TypeScript 웹서비스와 독립 Node 배치(`web/ingest`) — 수집·파싱·임베딩·요약, 화면/API, 스코어링. [web/README.md](web/README.md) |
+| `web/` | Next.js + TypeScript 웹서비스와 독립 Node 배치(`web/ingest`) — 수집·파싱·임베딩, 화면/API, 스코어링. [web/README.md](web/README.md) |
 | `shared/` | 공통 계약 데이터 — 지역코드, 직업분류(+파서 동의어), 소득분위 라벨, 2026 가구원별 기준중위소득표 |
 
 ## 빠른 시작 (API 키 없이)
 
-모든 외부 의존(공공 API·임베딩·LLM·DB)은 키가 없으면 mock/픽스처/데모 모드로 동작한다.
+공공 API·임베딩·DB는 키가 없으면 픽스처·mock·데모 모드로 동작한다. OpenRouter 키가
+없으면 실시간 AI 안내만 unavailable이 되고 카드 결과는 그대로 표시된다.
 
 ```bash
 # 웹 — DB 없이 내장 데모 데이터로 전체 흐름 동작
@@ -39,7 +40,7 @@
 
 ## 실 연동 (키 준비 후)
 
-Next.js와 독립 배치는 `web/.env.local`, GitHub Actions는 Secrets에 값을 넣으면 실 API로 전환된다.
+Next.js 런타임과 독립 배치는 `web/.env.local`을 읽는다. 수집용 키는 GitHub Actions Secrets에, OpenRouter 키는 Vercel 환경변수에 둔다.
 
 | 변수 | 용도 |
 |---|---|
@@ -48,7 +49,6 @@ Next.js와 독립 배치는 `web/.env.local`, GitHub Actions는 Secrets에 값�
 | `BIZINFO_API_KEY` | 기업마당 지원사업 API |
 | `FINLIFE_API_KEY` | 금융감독원 금융상품 한눈에 API |
 | `EMBEDDING_PROVIDER` / `EMBEDDING_API_KEY` | `voyage` \| `openai` \| `mock` (Voyage 모델: `voyage-4-large`, 차원 1024 고정) |
-| `OPENROUTER_API_KEY` | 배치 전용 — OpenRouter로 파싱 보완 + 요약 생성 (`google/gemma-4-31b-it:free`) |
-| `LLM_FALLBACK_MODELS` | 기본 모델 실패 시 시도할 대체 모델 (쉼표 구분). 비우면 폴백 없음 |
+| `OPENROUTER_API_KEY` / `LLM_MODEL` | Vercel 런타임 전용 — 질의가 있는 최초 전체 검색의 상위 5건 공개 메타데이터로 실시간 답변 생성. 실패해도 카드 결과는 유지 |
 | `RATE_LIMIT_SESSION_PER_MIN` / `RATE_LIMIT_ANON_PER_MIN` / `RATE_LIMIT_IP_PER_MIN` | 검색 한도. 기본 10 / 60 / 600. `0` 은 해제 — 재배포 없이 값만 바꿔 적용된다 |
 | `SESSION_SECRET` | 프로덕션 비밀 키 (32자 이상). 프로필 쿠키 **암호화** 키와 세션 id 서명 키를 여기서 파생한다 |

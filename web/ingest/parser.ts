@@ -14,7 +14,6 @@ import {
   EligibilityRules,
   type ExtraCondition,
   type ParseEvidence,
-  type ParseMethod,
 } from "./models";
 
 type ParsedValues = {
@@ -456,28 +455,9 @@ function extractExtraConditions(text: string): ExtraCondition[] {
 export function computeConfidence(rules: EligibilityRules): number {
   const filled = rules.filledFields();
   if (!filled.length) return 0.2;
-  const weights = filled.map((name) => {
-    const item = rules.parse_evidence[name];
-    return item && typeof item === "object" && "method" in item && item.method === "llm"
-      ? 0.55
-      : 1;
-  });
-  const base = weights.reduce((sum, weight) => sum + weight, 0) / weights.length;
   const coverage = Math.min(1, filled.length / 3);
-  const score = base * (0.6 + 0.4 * coverage) * (rules.needs_review ? 0.8 : 1);
+  const score = (0.6 + 0.4 * coverage) * (rules.needs_review ? 0.8 : 1);
   return Math.round(Math.min(1, score) * 1000) / 1000;
-}
-
-export function resolveParseMethod(evidence: ParseEvidence): ParseMethod {
-  const methods = new Set<string>();
-  for (const [key, value] of Object.entries(evidence)) {
-    if (key.startsWith("_") || !value || typeof value !== "object") continue;
-    const method = "method" in value ? value.method : "regex";
-    if (typeof method === "string") methods.add(method);
-  }
-  if (!methods.size) return "regex";
-  if (methods.size > 1) return "mixed";
-  return methods.has("llm") ? "llm" : "regex";
 }
 
 export function parseEligibility(rawText: string): EligibilityRules {
@@ -631,7 +611,7 @@ export function parseEligibility(rawText: string): EligibilityRules {
     median_income_percent_max: out.median_income_percent_max,
     extra_conditions: [...extractExtraConditions(text), ...rejected],
     parse_evidence: evidence,
-    parse_method: resolveParseMethod(evidence),
+    parse_method: "regex",
   });
   rules.confidence = computeConfidence(rules);
   return rules;

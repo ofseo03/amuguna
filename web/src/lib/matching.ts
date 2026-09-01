@@ -6,7 +6,7 @@
  *  - DB 모드   : Supabase RPC match_programs(...) → 프로그램 행 조회
  *  - 데모 모드 : 번들 JSON 위에서 동일 판정을 TypeScript 로 수행
  *
- * 요청 경로에 LLM 은 없다 (§7.5). 요약·절차는 배치 사전 생성분, 근거 문장은 템플릿 조립.
+ * 저장 요약·절차와 근거 문장은 결정형으로 조립한다. 실시간 전체 안내는 API 라우트가 담당한다.
  */
 import { cosine, embedQuery, toPgVectorLiteral, vectorSpace } from "./embedding";
 import {
@@ -413,8 +413,9 @@ function pageCards(cards: MatchCard[], cursor: MatchCursor | null) {
   };
 }
 
-export async function runMatch(input: MatchInput): Promise<MatchResponse> {
-  const started = Date.now();
+export async function runMatch(
+  input: MatchInput,
+): Promise<Omit<MatchResponse, "aiAnswer" | "aiAnswerStatus" | "tookMs">> {
   const now = new Date();
   const { profile } = input;
 
@@ -503,7 +504,6 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
       // 데모 모드는 번들 데이터가 항상 들어 있으므로 콜드 스타트가 성립하지 않는다
       catalogEmpty: false,
       degraded,
-      tookMs: Date.now() - started,
     };
   }
 
@@ -556,7 +556,6 @@ export async function runMatch(input: MatchInput): Promise<MatchResponse> {
     demoMode,
     catalogEmpty,
     degraded,
-    tookMs: Date.now() - started,
   };
 }
 

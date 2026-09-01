@@ -15,17 +15,7 @@ import {
 } from "../db";
 import { chunkText, Embedder } from "../embedder";
 import { EMBEDDING_DIM, embedQuery, VOYAGE_MODEL } from "../../src/lib/embedding";
-import {
-  applyFallback,
-  LLMFallback,
-  missingFieldGroups,
-  mockCardCopy,
-  revalidate,
-  Summarizer,
-  type FallbackRules,
-  type LlmFetch,
-} from "../llm";
-import { parseEligibility } from "../parser";
+import { buildCardCopy } from "../card-copy";
 
 const now = new Date("2026-08-10T00:00:00Z");
 
@@ -272,184 +262,19 @@ test("real embedding configuration fails instead of mixing in mock vectors", asy
   await assert.rejects(sharedSettings.embedTexts(["본문"]), /EMBEDDING_API_KEY/);
 });
 
-function emptyRules(): FallbackRules {
-  return {
-    age_min: null,
-    age_max: null,
-    gender: null,
-    regions: null,
-    occupations: null,
-    income_decile_max: null,
-    median_income_percent_max: null,
-    parse_method: "regex",
-    parse_evidence: {},
-    confidence: 0,
-    needs_review: false,
-    review_reason: null,
-  };
-}
-
-function stubFetch(
-  input: Record<string, unknown> | string | Error,
-  toolName = "emit_eligibility",
-): LlmFetch {
-  return async (url, init) => {
-    assert.equal(String(url), "https://openrouter.ai/api/v1/chat/completions");
-    assert.equal((init?.headers as Record<string, string>).Authorization, "Bearer test");
-    const request = JSON.parse(String(init?.body));
-    assert.equal(request.tools[0].type, "function");
-    assert.equal(request.tool_choice.function.name, toolName);
-    if (input instanceof Error) throw input;
-    return Response.json({
-      choices: [{
-        finish_reason: "tool_calls",
-        message: {
-          tool_calls: [{
-            type: "function",
-            function: {
-              name: toolName,
-              arguments: typeof input === "string" ? input : JSON.stringify(input),
-            },
-          }],
-        },
-      }],
-    });
-  };
-}
-
-test("LLM fields are server-revalidated and regex values are not overwritten", async () => {
-  assert.deepEqual(revalidate({ regions: ["11620"], occupations: ["self_employed"] }), {
-    clean: { regions: ["11620"], occupations: ["self_employed"] },
-    rejected: [],
-  });
-  assert.deepEqual(revalidate({ regions: ["99999"], occupations: ["astronaut"] }).rejected.sort(), [
-    "occupations",
-    "regions",
-  ]);
-
-  const rules = emptyRules();
-  rules.age_min = 19;
-  await applyFallback(
-    rules,
-    "만 19세 이상이며 소득 기준은 붙임 참조",
-    new LLMFallback(
-      { openrouterApiKey: "test", model: "test-model" },
-      stubFetch({
-        age_min: 99,
-        median_income_percent_max: 100,
-        evidence: { median_income_percent_max: "중위소득 100% 이하" },
-      }),
-    ),
-  );
-  assert.equal(rules.age_min, 19);
-  assert.equal(rules.median_income_percent_max, 100);
-  assert.equal(rules.parse_method, "llm");
-});
-
-test("LLM fills the missing income axis without replacing the parsed one", async () => {
-  const rules = emptyRules();
-  rules.income_decile_max = 3;
-  assert.deepEqual(missingFieldGroups(rules), ["age", "median_income", "gender", "region", "occupation"]);
-
-  await applyFallback(
-    rules,
-    "소득 3분위 이하이며 기준 중위소득 120% 이하",
-    new LLMFallback(
-      { openrouterApiKey: "test", model: "test-model" },
-      stubFetch({
-        median_income_percent_max: 120,
-        evidence: { median_income_percent_max: "기준 중위소득 120% 이하" },
-      }),
-    ),
-  );
-
-  assert.equal(rules.income_decile_max, 3);
-  assert.equal(rules.median_income_percent_max, 120);
-});
-
-test("LLM cannot restore parser-rejected hard filters", async () => {
-  const rules = parseEligibility(
-    "일반 농업인 또는 기초생활수급자 등 저소득 농업인 단체를 지원합니다.",
-  );
-  assert.equal(rules.income_decile_max, null);
-  await applyFallback(
-    rules,
-    "일반 농업인 또는 기초생활수급자 등 저소득 농업인 단체",
-    new LLMFallback(
-      { openrouterApiKey: "test", model: "test-model" },
-      stubFetch({
-        income_decile_max: 2,
-        median_income_percent_max: 50,
-        evidence: { income_decile_max: "기초생활수급자" },
-      }),
-    ),
-  );
-  assert.equal(rules.income_decile_max, null);
-  assert.equal(rules.median_income_percent_max, null);
-});
-
-test("missing LLM key is deterministic and does not block the whole service", async () => {
-  const rules = emptyRules();
-  await applyFallback(rules, "자격은 공고문 참고", new LLMFallback({ openrouterApiKey: "" }));
-  assert.equal(rules.review_reason, "llm_unavailable");
-
-  const card = await new Summarizer({ openrouterApiKey: "" }).generate({
+test("card copy is deterministic and bounded", () => {
+  const card = buildCardCopy({
     title: "지원 사업",
     body_text: "청년의 주거비를 지원합니다. 자세한 내용은 공고를 확인하세요.",
     apply_method: "온라인 신청",
   });
-  assert.deepEqual(card, mockCardCopy({
-    title: "지원 사업",
-    body_text: "청년의 주거비를 지원합니다. 자세한 내용은 공고를 확인하세요.",
-    apply_method: "온라인 신청",
-  }));
-  assert.equal(card.apply_steps.length, 3);
-});
-
-test("summarizer revalidates tool output and truncates overlong copy", async () => {
-  const summarizer = new Summarizer(
-    { openrouterApiKey: "test" },
-    stubFetch(
-      { summary: "가".repeat(200), apply_steps: ["하나", "둘", "셋"] },
-      "emit_card_copy",
-    ),
-  );
-  const card = await summarizer.generate({ title: "제목", body_text: "본문" });
-  assert.equal(card.method, "llm");
-  assert.ok(card.summary.length <= 40);
-});
-
-test("invalid or failed OpenRouter responses fall back safely", async () => {
-  const rules = emptyRules();
-  await applyFallback(
-    rules,
-    "자격은 공고문 참고",
-    new LLMFallback({ openrouterApiKey: "test" }, stubFetch("{bad json")),
-  );
-  assert.equal(rules.review_reason, "llm_failed");
-
-  const program = { title: "지원 사업", body_text: "청년의 주거비를 지원합니다." };
-  const card = await new Summarizer(
-    { openrouterApiKey: "test" },
-    stubFetch(new Error("network"), "emit_card_copy"),
-  ).generate(program);
-  assert.deepEqual(card, mockCardCopy(program));
-});
-
-test("OpenRouter transient failures are retried once", async () => {
-  let calls = 0;
-  const success = stubFetch(
-    { summary: "청년 주거비 지원", apply_steps: ["확인", "신청", "결과 확인"] },
-    "emit_card_copy",
-  );
-  const transient: LlmFetch = async (url, init) => {
-    calls++;
-    return calls === 1 ? new Response(null, { status: 503 }) : success(url, init);
-  };
-  const card = await new Summarizer({ openrouterApiKey: "test" }, transient).generate({
-    title: "지원 사업",
-    body_text: "청년의 주거비를 지원합니다.",
+  assert.deepEqual(card, {
+    summary: "청년의 주거비를 지원합니다.",
+    apply_steps: [
+      "자격요건과 제출서류를 확인합니다.",
+      "온라인 신청을 진행합니다.",
+      "심사 결과와 지급 일정을 소관 기관에서 확인합니다.",
+    ],
   });
-  assert.equal(calls, 2);
-  assert.equal(card.method, "llm");
+  assert.ok(buildCardCopy({ body_text: "가".repeat(200) }).summary.length <= 40);
 });
