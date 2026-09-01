@@ -53,8 +53,12 @@ jobs:
       LLM_FALLBACK_MODELS: ${{ vars.LLM_FALLBACK_MODELS }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      PGSSLROOTCERT: ${{ github.workspace }}/prod-ca-2021.crt
     steps:
       - uses: actions/checkout@v4
+
+      - name: Supabase CA 인증서 준비
+        run: curl --fail --silent --show-error --location https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt --output "$PGSSLROOTCERT"
 
       - uses: actions/setup-node@v4
         with:
@@ -119,8 +123,12 @@ jobs:
       LLM_FALLBACK_MODELS: ${{ vars.LLM_FALLBACK_MODELS }}
       EMBEDDING_PROVIDER: ${{ vars.EMBEDDING_PROVIDER || 'mock' }}
       EMBEDDING_API_KEY: ${{ secrets.EMBEDDING_API_KEY }}
+      PGSSLROOTCERT: ${{ github.workspace }}/prod-ca-2021.crt
     steps:
       - uses: actions/checkout@v4
+
+      - name: Supabase CA 인증서 준비
+        run: curl --fail --silent --show-error --location https://supabase-downloads.s3-ap-southeast-1.amazonaws.com/prod/ssl/prod-ca-2021.crt --output "$PGSSLROOTCERT"
 
       - uses: actions/setup-node@v4
         with:
