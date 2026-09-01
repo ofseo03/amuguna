@@ -19,10 +19,20 @@ export const STEP_LABELS = ["나이", "성별", "직업", "지역", "소득", "�
 export default function StepTrail({ step }: { step: number }) {
   const total = STEP_LABELS.length;
   return (
-    <div>
+    /*
+     * 한 줄에 여섯 칸을 놓으려면 가장 긴 라벨("원하는 것", 58.6px @100%) 기준으로
+     * 58.6 x 6 + 간격 4 x 5 = 371.6px = 23.2rem 이 필요하다. 여유를 둬 23.5rem 으로 잡는다.
+     * 그 아래로는 3칸 두 줄로 접는다 — 라벨을 접어 칸에 우겨넣는 것보다 낫다.
+     *
+     * 기준을 rem 으로 쓰는 게 요점이다. 컨테이너 쿼리의 rem 은 루트 배율,
+     * 즉 사용자가 화면 크기 슬라이더로 키운 값을 그대로 따라간다(직접 확인).
+     * 그래서 폭이 좁아서든 글자를 키워서든 "안 들어가면 접는다" 가 한 줄로 표현된다.
+     * 뷰포트 미디어 쿼리로는 안 된다. 거기서 rem 은 배율을 따라가지 않는다.
+     */
+    <div className="@container">
       <ol
         aria-label="입력 단계"
-        className="flex items-start justify-between gap-1"
+        className="grid grid-cols-3 items-start gap-x-1 gap-y-4 @min-[23.5rem]:grid-cols-6"
       >
         {STEP_LABELS.map((label, i) => {
           const n = i + 1;
@@ -33,7 +43,7 @@ export default function StepTrail({ step }: { step: number }) {
             <li
               key={label}
               aria-current={current ? "step" : undefined}
-              className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
+              className="flex min-w-0 flex-col items-center gap-1.5"
             >
               <span
                 className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold transition-colors ${
@@ -53,8 +63,13 @@ export default function StepTrail({ step }: { step: number }) {
                   n
                 )}
               </span>
+              {/*
+                w-full 이 없으면 줄바꿈을 걸 곳이 없어 라벨이 제 칸을 넘어 옆 단계와 겹친다.
+                말줄임이 아니라 줄바꿈이다 — 고령층에게 "원하는…" 은 읽히지 않는다.
+                body 의 word-break: keep-all 덕에 "원하는" 이 음절 사이에서 갈라지지 않는다.
+              */}
               <span
-                className={`truncate text-center text-sm ${
+                className={`w-full text-center text-sm leading-tight ${
                   current ? "font-bold text-brand" : "text-ink-3"
                 }`}
               >

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import FontSizeToggle from "./FontSizeToggle";
+import ScreenZoomControl from "./ScreenZoomControl";
 
 /**
  * 전역 내비 — 순수 검정 띠. 이 사이트에서 #000 이 나오는 유일한 자리다.
@@ -20,7 +20,7 @@ export function SiteHeader() {
             내게 맞는 공공 금융정보
           </span>
         </Link>
-        <FontSizeToggle />
+        <ScreenZoomControl />
       </div>
     </header>
   );

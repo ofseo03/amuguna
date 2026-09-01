@@ -26,7 +26,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <head>
-        {/* 저장된 글자 크기를 페인트 전에 적용해 깜빡임을 없앤다 (§8 접근성) */}
+        {/* 저장된 화면 크기를 페인트 전에 적용해 깜빡임을 없앤다 (§8 접근성) */}
         <script dangerouslySetInnerHTML={{ __html: FONT_SIZE_BOOTSTRAP }} />
       </head>
       <body className="flex min-h-screen flex-col bg-bg">
