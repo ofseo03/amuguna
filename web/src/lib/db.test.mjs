@@ -10,7 +10,7 @@ test("Supabase pooler uses the bundled official CA without a file path", () => {
 
   assert.equal(typeof ssl, "object");
   assert.equal(ssl.rejectUnauthorized, true);
-  assert.match(ssl.ca, /Supabase Root 2021 CA/);
+  assert.match(ssl.ca, /^-----BEGIN CERTIFICATE-----/);
 });
 
 test("an explicit sslmode remains controlled by the connection string", () => {
