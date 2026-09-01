@@ -23,6 +23,7 @@
  */
 import { useRef } from "react";
 import { useSyncExternalStore } from "react";
+import Icon from "./visual/Icon";
 import {
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
@@ -74,6 +75,10 @@ export default function FontSizeToggle() {
 
   return (
     <div className="fontsize-track flex select-none items-center gap-[8px] rounded-full py-[4px]">
+      <span aria-hidden="true" className="text-on-dark">
+        <Icon name="search" className="h-[17px] w-[17px]" />
+      </span>
+
       <span
         aria-hidden="true"
         className="leading-none text-on-dark"
