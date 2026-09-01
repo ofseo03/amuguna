@@ -148,6 +148,17 @@ export default function ScreenZoomControl() {
               ref={sliderRef}
               type="range"
               className="zoom-slider min-w-0 flex-1"
+              /*
+               * 지나온 트랙을 채운다. 단순 퍼센트로는 손잡이(28px) 폭만큼 어긋나므로
+               * 손잡이가 실제로 움직이는 구간(전체 - 28px)에 비례시키고 반지름을 더한다.
+               */
+              style={
+                {
+                  "--fill": `calc(14px + (100% - 28px) * ${
+                    (zoom - MIN_ZOOM) / (MAX_ZOOM - MIN_ZOOM)
+                  })`,
+                } as React.CSSProperties
+              }
               min={MIN_ZOOM}
               max={MAX_ZOOM}
               step={ZOOM_STEP}

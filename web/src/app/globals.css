@@ -323,17 +323,24 @@ body {
   height: 44px;
   background: transparent;
   cursor: pointer;
+  /* 지나온 만큼 트랙이 파랗게 찬다. --fill 은 컴포넌트가 인라인으로 넣는다 */
+  --fill: 0%;
+  --zoom-track: linear-gradient(
+    to right,
+    var(--brand) 0 var(--fill),
+    var(--bg-sunken) var(--fill) 100%
+  );
 }
 .zoom-slider::-webkit-slider-runnable-track {
   height: 8px;
   border-radius: 9999px;
-  background: var(--bg-sunken);
+  background: var(--zoom-track);
   border: 1px solid var(--line);
 }
 .zoom-slider::-moz-range-track {
   height: 8px;
   border-radius: 9999px;
-  background: var(--bg-sunken);
+  background: var(--zoom-track);
   border: 1px solid var(--line);
 }
 .zoom-slider::-webkit-slider-thumb {
