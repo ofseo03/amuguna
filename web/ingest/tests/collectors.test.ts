@@ -364,6 +364,35 @@ test("JSON collectors retry a malformed successful response", async () => {
   assert.equal(calls, 2);
 });
 
+test("limited collection skips past deadlines and stops after 100 active programs", async () => {
+  const pages: number[] = [];
+  const item = (id: number, end = "20271231") => ({
+    pblancId: String(id),
+    pblancNm: `공고 ${id}`,
+    reqstBeginEndDe: `20260101 ~ ${end}`,
+  });
+  const collector = new BizinfoCollector({
+    settings: settingsFromEnv({ NODE_ENV: "test", BIZINFO_API_KEY: "test-key" }),
+    pageSize: 60,
+    retries: 0,
+    fetchImpl: async (input) => {
+      const page = Number(new URL(String(input)).searchParams.get("pageIndex"));
+      pages.push(page);
+      assert.notEqual(page, 3);
+      const start = (page - 1) * 60;
+      const programs = Array.from({ length: 60 }, (_, index) => item(start + index));
+      if (page === 1) programs[0] = item(0, "20260831");
+      return Response.json({ resultCode: "0000", jsonArray: programs });
+    },
+  });
+
+  const programs = await collector.fetch({ maxItems: 100, today: "2026-09-01" });
+
+  assert.equal(programs.length, 100);
+  assert.equal(programs.some((program) => program.external_id === "bizinfo:0"), false);
+  assert.deepEqual(pages, [1, 2]);
+});
+
 test("live collectors send each source its own API key", async () => {
   const settings = settingsFromEnv({
     NODE_ENV: "test",

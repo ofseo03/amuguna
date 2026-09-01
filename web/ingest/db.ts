@@ -161,6 +161,7 @@ export interface Database {
   knownExternalIds(sourceKey: string): Promise<Set<string>>;
   expirePrograms(externalIds: Iterable<string>): Promise<number>;
   expireProgramsPastDeadline(today: string): Promise<number>;
+  expireProgramsBeyondLimit(sourceKey: string, limit: number): Promise<number>;
   sourceBaseline(sourceKey: string): Promise<number | null>;
   recordSourceBaseline(sourceKey: string, fetchedCount: number): Promise<void>;
   commit(): Promise<void>;
@@ -450,6 +451,16 @@ export class InMemoryDatabase implements Database {
         .filter((row) => row.status === "active" && row.ends_at !== null && row.ends_at < today)
         .map((row) => row.external_id),
     );
+  }
+
+  async expireProgramsBeyondLimit(sourceKey: string, limit: number): Promise<number> {
+    const prefix = `${sourceKey}:`;
+    const excess = [...this.programs.values()]
+      .filter((row) => row.status === "active" && row.external_id.startsWith(prefix))
+      .sort((a, b) => b.fetched_at.getTime() - a.fetched_at.getTime() || b.id - a.id)
+      .slice(limit)
+      .map((row) => row.external_id);
+    return this.expirePrograms(excess);
   }
 
   async sourceBaseline(sourceKey: string): Promise<number | null> {
@@ -824,6 +835,27 @@ export class PostgresDatabase implements Database {
       UPDATE programs SET status = 'expired'
       WHERE status = 'active' AND ends_at < ${today}::date
       RETURNING id
+    `;
+    if (rows.length) {
+      await this.sql`
+        DELETE FROM program_embeddings
+        WHERE program_id = ANY(${this.sql.array(rows.map((row) => Number(row.id)))}::bigint[])
+      `;
+    }
+    return rows.length;
+  }
+
+  async expireProgramsBeyondLimit(sourceKey: string, limit: number): Promise<number> {
+    const rows = await this.sql<{ id: number | string }[]>`
+      WITH excess AS (
+        SELECT id FROM programs
+        WHERE status = 'active' AND starts_with(external_id, ${`${sourceKey}:`})
+        ORDER BY fetched_at DESC, id DESC
+        OFFSET ${limit}
+      )
+      UPDATE programs p SET status = 'expired'
+      FROM excess WHERE p.id = excess.id
+      RETURNING p.id
     `;
     if (rows.length) {
       await this.sql`

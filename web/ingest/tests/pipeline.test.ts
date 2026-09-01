@@ -35,7 +35,7 @@ function program(overrides: Partial<ConstructorParameters<typeof CollectedProgra
 }
 
 class FakeCollector extends Collector {
-  readonly sourceKey = "fake";
+  readonly sourceKey: string = "fake";
   readonly endpoint = "https://example.test";
   readonly idListEndpoint = this.endpoint;
 
@@ -67,6 +67,10 @@ class FakeCollector extends Collector {
   override async listExternalIds(): Promise<Set<string>> {
     return this.sourceIds;
   }
+}
+
+class BizinfoFakeCollector extends FakeCollector {
+  override readonly sourceKey = "bizinfo";
 }
 
 function pipeline(db: InMemoryDatabase, embedder = new Embedder(settings), today = "2025-01-01") {
@@ -204,6 +208,25 @@ test("past deadlines are expired or skipped before ingestion", async () => {
   assert.equal(await db.getProgramId("fake:old"), null);
   assert.notEqual(await db.getProgramId("fake:today"), null);
   assert.notEqual(await db.getProgramId("fake:open"), null);
+});
+
+test("MVP sources keep at most 100 active programs", async () => {
+  const db = new InMemoryDatabase();
+  await db.recordSourceBaseline("bizinfo", 1_000);
+  const programs = Array.from({ length: 101 }, (_, index) =>
+    program({
+      external_id: `bizinfo:${index}`,
+      source_key: "bizinfo",
+      title: `공고 ${index}`,
+    }),
+  );
+
+  const ingest = pipeline(db);
+  await ingest.runSource(new BizinfoFakeCollector(programs));
+
+  assert.equal((await db.activeExternalIds("bizinfo")).size, 100);
+  assert.equal(db.programs.get(1)?.status, "expired");
+  assert.deepEqual(checkVolumeDrop(ingest.report), []);
 });
 
 test("a parser version bump reparses identical stored content once", async () => {

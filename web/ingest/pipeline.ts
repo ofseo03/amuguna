@@ -18,6 +18,9 @@ export const FIELD_NAMES = [
   "median_income_percent_max",
 ] as const;
 
+const MVP_SOURCE_LIMIT = 100;
+const MVP_SOURCE_KEYS = new Set(["bizinfo", "gov24"]);
+
 export class SourceStats {
   fetched = 0;
   observed = 0;
@@ -210,15 +213,20 @@ export class Pipeline {
     collector: Collector,
     db: Database = this.db,
     stats?: SourceStats,
+    fetchedIds?: Set<string>,
   ): Promise<number> {
     let sourceIds: Set<string>;
-    try {
-      sourceIds = await collector.listExternalIds();
-    } catch (error) {
-      if (!(error instanceof CollectorError)) throw error;
-      console.error(`${collector.sourceKey} 전량 대조 실패: ${error.message}`);
-      stats?.errors.push(`reconcile: ${error.message}`);
-      return 0;
+    if (fetchedIds) {
+      sourceIds = fetchedIds;
+    } else {
+      try {
+        sourceIds = await collector.listExternalIds();
+      } catch (error) {
+        if (!(error instanceof CollectorError)) throw error;
+        console.error(`${collector.sourceKey} 전량 대조 실패: ${error.message}`);
+        stats?.errors.push(`reconcile: ${error.message}`);
+        return 0;
+      }
     }
     if (!sourceIds.size) {
       console.warn(`${collector.sourceKey} 전량 대조 결과가 비어 있어 만료 처리를 건너뜁니다`);
@@ -235,18 +243,25 @@ export class Pipeline {
     collector: Collector,
     { since, reconcile = false }: { since?: string; reconcile?: boolean } = {},
   ): Promise<SourceStats> {
+    const limited = MVP_SOURCE_KEYS.has(collector.sourceKey);
     let stats = this.report.sources.get(collector.sourceKey);
     if (!stats) {
       stats = new SourceStats(collector.sourceKey);
       stats.incrementalStrategy = collector.incrementalStrategy;
       stats.previousFetched = await this.db.sourceBaseline(collector.sourceKey);
+      if (limited && stats.previousFetched !== null) {
+        stats.previousFetched = Math.min(stats.previousFetched, MVP_SOURCE_LIMIT);
+      }
       this.report.sources.set(collector.sourceKey, stats);
     }
     let programs: CollectedProgram[];
+    const today = this.options.today ?? kstDate(new Date());
     try {
       programs = await collector.fetch({
         since,
         knownIds: await this.db.knownExternalIds(collector.sourceKey),
+        maxItems: limited ? MVP_SOURCE_LIMIT : undefined,
+        today,
       });
     } catch (error) {
       if (!(error instanceof CollectorError)) throw error;
@@ -256,13 +271,13 @@ export class Pipeline {
     }
 
     stats.fetched = programs.length;
-    stats.observed = collector.observedCount ?? programs.length;
+    stats.observed = limited ? programs.length : (collector.observedCount ?? programs.length);
+    const expected = stats.previousFetched ?? stats.observed;
     stats.volumeDrop =
       stats.previousFetched !== null &&
       stats.previousFetched > 0 &&
-      stats.observed <= stats.previousFetched * 0.5;
+      stats.observed <= expected * 0.5;
     const now = new Date();
-    const today = this.options.today ?? kstDate(now);
     const past = programs.filter((program) => program.ends_at !== null && program.ends_at < today);
     await this.db.transaction(async (sourceDb) => {
       stats!.expired += await sourceDb.expirePrograms(past.map((program) => program.external_id));
@@ -277,7 +292,18 @@ export class Pipeline {
         }
       }
       if (reconcile && !stats!.volumeDrop) {
-        stats!.expired += await this.reconcile(collector, sourceDb, stats);
+        stats!.expired += await this.reconcile(
+          collector,
+          sourceDb,
+          stats,
+          limited ? new Set(programs.map((program) => program.external_id)) : undefined,
+        );
+      }
+      if (limited) {
+        stats!.expired += await sourceDb.expireProgramsBeyondLimit(
+          collector.sourceKey,
+          MVP_SOURCE_LIMIT,
+        );
       }
     });
     stats.errors.push(...collector.errors);

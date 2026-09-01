@@ -36,6 +36,8 @@ export interface CollectorOptions {
 export interface FetchOptions {
   since?: string | null;
   maxPages?: number;
+  maxItems?: number;
+  today?: string;
   /**
    * 이미 적재된 external_id. 건당 상세 조회가 필요한 소스만 참고해, 일일 호출
    * 한도를 신규 건에 몰아준다. 상세 호출이 없는 소스는 그대로 무시한다.
@@ -201,17 +203,42 @@ export abstract class Collector {
     this.errors.length = 0;
     const { since = null } = options;
     const maxPages = options.maxPages ?? PAGINATION_SAFETY_LIMIT;
-    const payloads: unknown[] = [];
+    const collected: CollectedProgram[] = [];
+    const seen = new Set<string>();
+    this.observedCount = 0;
+    const collect = (payload: unknown): boolean => {
+      const pageItems = this.items(payload);
+      this.observedCount! += pageItems.length;
+      for (const item of pageItems) {
+        try {
+          const program = this.mapItem(item);
+          if (!program || seen.has(program.external_id)) continue;
+          seen.add(program.external_id);
+          if (
+            options.maxItems !== undefined &&
+            program.ends_at !== null &&
+            program.ends_at < (options.today ?? "")
+          ) {
+            continue;
+          }
+          collected.push(program);
+          if (options.maxItems !== undefined && collected.length >= options.maxItems) return true;
+        } catch (error) {
+          console.warn(`${this.sourceKey}: 항목 매핑 실패`, error);
+          this.errors.push(`항목 매핑 실패: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      return false;
+    };
     if (this.useFixtures) {
-      payloads.push(await this.loadJson(this.fixturePath));
+      collect(await this.loadJson(this.fixturePath));
     } else {
       let complete = false;
       for (let page = 1; page <= maxPages; page += 1) {
         const payload = await this.getJson(this.queryParams({ since, page }));
         const pageItems = this.items(payload);
         if (pageItems.length === 0) this.validateEmptyPage(payload);
-        payloads.push(payload);
-        if (pageItems.length < this.pageSize) {
+        if (collect(payload) || pageItems.length < this.pageSize) {
           complete = true;
           break;
         }
@@ -220,26 +247,6 @@ export abstract class Collector {
         throw new CollectorError(
           `${this.sourceKey}: ${PAGINATION_SAFETY_LIMIT}페이지 안전 한도에 도달해 전량 수집 여부를 확인할 수 없음`,
         );
-      }
-    }
-
-    const collected: CollectedProgram[] = [];
-    const seen = new Set<string>();
-    this.observedCount = payloads.reduce<number>(
-      (count, payload) => count + this.items(payload).length,
-      0,
-    );
-    for (const payload of payloads) {
-      for (const item of this.items(payload)) {
-        try {
-          const program = this.mapItem(item);
-          if (!program || seen.has(program.external_id)) continue;
-          seen.add(program.external_id);
-          collected.push(program);
-        } catch (error) {
-          console.warn(`${this.sourceKey}: 항목 매핑 실패`, error);
-          this.errors.push(`항목 매핑 실패: ${error instanceof Error ? error.message : String(error)}`);
-        }
       }
     }
     return collected;
