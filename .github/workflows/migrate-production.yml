@@ -1,0 +1,36 @@
+name: migrate-production
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: migrate-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  migrate:
+    name: Supabase 마이그레이션 적용
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 대상 프로젝트 확인
+        shell: bash
+        run: |
+          test -n "$DATABASE_URL"
+          [[ "$DATABASE_URL" == *"ylxkqgmwmhtdwosttnkk"* ]]
+          [[ "$DATABASE_URL" == *"aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"* ]]
+
+      - name: 마이그레이션 순차 적용
+        shell: bash
+        run: |
+          for f in db/migrations/*.sql; do
+            echo "== $f"
+            psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f" || break
+          done
