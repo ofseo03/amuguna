@@ -11,13 +11,15 @@ permissions:
   contents: read
 
 jobs:
-  inspect:
-    name: Supabase 스키마 상태 확인
+  migrate:
+    name: Supabase 남은 마이그레이션 적용
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: 대상 프로젝트 확인
         shell: bash
         run: |
@@ -25,29 +27,24 @@ jobs:
           [[ "$DATABASE_URL" == *"ylxkqgmwmhtdwosttnkk"* ]]
           [[ "$DATABASE_URL" == *"aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"* ]]
 
-      - name: 마이그레이션 표식 확인
+      - name: 0008부터 순차 적용
         shell: bash
         run: |
-          psql -v ON_ERROR_STOP=1 "$DATABASE_URL" <<'SQL'
-          SELECT '0001_raw_documents' AS marker, to_regclass('public.raw_documents') IS NOT NULL AS applied
-          UNION ALL SELECT '0002_match_programs', to_regprocedure('public.match_programs(integer,text,text[],text,integer,vector,integer)') IS NOT NULL
-          UNION ALL SELECT '0003_profiles', to_regclass('public.profiles') IS NOT NULL
-          UNION ALL SELECT '0004_provider_column', EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema='public' AND table_name='program_embeddings' AND column_name='provider')
-          UNION ALL SELECT '0006_income_axis', EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema='public' AND table_name='eligibility_rules' AND column_name='median_income_percent_max')
-          UNION ALL SELECT '0007_provider_constraint', EXISTS (
-            SELECT 1 FROM pg_constraint WHERE conname='program_embeddings_provider_check')
-          UNION ALL SELECT '0008_application_window', COALESCE((
-            SELECT pg_get_functiondef('public.match_programs(integer,text,text[],text,integer,vector,integer)'::regprocedure)
-                   LIKE '%p.starts_at%' ), false)
-          UNION ALL SELECT '0009_ingest_state', to_regclass('public.ingest_embedding_state') IS NOT NULL
-          UNION ALL SELECT '0010_match_counts', to_regprocedure('public.match_program_counts(integer,text,text[],text,integer,integer,vector,integer)') IS NOT NULL
-          UNION ALL SELECT '0010_match_page', to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer)') IS NOT NULL
-          UNION ALL SELECT '0012_profiles_removed', to_regclass('public.profiles') IS NULL
-          UNION ALL SELECT '0012_outbox_removed', to_regclass('public.notification_outbox') IS NULL
-          UNION ALL SELECT '0012_purge_removed', to_regprocedure('public.purge_stale_profiles(integer)') IS NULL
-          ORDER BY marker;
-          SQL
+          set -euo pipefail
+          for f in             db/migrations/0008_application_window.sql             db/migrations/0009_operational_integrity.sql             db/migrations/0010_cursor_matching.sql             db/migrations/0012_drop_profiles.sql
+          do
+            echo "== $f"
+            psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f"
+          done
+
+      - name: 적용 결과 검증
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT pg_get_functiondef('public.match_programs(integer,text,text[],text,integer,vector,integer)'::regprocedure) LIKE '%p.starts_at%'")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.ingest_embedding_state') IS NOT NULL")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_counts(integer,text,text[],text,integer,integer,vector,integer)') IS NOT NULL")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer)') IS NOT NULL")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.profiles') IS NULL")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.notification_outbox') IS NULL")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.purge_stale_profiles(integer)') IS NULL")" = "t"
