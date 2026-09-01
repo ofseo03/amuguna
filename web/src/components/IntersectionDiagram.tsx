@@ -49,9 +49,9 @@ export default function IntersectionDiagram({
 
         <span
           aria-hidden="true"
-          className="venn-right relative -ml-[min(3.5rem,13vw)] flex h-[min(10rem,38vw)] w-[min(10rem,38vw)] items-center justify-center rounded-full border border-accent-violet/30 pl-[min(3rem,11vw)] before:absolute before:inset-0 before:rounded-full before:bg-accent-violet/15 before:mix-blend-multiply before:content-[''] sm:-ml-[min(5rem,9vw)] sm:h-[min(14rem,26vw)] sm:w-[min(14rem,26vw)] sm:pl-[min(4rem,7vw)]"
+          className="venn-right relative -ml-[min(3.5rem,13vw)] flex h-[min(10rem,38vw)] w-[min(10rem,38vw)] items-center justify-center rounded-full border border-accent-plum/30 pl-[min(3rem,11vw)] before:absolute before:inset-0 before:rounded-full before:bg-accent-plum/15 before:mix-blend-multiply before:content-[''] sm:-ml-[min(5rem,9vw)] sm:h-[min(14rem,26vw)] sm:w-[min(14rem,26vw)] sm:pl-[min(4rem,7vw)]"
         >
-          <span className="relative text-center text-sm font-bold text-accent-violet sm:text-base">
+          <span className="relative text-center text-sm font-bold text-accent-plum sm:text-base">
             의도
             <span className="block text-sm font-normal text-ink-3">
               내가 찾는 것인가

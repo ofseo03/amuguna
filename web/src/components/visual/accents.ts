@@ -2,19 +2,22 @@
  * 화면 전반의 삽화·아이콘이 쓰는 색 조합.
  *
  * 여기 한 곳에서만 색을 정한다 — 배지·아이콘 타일·체크 표시가 같은 계열을 쓰게 하려고.
- * 값은 globals.css 의 토큰을 가리키고, 토큰은 모두 흰 배경 대비 4.5:1 이상이라
- * 작은 글자나 체크 표시에 그대로 써도 된다 (§8).
+ * 값은 globals.css 의 토큰을 가리키고, 토큰은 모두 가장 어두운 밝은 면 대비 4.5:1
+ * 이상이라 작은 글자나 체크 표시에 그대로 써도 된다 (§8).
+ *
+ * 다섯 색은 전부 따뜻한 계열의 한 사다리 위에 있다. 파랑·보라를 섞으면 무지개가 되고,
+ * 무지개는 브랜드가 없다는 뜻이다.
  *
  * 색만으로 뜻을 전달하지 않는다 — 이 색을 쓰는 자리에는 항상 라벨이나 아이콘이 함께 붙는다.
  */
 
-export type Accent = "blue" | "teal" | "green" | "violet" | "plum";
+export type Accent = "coral" | "teal" | "green" | "plum" | "brown";
 
 export const ACCENT: Record<
   Accent,
   { tile: string; icon: string; check: string; /** SVG stroke/fill 용 원시 색 */ raw: string }
 > = {
-  blue: {
+  coral: {
     tile: "bg-brand-soft",
     icon: "text-brand",
     check: "bg-brand-soft text-brand",
@@ -32,17 +35,17 @@ export const ACCENT: Record<
     check: "bg-ok-soft text-ok",
     raw: "var(--ok)",
   },
-  violet: {
-    tile: "bg-accent-violet-soft",
-    icon: "text-accent-violet",
-    check: "bg-accent-violet-soft text-accent-violet",
-    raw: "var(--accent-violet)",
-  },
   plum: {
     tile: "bg-accent-plum-soft",
     icon: "text-accent-plum",
     check: "bg-accent-plum-soft text-accent-plum",
     raw: "var(--accent-plum)",
+  },
+  brown: {
+    tile: "bg-accent-brown-soft",
+    icon: "text-accent-brown",
+    check: "bg-accent-brown-soft text-accent-brown",
+    raw: "var(--accent-brown)",
   },
 };
 
@@ -59,11 +62,11 @@ export const CATEGORIES: {
   accent: Accent;
   example: string;
 }[] = [
-  { label: "지원금", icon: "megaphone", accent: "blue", example: "청년 일자리 도약장려금" },
+  { label: "지원금", icon: "megaphone", accent: "coral", example: "청년 일자리 도약장려금" },
   { label: "대출", icon: "bank", accent: "teal", example: "버팀목 전세자금대출 한도" },
   { label: "세금", icon: "receipt", accent: "green", example: "연말정산 환급 대상 공제" },
-  { label: "금융상품", icon: "link", accent: "violet", example: "ISA 비과세 한도 비교" },
-  { label: "법령", icon: "gavel", accent: "plum", example: "청년 주거지원 개정 사항" },
+  { label: "금융상품", icon: "link", accent: "plum", example: "ISA 비과세 한도 비교" },
+  { label: "법령", icon: "gavel", accent: "brown", example: "청년 주거지원 개정 사항" },
 ];
 
 export type IconName =
