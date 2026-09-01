@@ -143,26 +143,30 @@
  *   Bold   → 600 · 700
  * 굵기를 범위로 적어야 브라우저가 없는 굵기를 가짜로 만들어 내지 않는다.
  *
- * 셋을 합치면 1.8MB 다. 디스플레이 서체를 본문까지 쓰는 대가이고, 회선이 느린 사용자에게는
+ * 셋을 합치면 1.5MB 다. 디스플레이 서체를 본문까지 쓰는 대가이고, 회선이 느린 사용자에게는
  * font-display: swap 덕에 시스템 고딕으로 먼저 읽힌다.
+ *
+ * 파일은 corp.gmarket.com 의 공식 TTF 를 woff2 로 형식만 바꾼 것이다. 눈누·CDN 의 변환본은
+ * name 테이블이 지워져 있어서 폰트 안에 저작권·라이선스가 남지 않는다 — SIL OFL 조건 2 가
+ * 재배포 시 요구하는 내용이다. 사람이 읽을 사본은 public/fonts/OFL.txt 에 함께 둔다.
  */
 @font-face {
   font-family: "Gmarket Sans";
-  src: url("/fonts/GmarketSansLight.woff") format("woff");
+  src: url("/fonts/GmarketSansLight.woff2") format("woff2");
   font-weight: 300;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Gmarket Sans";
-  src: url("/fonts/GmarketSansMedium.woff") format("woff");
+  src: url("/fonts/GmarketSansMedium.woff2") format("woff2");
   font-weight: 400 500;
   font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "Gmarket Sans";
-  src: url("/fonts/GmarketSansBold.woff") format("woff");
+  src: url("/fonts/GmarketSansBold.woff2") format("woff2");
   font-weight: 600 700;
   font-style: normal;
   font-display: swap;

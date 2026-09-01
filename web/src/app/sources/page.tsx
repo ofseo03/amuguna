@@ -271,7 +271,20 @@ export default async function SourcesPage() {
         </p>
       </section>
 
-      <p className="mt-10">
+      {/*
+        서체 출처. SIL OFL 조건 2 는 라이선스 전문을 함께 두면 충족되고 그건 이미
+        /fonts/OFL.txt 로 배포하지만, 배포처가 출처 표기도 권장하므로 한 줄 남긴다.
+      */}
+      <p className="mt-10 text-sm text-ink-3">
+        이 사이트는 이베이코리아에서 제공한 G마켓산스 폰트가 적용되어 있습니다. 라이선스
+        전문은{" "}
+        <a href="/fonts/OFL.txt" className="underline hover:text-brand">
+          OFL.txt
+        </a>
+        에 함께 배포합니다.
+      </p>
+
+      <p className="mt-6">
         <Link href="/privacy" className="inline-block py-1 underline hover:text-brand">
           ← 개인정보처리방침 보기
         </Link>
