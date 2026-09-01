@@ -25,6 +25,6 @@ export const COLLECTORS: Record<string, CollectorConstructor> = {
 };
 
 export const DEFAULT_SOURCE_KEYS = [
-  "bizinfo",
+  "finlife",
   "gov24",
 ] as const;

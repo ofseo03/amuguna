@@ -69,8 +69,8 @@ class FakeCollector extends Collector {
   }
 }
 
-class BizinfoFakeCollector extends FakeCollector {
-  override readonly sourceKey = "bizinfo";
+class FinlifeFakeCollector extends FakeCollector {
+  override readonly sourceKey = "finlife";
 }
 
 function pipeline(db: InMemoryDatabase, embedder = new Embedder(settings), today = "2025-01-01") {
@@ -212,19 +212,19 @@ test("past deadlines are expired or skipped before ingestion", async () => {
 
 test("MVP sources keep at most 100 active programs", async () => {
   const db = new InMemoryDatabase();
-  await db.recordSourceBaseline("bizinfo", 1_000);
+  await db.recordSourceBaseline("finlife", 1_000);
   const programs = Array.from({ length: 101 }, (_, index) =>
     program({
-      external_id: `bizinfo:${index}`,
-      source_key: "bizinfo",
+      external_id: `finlife:${index}`,
+      source_key: "finlife",
       title: `공고 ${index}`,
     }),
   );
 
   const ingest = pipeline(db);
-  await ingest.runSource(new BizinfoFakeCollector(programs));
+  await ingest.runSource(new FinlifeFakeCollector(programs));
 
-  assert.equal((await db.activeExternalIds("bizinfo")).size, 100);
+  assert.equal((await db.activeExternalIds("finlife")).size, 100);
   assert.equal(db.programs.get(1)?.status, "expired");
   assert.deepEqual(checkVolumeDrop(ingest.report), []);
 });

@@ -23,7 +23,7 @@ on:
         default: incremental
         options: [incremental, reconcile, fixtures-dry-run]
       source:
-        description: "특정 소스명. 비우면 gov24, bizinfo 실행"
+        description: "특정 소스명. 비우면 gov24, finlife 실행"
         type: string
         default: ""
 

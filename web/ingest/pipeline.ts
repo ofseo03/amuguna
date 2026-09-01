@@ -19,7 +19,7 @@ export const FIELD_NAMES = [
 ] as const;
 
 const MVP_SOURCE_LIMIT = 100;
-const MVP_SOURCE_KEYS = new Set(["bizinfo", "gov24"]);
+const MVP_SOURCE_KEYS = new Set(["finlife", "gov24"]);
 
 export class SourceStats {
   fetched = 0;
@@ -244,6 +244,7 @@ export class Pipeline {
     { since, reconcile = false }: { since?: string; reconcile?: boolean } = {},
   ): Promise<SourceStats> {
     const limited = MVP_SOURCE_KEYS.has(collector.sourceKey);
+    console.log(`[${collector.sourceKey}] 수집 시작${since ? ` (기준일 ${since})` : ""}`);
     let stats = this.report.sources.get(collector.sourceKey);
     if (!stats) {
       stats = new SourceStats(collector.sourceKey);
@@ -271,6 +272,9 @@ export class Pipeline {
     }
 
     stats.fetched = programs.length;
+    console.log(
+      `[${collector.sourceKey}] 수집 완료: ${programs.length}건 (API ${collector.httpCalls}회)`,
+    );
     stats.observed = limited ? programs.length : (collector.observedCount ?? programs.length);
     const expected = stats.previousFetched ?? stats.observed;
     stats.volumeDrop =
@@ -279,6 +283,9 @@ export class Pipeline {
       stats.observed <= expected * 0.5;
     const now = new Date();
     const past = programs.filter((program) => program.ends_at !== null && program.ends_at < today);
+    const activeCount = programs.length - past.length;
+    let processed = 0;
+    console.log(`[${collector.sourceKey}] DB 적재·임베딩 시작: ${activeCount}건`);
     await this.db.transaction(async (sourceDb) => {
       stats!.expired += await sourceDb.expirePrograms(past.map((program) => program.external_id));
       for (const program of programs) {
@@ -290,14 +297,20 @@ export class Pipeline {
           console.error(`${program.external_id} 처리 실패: ${message}`);
           stats!.errors.push(`${program.external_id}: ${message}`);
         }
+        processed++;
+        if (processed % 10 === 0 || processed === activeCount) {
+          console.log(`[${collector.sourceKey}] DB 적재·임베딩 진행: ${processed}/${activeCount}`);
+        }
       }
       if (reconcile && !stats!.volumeDrop) {
+        console.log(`[${collector.sourceKey}] 전량 대조 시작`);
         stats!.expired += await this.reconcile(
           collector,
           sourceDb,
           stats,
           limited ? new Set(programs.map((program) => program.external_id)) : undefined,
         );
+        console.log(`[${collector.sourceKey}] 전량 대조 완료`);
       }
       if (limited) {
         stats!.expired += await sourceDb.expireProgramsBeyondLimit(
@@ -310,6 +323,9 @@ export class Pipeline {
     if (!stats.errors.length && !stats.volumeDrop) {
       await this.db.recordSourceBaseline(collector.sourceKey, stats.observed);
     }
+    console.log(
+      `[${collector.sourceKey}] 완료: 생성 ${stats.created}, 갱신 ${stats.updated}, 유지 ${stats.unchanged}, 만료 ${stats.expired}`,
+    );
     return stats;
   }
 
@@ -321,26 +337,34 @@ export class Pipeline {
    * 상세 한도로 이미 적재된 건을 건너뛰는 중앙부처복지에서도 전량 대상이 보장된다.
    */
   private async embedPrograms(programIds: readonly number[], staged = false): Promise<void> {
-    for (const programId of programIds) {
+    for (const [index, programId] of programIds.entries()) {
       const input = await this.db.embeddingInput(programId);
-      if (!input) continue;
-      const [title, summary, body] = input;
-      const result = await this.options.embedder.embedProgram({ title, summary, body });
-      if (staged) {
-        await this.db.stageEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
-      } else {
-        await this.db.replaceEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
+      if (input) {
+        const [title, summary, body] = input;
+        const result = await this.options.embedder.embedProgram({ title, summary, body });
+        if (staged) {
+          await this.db.stageEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
+        } else {
+          await this.db.replaceEmbeddings(programId, result.vectors, this.options.embedder.vectorSpace);
+        }
+        this.report.embeddingsWritten++;
+        this.report.chunksWritten += result.vectors.length;
       }
-      this.report.embeddingsWritten++;
-      this.report.chunksWritten += result.vectors.length;
+      const completed = index + 1;
+      if (completed % 10 === 0 || completed === programIds.length) {
+        console.log(`[embedding] 진행: ${completed}/${programIds.length}`);
+      }
     }
   }
 
   private async reindexAll(): Promise<void> {
     await this.db.withEmbeddingReindexLock(async () => {
       await this.db.clearStagedEmbeddings(this.options.embedder.vectorSpace);
-      await this.embedPrograms(await this.db.programIds(), true);
+      const programIds = await this.db.programIds();
+      console.log(`[embedding] 전체 재색인 시작: ${programIds.length}건`);
+      await this.embedPrograms(programIds, true);
       await this.db.activateEmbeddingSpace(this.options.embedder.vectorSpace);
+      console.log("[embedding] 전체 재색인 완료");
     });
   }
 
@@ -348,6 +372,9 @@ export class Pipeline {
     collectors: readonly Collector[],
     options: { since?: string; reconcile?: boolean } = {},
   ): Promise<RunReport> {
+    console.log(
+      `[pipeline] 시작: ${collectors.map((collector) => collector.sourceKey).join(", ")} (${options.reconcile ? "전량 대조" : "증분 수집"})`,
+    );
     await this.db.expireProgramsPastDeadline(this.options.today ?? kstDate(new Date()));
     const activeVectorSpace = await this.db.activeEmbeddingSpace();
     if (activeVectorSpace !== this.options.embedder.vectorSpace) {
@@ -369,6 +396,7 @@ export class Pipeline {
     }
     for (const collector of collectors) await this.runSource(collector, options);
     await this.db.commit();
+    console.log("[pipeline] 완료");
     return this.report;
   }
 }

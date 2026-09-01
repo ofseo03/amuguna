@@ -301,6 +301,33 @@ test("Finlife covers all specified product endpoints and financial groups", asyn
   assert.match(programs[0].external_id, /^finlife:rent-020000-/);
 });
 
+test("Finlife stops API collection at the requested item limit", async () => {
+  let requests = 0;
+  const collector = new FinlifeCollector({
+    settings: settingsFromEnv({ NODE_ENV: "test", FINLIFE_API_KEY: "finlife-key" }),
+    retries: 0,
+    fetchImpl: async () => {
+      requests++;
+      return Response.json({
+        result: {
+          err_cd: "000",
+          max_page_no: 1,
+          baseList: Array.from({ length: 3 }, (_, index) => ({
+            fin_prdt_cd: `LIMIT-${index}`,
+            fin_co_no: "001",
+            fin_prdt_nm: `제한 상품 ${index}`,
+            kor_co_nm: "테스트은행",
+          })),
+          optionList: [],
+        },
+      });
+    },
+  });
+
+  assert.equal((await collector.fetch({ maxItems: 2 })).length, 2);
+  assert.equal(requests, 1);
+});
+
 test("Finlife trusts max_page_no over a short page", async () => {
   const targetPages: string[] = [];
   const collector = new FinlifeCollector({

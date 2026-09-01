@@ -124,6 +124,9 @@ export class FinlifeCollector extends Collector {
             if (!program || seen.has(program.external_id)) continue;
             seen.add(program.external_id);
             collected.push(program);
+            if (options.maxItems !== undefined && collected.length >= options.maxItems) {
+              return collected;
+            }
           }
 
           const hasLastPage = result.max_page_no !== undefined &&
