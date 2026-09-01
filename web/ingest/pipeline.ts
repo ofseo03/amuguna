@@ -1,3 +1,4 @@
+import { kstDate } from "../src/lib/eligibility";
 import type { Collector } from "./collectors/base";
 import { CollectorError } from "./collectors/base";
 import type { Database, ProgramValues, RuleValues } from "./db";
@@ -101,6 +102,7 @@ export class Pipeline {
     private readonly options: {
       embedder: Embedder;
       dryRun?: boolean;
+      today?: string;
     },
   ) {
     this.report = new RunReport(options.embedder.vectorSpace, options.dryRun ?? false);
@@ -260,8 +262,12 @@ export class Pipeline {
       stats.previousFetched > 0 &&
       stats.observed <= stats.previousFetched * 0.5;
     const now = new Date();
+    const today = this.options.today ?? kstDate(now);
+    const past = programs.filter((program) => program.ends_at !== null && program.ends_at < today);
     await this.db.transaction(async (sourceDb) => {
+      stats!.expired += await sourceDb.expirePrograms(past.map((program) => program.external_id));
       for (const program of programs) {
+        if (program.ends_at !== null && program.ends_at < today) continue;
         try {
           await sourceDb.transaction((recordDb) => this.process(recordDb, program, stats!, now));
         } catch (error) {
@@ -316,6 +322,7 @@ export class Pipeline {
     collectors: readonly Collector[],
     options: { since?: string; reconcile?: boolean } = {},
   ): Promise<RunReport> {
+    await this.db.expireProgramsPastDeadline(this.options.today ?? kstDate(new Date()));
     const activeVectorSpace = await this.db.activeEmbeddingSpace();
     if (activeVectorSpace !== this.options.embedder.vectorSpace) {
       if (activeVectorSpace !== null && !options.reconcile) {

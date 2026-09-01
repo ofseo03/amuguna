@@ -160,6 +160,7 @@ export interface Database {
    */
   knownExternalIds(sourceKey: string): Promise<Set<string>>;
   expirePrograms(externalIds: Iterable<string>): Promise<number>;
+  expireProgramsPastDeadline(today: string): Promise<number>;
   sourceBaseline(sourceKey: string): Promise<number | null>;
   recordSourceBaseline(sourceKey: string, fetchedCount: number): Promise<void>;
   commit(): Promise<void>;
@@ -441,6 +442,14 @@ export class InMemoryDatabase implements Database {
       count++;
     }
     return count;
+  }
+
+  async expireProgramsPastDeadline(today: string): Promise<number> {
+    return this.expirePrograms(
+      [...this.programs.values()]
+        .filter((row) => row.status === "active" && row.ends_at !== null && row.ends_at < today)
+        .map((row) => row.external_id),
+    );
   }
 
   async sourceBaseline(sourceKey: string): Promise<number | null> {
@@ -799,6 +808,21 @@ export class PostgresDatabase implements Database {
     const rows = await this.sql<{ id: number | string }[]>`
       UPDATE programs SET status = 'expired'
       WHERE external_id = ANY(${this.sql.array(ids)}::text[]) AND status <> 'expired'
+      RETURNING id
+    `;
+    if (rows.length) {
+      await this.sql`
+        DELETE FROM program_embeddings
+        WHERE program_id = ANY(${this.sql.array(rows.map((row) => Number(row.id)))}::bigint[])
+      `;
+    }
+    return rows.length;
+  }
+
+  async expireProgramsPastDeadline(today: string): Promise<number> {
+    const rows = await this.sql<{ id: number | string }[]>`
+      UPDATE programs SET status = 'expired'
+      WHERE status = 'active' AND ends_at < ${today}::date
       RETURNING id
     `;
     if (rows.length) {

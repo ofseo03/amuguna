@@ -69,8 +69,8 @@ class FakeCollector extends Collector {
   }
 }
 
-function pipeline(db: InMemoryDatabase, embedder = new Embedder(settings)) {
-  return new Pipeline(db, { embedder, dryRun: true });
+function pipeline(db: InMemoryDatabase, embedder = new Embedder(settings), today = "2025-01-01") {
+  return new Pipeline(db, { embedder, dryRun: true, today });
 }
 
 const LABEL_FIELDS = [
@@ -181,6 +181,29 @@ test("new, unchanged, update, and reconciliation preserve the state-machine cont
   await ingest.runSource(new FakeCollector([], new Set(["fake:other"])), { reconcile: true });
   assert.equal(db.programs.get(1)?.status, "expired");
   assert.equal(db.embeddings.has(1), false);
+});
+
+test("past deadlines are expired or skipped before ingestion", async () => {
+  const db = new InMemoryDatabase();
+  await pipeline(db, undefined, "2026-08-31").runSource(
+    new FakeCollector([program({ ends_at: "2026-08-31" })]),
+  );
+
+  const ingest = pipeline(db, undefined, "2026-09-01");
+  await ingest.runSource(
+    new FakeCollector([
+      program({ external_id: "fake:old", ends_at: "2026-08-31" }),
+      program({ external_id: "fake:today", ends_at: "2026-09-01" }),
+      program({ external_id: "fake:open", ends_at: null, is_always_open: true }),
+    ]),
+  );
+  await ingest.run([], { reconcile: true });
+
+  assert.equal(db.programs.get(1)?.status, "expired");
+  assert.equal(db.embeddings.has(1), false);
+  assert.equal(await db.getProgramId("fake:old"), null);
+  assert.notEqual(await db.getProgramId("fake:today"), null);
+  assert.notEqual(await db.getProgramId("fake:open"), null);
 });
 
 test("a parser version bump reparses identical stored content once", async () => {
