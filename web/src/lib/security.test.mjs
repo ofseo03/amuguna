@@ -35,7 +35,7 @@ test("external links only allow http and https", () => {
 
 test("database TLS defaults do not override explicit or local DSNs", () => {
   assert.equal(sslOption("postgres://localhost/app", {}), undefined);
-  assert.equal(sslOption("postgres://db.example/app?sslmode=disable", {}), undefined);
+  assert.equal(sslOption("postgres://db.example/app?sslmode=disable", {}), false);
   assert.equal(sslOption("host=/var/run/postgresql dbname=app", {}), undefined);
   assert.equal(sslOption("postgres://db.example/app", {}), "verify-full");
 });

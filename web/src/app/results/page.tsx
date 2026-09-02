@@ -31,6 +31,11 @@ export default function ResultsPage() {
   const [aiAnswerStatus, setAiAnswerStatus] = useState<AiAnswerStatus>("not_requested");
 
   const cache = useRef(new Map<string, Payload>());
+  /**
+   * 마지막으로 보낸 요청의 순번. 응답이 도착했을 때 이 값과 다르면 그 사이 다른 탭·페이지를
+   * 눌렀다는 뜻이므로 버린다 — 느린 응답이 늦게 와서 새 탭 위에 옛 카드를 그리지 않게 한다.
+   */
+  const reqSeq = useRef(0);
 
   type Outcome =
     | { kind: "ok"; payload: Payload }
@@ -92,8 +97,9 @@ export default function ResultsPage() {
     let cancelled = false;
     // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
     const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
+    const seq = ++reqSeq.current;
     void fetchMatch("all", null, q).then((o) => {
-      if (!cancelled) apply(o, q);
+      if (!cancelled && seq === reqSeq.current) apply(o, q);
     });
     return () => {
       cancelled = true;
@@ -104,7 +110,10 @@ export default function ResultsPage() {
     setTab(nextTab);
     setCursor(nextCursor);
     setLoading(true);
-    void fetchMatch(nextTab, nextCursor, query).then((o) => apply(o, query));
+    const seq = ++reqSeq.current;
+    void fetchMatch(nextTab, nextCursor, query).then((o) => {
+      if (seq === reqSeq.current) apply(o, query);
+    });
   }
 
   function changeTab(t: Tab) {

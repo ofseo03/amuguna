@@ -15,6 +15,12 @@ import { validateCursor, validateForm, validateQuery } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/**
+ * 함수 실행 상한(초). 요청 예산 = 질의 임베딩 15초 + SQL 수 회 + OpenRouter 12초 (SPEC §8 성능).
+ * 명시하지 않으면 플랫폼 기본값(10~15초)이 이 예산보다 먼저 끊어, 임베딩·LLM 의 degraded
+ * 경로가 실행될 기회 없이 504 가 난다. 예산 합계에 여유를 조금 더한 값이다.
+ */
+export const maxDuration = 40;
 
 export async function POST(req: Request) {
   // CSRF (§8): 검색은 임베딩·OpenRouter 비용을 만들 수 있으므로 크로스사이트 호출을 막는다
