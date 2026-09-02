@@ -10,7 +10,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { getProgram } from "@/lib/matching";
-import { checklist, DIMENSION_LABEL, dDay, evaluate } from "@/lib/eligibility";
+import { checklist, DIMENSION_LABEL, dDay, evaluate, needsEligibilityReview } from "@/lib/eligibility";
 import { readProfile } from "@/lib/session";
 import StatusMark from "@/components/visual/StatusMark";
 import { FORM_LABEL, isFinancialProduct } from "@/lib/forms";
@@ -55,6 +55,7 @@ export default async function ProgramDetailPage({ params }: Props) {
   const profile = await readProfile();
   const checks = profile ? checklist(program.rules, profile) : null;
   const ev = profile ? evaluate(program.rules, profile) : null;
+  const review = ev ? needsEligibilityReview(program.rules, ev.unknownDimensions) : false;
   const d = dDay(program);
   const extras = program.rules.extra_conditions ?? [];
   const sourceUrl = externalHttpUrl(program.source_url);
@@ -73,7 +74,7 @@ export default async function ProgramDetailPage({ params }: Props) {
         <span className="rounded bg-bg-sunken px-2 py-0.5 font-semibold text-ink-2">
           {FORM_LABEL[program.form]}
         </span>
-        <span className="text-ink-3">{issuerLevelLabel(program.issuer_level)}</span>
+        <span className="text-ink-3">{issuerLevelLabel(program.issuer_level, program.form)}</span>
         <span aria-hidden="true" className="text-ink-3">·</span>
         <span className="text-ink-3">{program.issuer}</span>
       </div>
@@ -87,22 +88,22 @@ export default async function ProgramDetailPage({ params }: Props) {
       {ev && (
         <div
           className={`mt-6 rounded-xl border-2 px-5 py-4 ${
-            ev.violations === 0
+            ev.violations === 0 && !review
               ? "border-ok bg-ok-soft"
               : "border-warn bg-warn-soft"
           }`}
         >
           <p className="flex items-center gap-2.5 text-lg font-bold">
-            {ev.violations === 0 && ev.unknownDimensions.length === 0 ? (
+            {ev.violations === 0 && !review ? (
               <>
                 <StatusMark status="pass" />
-                <span className="text-ok">입력하신 정보로는 대상에 해당합니다</span>
+                <span className="text-ok">입력하신 정보로는 대상 가능성이 높습니다</span>
               </>
             ) : ev.violations === 0 ? (
               <>
                 <StatusMark status="unknown" />
                 <span className="text-warn">
-                  입력하지 않은 조건을 추가로 확인해 주세요
+                  자동 확인하지 못한 조건을 추가로 확인해 주세요
                 </span>
               </>
             ) : (
@@ -153,15 +154,22 @@ export default async function ProgramDetailPage({ params }: Props) {
       {/* ---------------- 금액 / 기한 ---------------- */}
       <section aria-labelledby="facts" className="mt-8">
         <h2 id="facts" className="text-xl font-bold text-ink">
-          지원 금액과 기한
+          {program.form === "product"
+            ? "상품 조건과 판매 상태"
+            : program.form === "loan"
+              ? "대출 조건과 접수 상태"
+              : "지원 금액과 기한"}
         </h2>
         <dl className="mt-3 grid gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-2">
-          <Fact label="지원 금액" value={program.benefit_amount_text ?? "금액 정보 없음"} />
+          <Fact
+            label={program.form === "product" ? "가입 한도" : program.form === "loan" ? "대출 한도" : "지원 금액"}
+            value={program.benefit_amount_text ?? "금액 정보 없음"}
+          />
           <Fact
             label="접수 기한"
             value={
               program.is_always_open || !program.ends_at ? (
-                <Term name="상시">상시 접수</Term>
+                program.form === "product" ? "현재 공시 중" : <Term name="상시">상시 접수</Term>
               ) : (
                 <>
                   {formatDate(program.ends_at)}까지{" "}
@@ -195,7 +203,9 @@ export default async function ProgramDetailPage({ params }: Props) {
                 key={c.dimension}
                 className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-4 py-3 ${
                   !c.constrained
-                    ? "border-line-soft bg-bg-soft"
+                    ? program.rules.needs_review
+                      ? "border-warn bg-warn-soft"
+                      : "border-line-soft bg-bg-soft"
                     : c.unknown
                       ? "border-warn bg-warn-soft"
                     : c.pass
@@ -206,7 +216,7 @@ export default async function ProgramDetailPage({ params }: Props) {
                 <StatusMark
                   status={
                     !c.constrained
-                      ? "none"
+                      ? program.rules.needs_review ? "unknown" : "none"
                       : c.unknown
                         ? "unknown"
                         : c.pass
@@ -226,9 +236,11 @@ export default async function ProgramDetailPage({ params }: Props) {
             ))}
           </ul>
           <p className="mt-3 flex items-center gap-2 text-sm text-ink-3">
-            <StatusMark status="none" className="h-5 w-5" />
+            <StatusMark status={program.rules.needs_review ? "unknown" : "none"} className="h-5 w-5" />
             <span>
-              이 지원에 해당 조건이 없다는 뜻입니다. 조건이 없으면 통과로 봅니다.
+              {program.rules.needs_review
+                ? "구조화된 축에서 조건을 자동 확인하지 못했다는 뜻입니다. 공고 원문을 확인해 주세요."
+                : "공고가 자격 제한이 없다고 명시한 항목입니다."}
             </span>
           </p>
         </section>
@@ -240,7 +252,11 @@ export default async function ProgramDetailPage({ params }: Props) {
           추가 확인 필요 조건
         </h2>
         {extras.length === 0 ? (
-          <p className="mt-2 text-ink-2">추가로 확인해야 할 조건이 없습니다.</p>
+          <p className="mt-2 text-ink-2">
+            {program.rules.needs_review
+              ? "자동 추출하지 못한 조건이 있을 수 있으니 공고 원문을 확인해 주세요."
+              : "자동 확인 범위에서 추가 조건을 찾지 못했습니다."}
+          </p>
         ) : (
           <>
             <p className="mt-1 text-ink-2">
@@ -337,7 +353,11 @@ export default async function ProgramDetailPage({ params }: Props) {
               rel="noopener noreferrer nofollow"
               className="mt-4 inline-block rounded-lg bg-brand px-6 py-3 font-bold text-white no-underline hover:bg-brand-dark"
             >
-              신청 페이지로 이동 ↗
+              {program.form === "product"
+                ? "금융감독원 비교공시에서 확인 ↗"
+                : program.form === "loan"
+                  ? "대출 안내 확인 ↗"
+                  : "신청 페이지로 이동 ↗"}
             </a>
           )}
         </div>
@@ -346,7 +366,7 @@ export default async function ProgramDetailPage({ params }: Props) {
       {/* 금소법 대응 (§8) — 대출·금융상품에는 비교·정보 제공임을 한 번 더 밝힌다 */}
       {isFinancialProduct(program.form) && (
         <div className="mt-8">
-          <FinancialProductNotice />
+          <FinancialProductNotice form={program.form} />
         </div>
       )}
 

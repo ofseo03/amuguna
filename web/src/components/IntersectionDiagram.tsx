@@ -32,7 +32,7 @@ export default function IntersectionDiagram({
     >
       <div
         role="img"
-        aria-label="자격 조건과 찾는 의도를 두 개의 겹치는 원으로 나타낸 그림. 두 원이 겹치는 부분이 실제로 받을 수 있으면서 찾던 것이다."
+        aria-label="자격 조건과 찾는 의도를 두 개의 겹치는 원으로 나타낸 그림. 두 원이 겹치는 부분이 조건이 맞을 가능성이 높은 후보이다."
         className="relative mx-auto flex w-fit items-center justify-center"
       >
         <span
@@ -67,7 +67,7 @@ export default function IntersectionDiagram({
           <span className="flex h-6 w-6 items-center justify-center rounded-full bg-ok-soft text-ok">
             <CheckMark />
           </span>
-          <span className="text-sm font-bold text-ok">내 것</span>
+          <span className="text-center text-sm font-bold text-ok">확인할 후보</span>
         </span>
       </div>
     </div>

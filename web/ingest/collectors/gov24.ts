@@ -22,6 +22,13 @@ function issuerLevel(agency: string, type: string): "central" | "metro" | "local
   return /(특별시|광역시|특별자치시|특별자치도|도)$/u.test(agency) ? "metro" : "central";
 }
 
+function programForm(title: string, body: string): "subsidy" | "loan" | "tax" {
+  const text = `${title} ${body}`;
+  if (/세액|세금|취득세|자동차세|소득공제|세액공제/u.test(text)) return "tax";
+  if (/대출|융자|자금보증|보증부/u.test(text)) return "loan";
+  return "subsidy";
+}
+
 export class Gov24Collector extends Collector {
   readonly sourceKey = "gov24";
   readonly endpoint = "https://api.odcloud.kr/api/gov24/v3/serviceList";
@@ -77,7 +84,7 @@ export class Gov24Collector extends Collector {
       title,
       body_text: bodyText || title,
       eligibility_text: eligibility,
-      form: this.defaultForm,
+      form: programForm(title, bodyText),
       issuer: agency,
       issuer_level: issuerLevel(agency, firstOf(item, ["소관기관유형"])),
       benefit_amount_text: benefit,

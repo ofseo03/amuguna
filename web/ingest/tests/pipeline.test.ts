@@ -509,8 +509,9 @@ test("all 30 fixtures match the established coverage baseline and are idempotent
     occupations: 8,
     median_income_percent_max: 9,
   });
-  assert.equal(ingest.report.parse.withExtraConditions, 14);
-  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.684);
+  assert.equal(ingest.report.parse.withExtraConditions, 16);
+  assert([...db.rules.values()].some((rule) => rule.needsReview === true));
+  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.557);
 
   await ingest.run(collectors);
   assert.equal(ingest.report.totals.updated, 0);

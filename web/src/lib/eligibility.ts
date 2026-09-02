@@ -1,8 +1,8 @@
 /**
  * 자격 판정 (SPEC §7.3), 근접 탈락 문구 (§7.6), 매칭 근거 템플릿 (§7.5).
  *
- * 원칙: NULL = 조건 없음 = 통과. 자격 조건이 명시되지 않은 프로그램은 배제하지 않는다.
- * "누락이 오탐보다 비싸다" — 이 서비스가 푸는 문제가 "받을 수 있는데 몰라서 못 받는 것"이므로.
+ * 원칙: 구조화된 축의 NULL은 해당 축을 위반시키지 않되, 미입력·미추출 조건이 있으면
+ * 대상 확정이 아니라 확인 필요로 표시한다.
  *
  * 이 모듈은 데모 모드(번들 JSON)의 판정 엔진이자,
  * DB 모드에서 RPC 가 돌려준 결과를 화면 문구로 옮기는 공통 로직이다.
@@ -151,6 +151,18 @@ export function evaluate(r: EligibilityRules, p: Profile): EligibilityResult {
   };
 }
 
+/** 구조화하지 못한 원문 조건이나 사용자 미입력값이 있으면 대상 확정에 쓰지 않는다. */
+export function needsEligibilityReview(
+  r: EligibilityRules,
+  unknownDimensions: RuleDimension[],
+): boolean {
+  return Boolean(
+    r.needs_review ||
+      r.extra_conditions.length > 0 ||
+      unknownDimensions.length > 0,
+  );
+}
+
 export const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/u;
 const KST_OFFSET_MS = 9 * 60 * 60 * 1_000;
 
@@ -263,12 +275,21 @@ export function buildReason(
   r: EligibilityRules,
   p: Profile,
   unknown: RuleDimension[] = [],
+  needsReview = false,
 ): string {
-  const pending = unknown.length
+  const unstructured = r.extra_conditions
+    .slice(0, 2)
+    .map(({ label }) => label)
+    .join("·");
+  const pending = unstructured
+    ? `${unstructured}은 추가 확인이 필요합니다`
+    : unknown.length
     ? `${unknown.map((dimension) => DIMENSION_LABEL[dimension]).join("·")} 조건은 추가 확인이 필요합니다`
+    : needsReview
+    ? "공고 원문의 필수조건은 추가 확인이 필요합니다"
     : null;
   if (matched.length === 0) {
-    return pending ?? "별도 자격 제한이 없어 누구나 신청할 수 있습니다";
+    return pending ?? "구조화된 자격 제한이 없습니다";
   }
   const parts = matched.map((d) => dimensionBadge(d, r, p));
   return `${parts.join(" · ")} 조건에 해당합니다${pending ? ` · ${pending}` : ""}`;
@@ -279,10 +300,15 @@ export function buildBadges(
   r: EligibilityRules,
   p: Profile,
   unknown: RuleDimension[] = [],
+  needsReview = false,
 ): string[] {
   const badges = matched.map((d) => dimensionBadge(d, r, p));
   badges.push(...unknown.map((dimension) => `${DIMENSION_LABEL[dimension]} 추가 확인`));
-  return badges.length ? badges : ["자격 제한 없음"];
+  if (needsReview) {
+    badges.push(...r.extra_conditions.slice(0, 2).map(({ label }) => `${label} 확인`));
+    if (!r.extra_conditions.length && !unknown.length) badges.push("원문 조건 확인");
+  }
+  return badges.length ? badges : ["구조화된 제한 없음"];
 }
 
 /* ------------------------------------------------------------------ */
@@ -347,24 +373,25 @@ export function nearMissMessage(
 /* ------------------------------------------------------------------ */
 
 function requirementText(d: RuleDimension, r: EligibilityRules): string {
+  const unrestricted = r.needs_review ? "자동 확인 정보 없음" : "제한 없음";
   switch (d) {
     case "age":
       if (r.age_min !== null && r.age_max !== null)
         return `만 ${r.age_min}세 ~ 만 ${r.age_max}세`;
       if (r.age_min !== null) return `만 ${r.age_min}세 이상`;
       if (r.age_max !== null) return `만 ${r.age_max}세 이하`;
-      return "나이 조건 없음";
+      return unrestricted;
     case "gender":
       return r.gender === null
-        ? "성별 조건 없음"
+        ? unrestricted
         : r.gender === "F"
           ? "여성"
           : "남성";
     case "region":
-      if (!r.regions || r.regions.length === 0) return "전국";
+      if (!r.regions || r.regions.length === 0) return unrestricted;
       return r.regions.map(regionCodeName).join(", ");
     case "occupation":
-      if (!r.occupations || r.occupations.length === 0) return "직업 조건 없음";
+      if (!r.occupations || r.occupations.length === 0) return unrestricted;
       return r.occupations.map(occupationName).join(", ");
     case "income":
       return [
@@ -372,7 +399,7 @@ function requirementText(d: RuleDimension, r: EligibilityRules): string {
         r.median_income_percent_max === null
           ? null
           : `기준중위소득 ${r.median_income_percent_max}% 이하`,
-      ].filter(Boolean).join(" · ") || "소득 조건 없음";
+      ].filter(Boolean).join(" · ") || unrestricted;
   }
 }
 

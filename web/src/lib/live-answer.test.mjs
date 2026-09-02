@@ -33,12 +33,12 @@ test("최초 검색은 허용된 상위 5건만 OpenRouter에 한 번 보낸다"
   const fetchImpl = async (url, init) => {
     calls++;
     request = { url, init };
-    return Response.json({ choices: [{ message: { content: "[1] 공고를 먼저 확인해 보세요." } }] });
+    return Response.json({ choices: [{ finish_reason: "stop", message: { content: "지원 사업 1 공고를 먼저 확인해 보세요." } }] });
   };
 
   const result = await generateLiveAnswer(initialSearch, fetchImpl, "secret-key", "test/model");
 
-  assert.deepEqual(result, { text: "[1] 공고를 먼저 확인해 보세요.", status: "ok" });
+  assert.deepEqual(result, { text: "지원 사업 1 공고를 먼저 확인해 보세요.", status: "ok" });
   assert.equal(calls, 1);
   assert.equal(request.url, "https://openrouter.ai/api/v1/chat/completions");
   assert.equal(request.init.headers.Authorization, "Bearer secret-key");
@@ -46,9 +46,9 @@ test("최초 검색은 허용된 상위 5건만 OpenRouter에 한 번 보낸다"
   const payload = JSON.parse(request.init.body);
   assert.equal(payload.model, "test/model");
   assert.equal(payload.stream, false);
-  assert.equal(payload.max_completion_tokens, 400);
+  assert.equal(payload.max_completion_tokens, 300);
   const serialized = JSON.stringify(payload);
-  assert.match(serialized, /창업 자금이 필요해요/);
+  assert.doesNotMatch(serialized, /창업 자금이 필요해요/);
   assert.match(serialized, /지원 사업 5/);
   assert.doesNotMatch(serialized, /지원 사업 6/);
   assert.doesNotMatch(serialized, /PRIVATE_PROFILE|PRIVATE_REASON|PRIVATE_BODY|body_text/);
@@ -98,8 +98,8 @@ test("키 누락과 OpenRouter 장애는 unavailable 상태로 끝난다", async
   }
 });
 
-test("빈 값·한국어가 아닌 값·1200자 초과 답변은 노출하지 않는다", async () => {
-  for (const content of [" ", "English only", "가".repeat(1201)]) {
+test("빈 값·한국어가 아닌 값·600자 초과·잘린 답변은 노출하지 않는다", async () => {
+  for (const content of [" ", "English only", "가".repeat(601)]) {
     const result = await generateLiveAnswer(
       initialSearch,
       async () => Response.json({ choices: [{ message: { content } }] }),
@@ -108,7 +108,14 @@ test("빈 값·한국어가 아닌 값·1200자 초과 답변은 노출하지 �
     assert.deepEqual(result, { text: null, status: "unavailable" });
   }
 
-  const boundary = "가".repeat(1200);
+  const truncated = await generateLiveAnswer(
+    initialSearch,
+    async () => Response.json({ choices: [{ finish_reason: "length", message: { content: "지원 안내가" } }] }),
+    "key",
+  );
+  assert.deepEqual(truncated, { text: null, status: "unavailable" });
+
+  const boundary = "가".repeat(600);
   assert.deepEqual(
     await generateLiveAnswer(
       initialSearch,

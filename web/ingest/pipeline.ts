@@ -193,7 +193,10 @@ export class Pipeline {
       status: "active",
     };
     const programId = await db.upsertProgram(values);
-    await db.replaceRules(programId, rules.toRow() as RuleValues);
+    await db.replaceRules(programId, rules.toRow() as RuleValues, {
+      needsReview: rules.needs_review,
+      reviewReason: rules.review_reason,
+    });
 
     // 자동 추출이 불완전해도 임베딩은 만든다 — 벡터가 없으면 의도 축(집합 B)에서
     // 영원히 검색되지 않아 사실상 숨긴 것과 같아진다.

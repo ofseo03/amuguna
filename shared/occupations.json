@@ -1,5 +1,5 @@
 {
-  "_note": "직업 대분류 12종 (SPEC §5 입력 필드 3). code는 DB·파서·화면 공통. synonyms는 파서 사전 룩업용 (§6.1).",
+  "_note": "직업 대분류 13종 (SPEC §5 입력 필드 3). code는 DB·파서·화면 공통. synonyms는 파서 사전 룩업용 (§6.1).",
   "categories": [
     { "code": "employee_office", "name": "사무직·전문직", "synonyms": ["사무직", "회사원", "직장인", "근로자", "노동자", "전문직"] },
     { "code": "employee_field", "name": "현장·생산·서비스직", "synonyms": ["생산직", "현장직", "서비스직", "기능공", "근로자", "노동자"] },
@@ -12,6 +12,7 @@
     { "code": "public_servant", "name": "공무원·군인", "synonyms": ["공무원", "군인", "직업군인"] },
     { "code": "medical", "name": "보건·의료", "synonyms": ["의료인", "간호사", "의사", "보건"] },
     { "code": "education", "name": "교육", "synonyms": ["교사", "교원", "강사", "교직원"] },
-    { "code": "retired", "name": "은퇴·연금생활", "synonyms": ["은퇴자", "퇴직자", "연금수급자", "어르신", "노인"] }
+    { "code": "retired", "name": "은퇴·연금생활", "synonyms": ["은퇴자", "퇴직자", "연금수급자", "어르신", "노인"] },
+    { "code": "other", "name": "해당 없음·기타·모름", "synonyms": [] }
   ]
 }

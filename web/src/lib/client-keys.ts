@@ -6,3 +6,5 @@
  * sessionStorage 라 탭을 닫으면 사라지고, 다른 탭·다른 사이트에서 읽을 수 없다.
  */
 export const QUERY_STORAGE_KEY = "amuguna.query";
+export const RESULT_STORAGE_KEY = "amuguna.result.v2";
+export const AI_ANSWER_STORAGE_KEY = "amuguna.ai-answer.v2";

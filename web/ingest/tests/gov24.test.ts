@@ -61,6 +61,22 @@ test("Gov24 list envelope maps public Swagger fields with one request per page",
   assert.match(program.body_text, /월 최대 20만원을 지원합니다/);
   assert.equal(program.raw_body.서비스ID, "GOV24-001");
   assert.equal(program.raw_body.수정일시, "2026-01-01");
+  assert.equal(program.form, "subsidy");
+});
+
+test("Gov24 separates tax relief and policy loans from subsidies", async () => {
+  const collector = new Gov24Collector({
+    settings: settingsFromEnv({ NODE_ENV: "test", DATA_GO_KR_API_KEY: "gov24-key" }),
+    retries: 0,
+    fetchImpl: async () => Response.json({
+      data: [
+        { 서비스ID: "TAX-1", 서비스명: "다자녀 자동차 취득세 감면", 지원내용: "취득세를 감면합니다." },
+        { 서비스ID: "LOAN-1", 서비스명: "청년 월세자금보증", 지원내용: "보증부 대출을 지원합니다." },
+      ],
+    }),
+  });
+  const programs = await collector.fetch({ maxPages: 1 });
+  assert.deepEqual(programs.map(({ form }) => form), ["tax", "loan"]);
 });
 
 test("Gov24 rejects an empty malformed envelope", async () => {

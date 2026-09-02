@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { checklist, dDay, evaluate, isOpen, nearMissMessage } from "./eligibility.ts";
+import { checklist, dDay, evaluate, isOpen, nearMissMessage, needsEligibilityReview } from "./eligibility.ts";
 import { deserializeProfile, serializeProfile } from "./session.ts";
 import { medianIncomeAmount, medianIncomePercent } from "./shared-data.ts";
 import { validateProfile } from "./validation.ts";
@@ -77,6 +77,17 @@ test("an omitted gender passes without claiming that the condition matched", () 
   assert.deepEqual(result.matchedDimensions, []);
   assert.deepEqual(result.unknownDimensions, ["gender"]);
   assert.equal(checklist(genderRules, profile).find(({ dimension }) => dimension === "gender")?.unknown, true);
+  assert.equal(needsEligibilityReview(genderRules, result.unknownDimensions), true);
+});
+
+test("unstructured conditions prevent a confirmed eligibility label", () => {
+  const result = evaluate(rules, profile);
+  assert.equal(needsEligibilityReview({ ...rules, needs_review: true }, result.unknownDimensions), true);
+  assert.equal(
+    needsEligibilityReview({ ...rules, extra_conditions: [{ label: "가구", text: "다자녀" }] }, result.unknownDimensions),
+    true,
+  );
+  assert.equal(needsEligibilityReview({ ...rules, needs_review: false }, result.unknownDimensions), false);
 });
 
 test("a date-only deadline remains open through its KST calendar day", () => {

@@ -13,7 +13,7 @@
 | `median_income_2026.json` | 보건복지부 고시 제2025-135호 | 2026-01-01 시행 | 연 1회 (매년 7~8월 고시) | `web/src/lib/median-income.test.mjs` |
 | `regions.json` | 행정안전부 행정표준코드 법정동코드 전체자료 | 2026-07-08 스냅샷 | 통폐합·관할 이관 고시 시 | `web/src/lib/regions.test.mjs` |
 | `income_deciles.json` | 소득분위 1~10 라벨 (표시 전용) | — | 없음 | — |
-| `occupations.json` | 직업 대분류 12종 + 파서 동의어 사전 | — | 사전 보강 시 | `web/ingest/tests/parser.test.ts` |
+| `occupations.json` | 직업 대분류 13종 + 파서 동의어 사전 | — | 사전 보강 시 | `web/ingest/tests/parser.test.ts` |
 
 ## 검증이 무엇을 보는가
 

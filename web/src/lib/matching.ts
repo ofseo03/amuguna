@@ -15,6 +15,7 @@ import {
   dDay,
   evaluate,
   isOpen,
+  needsEligibilityReview,
   nearMissMessage,
   profileLabel,
   regionPrefixes,
@@ -36,15 +37,15 @@ import type {
   RuleDimension,
 } from "./types";
 
-export const PAGE_SIZE = 20;
-const TOPK_BASE = 200;
-const TOPK_EXPANDED = 500;
+export const PAGE_SIZE = 10;
+const TOPK_BASE = 30;
+const TOPK_EXPANDED = 100;
 
 /**
  * 데모 모드의 집합 B 소속 판정 하한.
  *
  * DB 모드에서는 HNSW top-k 절단이 B 를 정의한다. 그런데 데모 데이터셋은 22건뿐이라
- * top-k 200 이 전 건을 포함해 버려 교집합이 항상 A 와 같아진다 — 교차 검증이 시연되지 않는다.
+ * top-k 30 이 전 건을 포함해 버려 교집합이 항상 A 와 같아진다 — 교차 검증이 시연되지 않는다.
  * 그래서 데모에서만 유사도 하한으로 B 를 정의한다.
  *
  * 절대 하한만 쓰면 mock 임베딩(문자 bigram)의 조사·어미 겹침 때문에 무관한 건도 0.15 근처가
@@ -347,13 +348,15 @@ function toCard(
     hasQuery,
     now,
   );
+  const needsReview = needsEligibilityReview(c.program.rules, c.unknownDimensions);
   return {
     program: c.program,
+    eligibilityStatus: needsReview ? "needs_review" : "likely",
     score: c.sortScore ?? breakdown.total,
     breakdown,
     sim: c.sim,
-    reason: buildReason(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
-    badges: buildBadges(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
+    reason: buildReason(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions, needsReview),
+    badges: buildBadges(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions, needsReview),
     dDay: dDay(c.program, now),
   };
 }
@@ -364,6 +367,7 @@ function toNearMiss(
   hasQuery: boolean,
   now: Date,
 ): NearMissCard | null {
+  if (needsEligibilityReview(c.program.rules, c.unknownDimensions)) return null;
   const d = c.violatedDimensions[0];
   if (!d) return null;
   const breakdown = scoreProgram(
@@ -386,9 +390,9 @@ function toNearMiss(
 const RELAXATION_NOTICE: Record<RelaxationStage, string | null> = {
   none: null,
   topk_expanded:
-    "정확히 일치하는 결과가 적어 검색 범위를 넓혔습니다 (유사도 상위 200건 → 500건).",
+    "정확히 일치하는 결과가 적어 검색 범위를 넓혔습니다 (유사도 상위 30건 → 100건).",
   intent_dropped:
-    "찾으시는 것과 딱 맞는 건 없지만, 대상이 되는 지원을 보여드립니다.",
+    "찾으시는 것과 딱 맞는 건 없지만, 조건 일부가 일치하는 후보를 보여드립니다.",
   near_miss_only:
     "지금 조건으로 바로 받을 수 있는 지원을 찾지 못했습니다. 조건이 하나만 어긋난 지원을 보여드립니다.",
 };
@@ -536,7 +540,7 @@ export async function runMatch(
   // violations=1 행까지 top-k 로 INNER JOIN 하므로, 벡터를 NULL 로 넘겨 자격 분기를 타게 한다.
   // 유사도 항이 없으니 정렬도 hasQuery=false 공식 — 데모 백엔드와 같다.
   const nearRows = await dbPageRows(
-    profile, null, topk, false, false, "all", null, 1, 5,
+    profile, null, topk, false, false, "all", null, 1, 20,
   );
   const nearMisses = (await dbCandidatesForRows(profile, nearRows))
     .map((c) => toNearMiss(c, profile, false, now))

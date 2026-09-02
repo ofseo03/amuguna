@@ -4,7 +4,7 @@ import { normalizeText } from "./dictionaries";
 
 // 파서 의미가 바뀌면 올린다. content_hash 접두사가 달라져 기존 공고도 다음
 // 수집에서 한 번 일반 수정 경로를 타며 새 eligibility_rules 로 교체된다.
-export const PARSER_VERSION = 4;
+export const PARSER_VERSION = 5;
 export const PARSER_HASH_PREFIX = `parser-v${PARSER_VERSION}:`;
 
 export const HASHED_FIELDS = [

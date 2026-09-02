@@ -2,7 +2,7 @@
 
 /**
  * 결과 화면 (SPEC §9 화면 3).
- * 매칭 요약 배너 + form 탭 + 카드 리스트 + 근접탈락 + 완화 안내 + 페이지네이션(20건).
+ * 매칭 요약 배너 + form 탭 + 카드 리스트 + 근접탈락 + 완화 안내 + 페이지네이션(10건).
  *
  * 자유입력은 sessionStorage 에서만 읽어 /api/match 로 보낸다 — URL 이나 서버에 남기지 않는다 (§8).
  * (form, cursor) 조합별로 응답을 캐시해 탭 전환 때마다 rate limit 을 소모하지 않게 한다.
@@ -14,15 +14,47 @@ import { Disclaimer, FinancialProductNotice, SubNav } from "@/components/SiteChr
 import Term from "@/components/Term";
 import StepTrail from "@/components/StepTrail";
 import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
-import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
+import {
+  AI_ANSWER_STORAGE_KEY,
+  QUERY_STORAGE_KEY,
+  RESULT_STORAGE_KEY,
+} from "@/lib/client-keys";
 import type { AiAnswerStatus, MatchResponse, ProgramForm } from "@/lib/types";
 
 type Tab = ProgramForm | "all";
 type Payload = MatchResponse & { ok: true };
+type ResultState = {
+  tab: Tab;
+  cursor: string | null;
+  page: number;
+  trail: Array<string | null>;
+};
+
+function cacheKey(tab: Tab, cursor: string | null, query: string | null) {
+  return `${query ?? ""}|${tab}|${cursor ?? "first"}`;
+}
+
+function persistResultState(state: ResultState) {
+  const params = new URLSearchParams();
+  if (state.tab !== "all") params.set("form", state.tab);
+  if (state.cursor) params.set("cursor", state.cursor);
+  if (state.page > 1) params.set("page", String(state.page));
+  const search = params.toString();
+  const current = typeof window.history.state === "object" && window.history.state !== null
+    ? window.history.state
+    : {};
+  window.history.replaceState(
+    { ...current, amugunaResult: state },
+    "",
+    search ? `/results?${search}` : "/results",
+  );
+}
 
 export default function ResultsPage() {
   const [tab, setTab] = useState<Tab>("all");
   const [cursor, setCursor] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [trail, setTrail] = useState<Array<string | null>>([]);
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; noProfile?: boolean } | null>(null);
@@ -47,7 +79,7 @@ export default function ResultsPage() {
    */
   const fetchMatch = useCallback(
     (nextTab: Tab, nextCursor: string | null, q: string | null): Promise<Outcome> => {
-      const key = `${nextTab}|${nextCursor ?? "first"}`;
+      const key = cacheKey(nextTab, nextCursor, q);
       const hit = cache.current.get(key);
       if (hit) return Promise.resolve({ kind: "ok", payload: hit });
 
@@ -77,7 +109,7 @@ export default function ResultsPage() {
     [],
   );
 
-  const apply = useCallback((outcome: Outcome, q: string | null) => {
+  const apply = useCallback((outcome: Outcome, q: string | null, key: string) => {
     setQuery(q);
     if (outcome.kind === "ok") {
       setData(outcome.payload);
@@ -85,6 +117,24 @@ export default function ResultsPage() {
       if (outcome.payload.aiAnswerStatus !== "not_requested") {
         setAiAnswer(outcome.payload.aiAnswer);
         setAiAnswerStatus(outcome.payload.aiAnswerStatus);
+        try {
+          window.sessionStorage.setItem(AI_ANSWER_STORAGE_KEY, JSON.stringify({
+            query: q,
+            answer: outcome.payload.aiAnswer,
+            status: outcome.payload.aiAnswerStatus,
+          }));
+        } catch {
+          // 저장소가 차단돼도 응답 렌더링은 계속한다.
+        }
+      }
+      try {
+        window.sessionStorage.setItem(RESULT_STORAGE_KEY, JSON.stringify({
+          key,
+          query: q,
+          payload: outcome.payload,
+        }));
+      } catch {
+        // 용량 초과·저장소 차단 시 메모리 캐시만 사용한다.
       }
       setError(null);
     } else {
@@ -96,23 +146,103 @@ export default function ResultsPage() {
   useEffect(() => {
     let cancelled = false;
     // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
-    const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
+    let q: string | null = null;
+    try {
+      q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
+    } catch {
+      // 저장소가 차단된 환경에서는 자유입력 없는 검색으로 계속한다.
+    }
+    let initial: ResultState = { tab: "all", cursor: null, page: 1, trail: [] };
+    const saved = window.history.state?.amugunaResult;
+    if (
+      saved &&
+      (saved.tab === "all" || FORMS.includes(saved.tab)) &&
+      (saved.cursor === null || typeof saved.cursor === "string") &&
+      Number.isInteger(saved.page) &&
+      saved.page >= 1 &&
+      Array.isArray(saved.trail) &&
+      saved.trail.every((value: unknown) => value === null || typeof value === "string")
+    ) initial = saved;
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("form") || params.has("cursor") || params.has("page")) {
+      const urlForm = params.get("form");
+      const urlTab: Tab = urlForm && FORMS.includes(urlForm as ProgramForm)
+        ? urlForm as ProgramForm
+        : "all";
+      const urlCursor = params.get("cursor");
+      const rawPage = Number(params.get("page") ?? "1");
+      const urlPage = Number.isInteger(rawPage) && rawPage >= 1 && (rawPage === 1 || urlCursor)
+        ? rawPage
+        : 1;
+      const samePage = initial.tab === urlTab &&
+        initial.cursor === urlCursor &&
+        initial.page === urlPage;
+      initial = { tab: urlTab, cursor: urlCursor, page: urlPage, trail: samePage ? initial.trail : [] };
+    }
+    persistResultState(initial);
+
+    let savedAi: { query?: unknown; answer?: unknown; status?: unknown } | null = null;
+    try {
+      savedAi = JSON.parse(window.sessionStorage.getItem(AI_ANSWER_STORAGE_KEY) ?? "null");
+    } catch {
+      window.sessionStorage.removeItem(AI_ANSWER_STORAGE_KEY);
+    }
+
+    const key = cacheKey(initial.tab, initial.cursor, q);
     const seq = ++reqSeq.current;
-    void fetchMatch("all", null, q).then((o) => {
-      if (!cancelled && seq === reqSeq.current) apply(o, q);
+    let savedPayload: Payload | null = null;
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(RESULT_STORAGE_KEY) ?? "null");
+      if (saved?.key === key && saved?.query === q && saved?.payload?.ok === true) {
+        savedPayload = saved.payload as Payload;
+      }
+    } catch {
+      window.sessionStorage.removeItem(RESULT_STORAGE_KEY);
+    }
+    void Promise.resolve().then(() => {
+      if (cancelled || seq !== reqSeq.current) return;
+      setTab(initial.tab);
+      setCursor(initial.cursor);
+      setPage(initial.page);
+      setTrail(initial.trail);
+      if (
+        savedAi?.query === q &&
+        (savedAi.status === "ok" || savedAi.status === "unavailable")
+      ) {
+        setAiAnswer(typeof savedAi.answer === "string" ? savedAi.answer : null);
+        setAiAnswerStatus(savedAi.status);
+      }
+      if (savedPayload) {
+        cache.current.set(key, savedPayload);
+        apply({ kind: "ok", payload: savedPayload }, q, key);
+        return;
+      }
+      void fetchMatch(initial.tab, initial.cursor, q).then((outcome) => {
+        if (!cancelled && seq === reqSeq.current) apply(outcome, q, key);
+      });
     });
     return () => {
       cancelled = true;
     };
   }, [fetchMatch, apply]);
 
-  function navigate(nextTab: Tab, nextCursor: string | null) {
+  function navigate(
+    nextTab: Tab,
+    nextCursor: string | null,
+    nextPage = 1,
+    nextTrail: Array<string | null> = [],
+  ) {
     setTab(nextTab);
     setCursor(nextCursor);
+    setPage(nextPage);
+    setTrail(nextTrail);
+    const state = { tab: nextTab, cursor: nextCursor, page: nextPage, trail: nextTrail };
+    persistResultState(state);
     setLoading(true);
+    const key = cacheKey(nextTab, nextCursor, query);
     const seq = ++reqSeq.current;
     void fetchMatch(nextTab, nextCursor, query).then((o) => {
-      if (seq === reqSeq.current) apply(o, query);
+      if (seq === reqSeq.current) apply(o, query, key);
     });
   }
 
@@ -122,7 +252,13 @@ export default function ResultsPage() {
 
   function nextPage() {
     if (!data?.nextCursor) return;
-    navigate(tab, data.nextCursor);
+    navigate(tab, data.nextCursor, page + 1, [...trail, cursor]);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function previousPage() {
+    if (page <= 1) return;
+    navigate(tab, trail.at(-1) ?? null, page - 1, trail.slice(0, -1));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -160,7 +296,7 @@ export default function ResultsPage() {
           <h1 className="font-bold text-danger">{error.message}</h1>
           <button
             type="button"
-            onClick={() => navigate(tab, cursor)}
+            onClick={() => navigate(tab, cursor, page, trail)}
             className="mt-4 rounded-lg border-2 border-danger bg-bg px-5 py-2 font-semibold text-danger"
           >
             다시 시도
@@ -236,7 +372,7 @@ export default function ResultsPage() {
       {/* ---------------- 매칭 요약 배너 ---------------- */}
       <div className="rounded-xl border border-line bg-brand-soft px-5 py-4">
         <h1 className="text-xl font-bold text-ink sm:text-2xl">
-          {summary.profileLabel}{" "}
+          {summary.profileLabel} 조건을 확인할 후보{" "}
           <span className="text-brand-dark">{summary.total}건</span>
         </h1>
         {query && (
@@ -246,7 +382,7 @@ export default function ResultsPage() {
         )}
         {!query && (
           <p className="mt-1 text-ink-2">
-            찾으시는 것을 입력하지 않으셔서, 대상이 되는 지원을 모두 보여드립니다.
+            찾으시는 것을 입력하지 않으셔서, 조건 일부가 일치하는 후보를 보여드립니다.
           </p>
         )}
         <p className="mt-2 text-sm text-ink-3">
@@ -326,15 +462,22 @@ export default function ResultsPage() {
       {/* 금소법 대응 (§8) — 대출·금융상품 탭에서는 비교·정보 제공임을 명시한다 */}
       {tab !== "all" && isFinancialProduct(tab) && (
         <div className="mt-4">
-          <FinancialProductNotice />
+          <FinancialProductNotice form={tab} />
         </div>
       )}
 
       {/* ---------------- 카드 리스트 ---------------- */}
       <section aria-label="매칭 결과" className="mt-6">
+        {loading && (
+          <p aria-live="polite" className="mb-3 rounded-lg bg-bg-sunken px-4 py-2 text-sm text-ink-2">
+            결과를 바꾸는 중입니다…
+          </p>
+        )}
         {cards.length === 0 ? (
           <p className="rounded-xl border border-line bg-bg-soft p-8 text-center text-ink-2">
-            이 분류에는 해당하는 지원이 없습니다. 다른 탭을 확인해 보세요.
+            {query && tab === "all"
+              ? "입력하신 의도와 조건을 함께 확인할 결과가 없습니다. 검색어를 더 짧게 바꿔 보세요."
+              : "이 분류에는 확인할 결과가 없습니다. 다른 탭을 확인해 보세요."}
           </p>
         ) : (
           <ul className="grid gap-4">
@@ -346,14 +489,24 @@ export default function ResultsPage() {
       </section>
 
       {/* ---------------- 페이지네이션 ---------------- */}
-      {nextCursor && (
+      {(page > 1 || nextCursor) && (
         <nav aria-label="결과 페이지" className="mt-8 flex items-center justify-center gap-2">
           <button
             type="button"
-            onClick={nextPage}
-            className="rounded-lg border-2 border-line bg-bg px-4 py-2 font-semibold text-ink-2"
+            onClick={previousPage}
+            disabled={page <= 1 || loading}
+            className="rounded-lg border-2 border-line bg-bg px-4 py-2 font-semibold text-ink-2 disabled:text-ink-3"
           >
-            다음 →
+            ← 이전
+          </button>
+          <span className="px-2 text-sm font-semibold text-ink-2">{page}페이지</span>
+          <button
+            type="button"
+            onClick={nextPage}
+            disabled={!nextCursor || loading}
+            className="rounded-lg border-2 border-line bg-bg px-4 py-2 font-semibold text-ink-2 disabled:text-ink-3"
+          >
+            {loading ? "불러오는 중…" : "다음 →"}
           </button>
         </nav>
       )}
