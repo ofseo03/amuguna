@@ -110,7 +110,10 @@ export default function OnboardingPage() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => null);
-        setError(body?.errors?.[0]?.message ?? "입력 정보를 저장하지 못했습니다.");
+        // 필드 오류는 errors[], rate limit·CSRF 는 message 로 온다 — 둘 다 그대로 보여준다
+        setError(
+          body?.errors?.[0]?.message ?? body?.message ?? "입력 정보를 저장하지 못했습니다.",
+        );
         setSubmitting(false);
         return;
       }

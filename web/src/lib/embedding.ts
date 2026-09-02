@@ -130,9 +130,10 @@ export function clearQueryCache(): void {
  * `/api/match` 한 요청의 예산은 임베딩 1회 + SQL + (최초 검색만) OpenRouter 12초다 (SPEC §8 성능).
  * 여기가 60초였을 때는 provider 가 느려지면 서버리스 함수 한도가 먼저 끊어 504 가 났고,
  * 아래 catch 의 degraded 경로(집합 A 만으로 렌더)는 영원히 실행되지 않았다.
- * 정상 응답은 1초 안쪽이므로 5초면 넉넉하고, 넘기면 곧바로 자격 축만으로 내려간다.
+ * 정상 응답은 1초 안쪽이지만 provider 측 일시 지연을 흡수하도록 15초를 준다.
+ * 넘기면 곧바로 자격 축만으로 내려간다. `/api/match` 의 maxDuration 이 이 값을 전제한다.
  */
-const QUERY_EMBED_TIMEOUT_MS = 5_000;
+const QUERY_EMBED_TIMEOUT_MS = 15_000;
 
 export type EmbeddingProvider = "voyage" | "openai" | "mock";
 

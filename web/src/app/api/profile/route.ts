@@ -6,8 +6,9 @@
  * DB 는 공공 API 에서 수집한 지원사업 데이터만 보관한다.
  */
 import { NextResponse } from "next/server";
-import { readOrCreateSessionId, writeProfile } from "@/lib/session";
+import { readOrCreateSessionId, readSessionId, writeProfile } from "@/lib/session";
 import { CSRF_MESSAGE, checkCsrf } from "@/lib/csrf";
+import { checkSessionAndIpRateLimit, rateLimitMessage } from "@/lib/rate-limit";
 import { validateProfile } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -19,6 +20,19 @@ export async function POST(req: Request) {
   if (!csrf.ok) {
     console.warn(`[api/profile] CSRF 거부 (${csrf.reason})`);
     return NextResponse.json({ ok: false, code: "csrf", message: CSRF_MESSAGE }, { status: 403 });
+  }
+
+  // Rate limit (§8): 외부 호출은 없지만 세션 쿠키를 발급하는 유일한 쓰기 경로다.
+  // `/api/match` 와 같은 버킷을 쓴다 — 한 사람의 API 예산은 하나이고, 온보딩은 검색 전에
+  // 한 번 지나가는 경로라 개인 한도(10회/분)를 실질적으로 소모하지 않는다.
+  // 세션 쿠키가 아직 없는 첫 방문은 IP 단위 익명 한도로 센다.
+  const rl = checkSessionAndIpRateLimit(await readSessionId(), req);
+  if (!rl.allowed) {
+    console.warn(`[api/profile] rate limited (scope=${rl.scope}, limit=${rl.limit})`);
+    return NextResponse.json(
+      { ok: false, code: "rate_limited", message: rateLimitMessage(rl.retryAfter) },
+      { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+    );
   }
 
   let body: unknown;

@@ -5,6 +5,7 @@
  *
  * 서버 컴포넌트 — 세션 쿠키의 프로필을 직접 읽어 대조한다.
  */
+import { cache } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
@@ -30,9 +31,15 @@ interface Props {
   params: Promise<{ id: string }>;
 }
 
+/**
+ * 요청 단위로 결과를 공유한다. generateMetadata 와 본문이 같은 id 로 각각 부르는데,
+ * React `cache` 없이는 한 페이지 렌더에 DB 왕복이 두 번 나간다.
+ */
+const loadProgram = cache((id: number) => getProgram(id));
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  const program = await getProgram(Number(id)).catch(() => null);
+  const program = await loadProgram(Number(id)).catch(() => null);
   if (!program) return { title: "지원 정보를 찾을 수 없습니다" };
   return { title: program.title, description: program.summary };
 }
@@ -42,7 +49,7 @@ export default async function ProgramDetailPage({ params }: Props) {
   const numeric = Number(id);
   if (!Number.isInteger(numeric) || numeric <= 0) notFound();
 
-  const program = await getProgram(numeric);
+  const program = await loadProgram(numeric);
   if (!program) notFound();
 
   const profile = await readProfile();
