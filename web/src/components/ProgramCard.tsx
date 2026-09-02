@@ -3,7 +3,7 @@ import { dDayLabel, isUrgent, issuerLevelLabel } from "@/lib/format";
 import { FORM_LABEL } from "@/lib/forms";
 import type { MatchCard, NearMissCard } from "@/lib/types";
 
-/** 결과 카드 (SPEC §9 화면 3) — 제목 / 한 줄 요약 / 지원금액 / 마감 D-n / 매칭 근거 배지 */
+/** 결과 카드 (SPEC §9 화면 3) — 제목 / 마감 D-n / 매칭 근거 배지 (요약·지원금액은 상세 화면에서만) */
 export function ProgramCard({ card }: { card: MatchCard }) {
   const p = card.program;
   const urgent = isUrgent(card.dDay);
@@ -36,14 +36,6 @@ export function ProgramCard({ card }: { card: MatchCard }) {
           {p.title}
         </Link>
       </h3>
-
-      <p className="mt-1 text-ink-2">{p.summary}</p>
-
-      {p.benefit_amount_text && (
-        <p className="mt-3 text-lg font-bold text-brand-dark">
-          {p.benefit_amount_text}
-        </p>
-      )}
 
       {/* 매칭 근거 — 저장된 문구가 아니라 요청 시점에 템플릿으로 조립한다 */}
       <div className="mt-4 border-t border-line-soft pt-3">
