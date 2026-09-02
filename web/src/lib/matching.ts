@@ -128,7 +128,8 @@ function demoCandidates(
   const eligible = rows.filter(
     (r) => r.violations === 0 && (inB === null || inB.has(r.program.id)),
   );
-  // 근접 탈락은 의도 필터를 적용하지 않는다 — 자격 축 안내가 목적이므로 (§7.6)
+  // 근접 탈락은 의도 필터를 적용하지 않는다 — 자격 축 안내가 목적이므로 (§7.6).
+  // DB 백엔드도 같은 규칙을 지켜야 한다: runMatch 의 근접 탈락 조회는 벡터를 NULL 로 넘긴다.
   const nearMiss = rows.filter((r) => r.violations === 1);
   return { eligible, nearMiss };
 }
@@ -478,8 +479,10 @@ export async function runMatch(
     const allCards = result.eligible
       .map((c) => toCard(c, profile, hasQueryForScoring, now))
       .sort(compareCards);
+    // 근접 탈락은 자격 축 안내라 유사도 항 없이 정렬한다 — DB 백엔드와 같은 공식이어야
+    // 두 모드에서 같은 다섯 건이 나온다 (§7.6).
     const nearMisses = result.nearMiss
-      .map((c) => toNearMiss(c, profile, hasQueryForScoring, now))
+      .map((c) => toNearMiss(c, profile, false, now))
       .filter((x): x is NearMissCard => x !== null)
       .sort(compareCards)
       .slice(0, 5);
@@ -529,11 +532,14 @@ export async function runMatch(
   const cards = (await dbCandidatesForRows(profile, visibleRows)).map((c) =>
     toCard(c, profile, hasQueryForScoring, now),
   );
+  // 근접 탈락은 의도 필터를 적용하지 않는다 (§7.6). match_programs 의 벡터 분기는
+  // violations=1 행까지 top-k 로 INNER JOIN 하므로, 벡터를 NULL 로 넘겨 자격 분기를 타게 한다.
+  // 유사도 항이 없으니 정렬도 hasQuery=false 공식 — 데모 백엔드와 같다.
   const nearRows = await dbPageRows(
-    profile, qvec, topk, useIntent, hasQueryForScoring, "all", null, 1, 5,
+    profile, null, topk, false, false, "all", null, 1, 5,
   );
   const nearMisses = (await dbCandidatesForRows(profile, nearRows))
-    .map((c) => toNearMiss(c, profile, hasQueryForScoring, now))
+    .map((c) => toNearMiss(c, profile, false, now))
     .filter((x): x is NearMissCard => x !== null)
     .slice(0, 5);
   const last = cards.at(-1);

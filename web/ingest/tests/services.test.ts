@@ -37,24 +37,32 @@ test("batch database verifies TLS with PGSSLROOTCERT", () => {
   }
 });
 
-test("explicit sslmode in URL and keyword DSNs wins over PGSSLROOTCERT", async () => {
+// postgres.js 는 sslmode=require|allow|prefer 를 rejectUnauthorized:false 로 해석한다.
+// DSN 의 sslmode 를 그대로 넘기면 PGSSLROOTCERT 로 고정한 CA 가 통째로 무시되므로,
+// 검증 모드는 전부 CA 검증으로 승격하고 'disable' 만 명시적 해제로 존중한다.
+test("verifying sslmodes keep PGSSLROOTCERT pinned; only disable opts out", async () => {
   const directory = mkdtempSync(join(tmpdir(), "amuguna-ca-"));
   const certificate = join(directory, "ca.crt");
   const original = process.env.PGSSLROOTCERT;
   writeFileSync(certificate, "TEST_CA", "utf8");
   try {
     process.env.PGSSLROOTCERT = certificate;
-    for (const mode of ["disable", "allow", "prefer", "require", "verify-full"]) {
+    const pinned = { ca: "TEST_CA", rejectUnauthorized: true };
+    for (const mode of ["allow", "prefer", "require", "verify-ca", "verify-full"]) {
       const dsn = `postgresql://example.test/postgres?sslmode=${mode}`;
-      assert.equal(postgresOptions(dsn).ssl, undefined);
+      assert.deepEqual(postgresOptions(dsn).ssl, pinned, mode);
+      // 명시 옵션이 DSN 의 sslmode 보다 우선한다 — postgres.js 가 실제로 받는 값으로 확인한다
       const sql = postgres(dsn, postgresOptions(dsn));
-      assert.equal(sql.options.ssl, mode === "disable" ? false : mode);
+      assert.deepEqual(sql.options.ssl, pinned, mode);
       await sql.end();
     }
-    assert.equal(
-      postgresOptions("host=example.test dbname=postgres sslmode=disable").ssl,
-      undefined,
-    );
+    const disabledUrl = "postgresql://example.test/postgres?sslmode=disable";
+    assert.equal(postgresOptions(disabledUrl).ssl, false);
+    const sql = postgres(disabledUrl, postgresOptions(disabledUrl));
+    assert.equal(sql.options.ssl, false);
+    await sql.end();
+    // 키워드 형식 DSN 은 postgres.js 가 URL 로 파싱하지 못하므로 옵션 계산만 확인한다
+    assert.equal(postgresOptions("host=example.test dbname=postgres sslmode=disable").ssl, false);
   } finally {
     if (original === undefined) delete process.env.PGSSLROOTCERT;
     else process.env.PGSSLROOTCERT = original;
