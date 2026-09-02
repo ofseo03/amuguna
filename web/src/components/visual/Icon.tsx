@@ -95,9 +95,12 @@ const SIZE = {
 export default function Icon({
   name,
   size = "md",
+  className,
 }: {
   name: IconName;
   size?: keyof typeof SIZE;
+  /** 크기를 직접 박아야 하는 자리용 — 글자 크기 조절 슬라이더처럼 rem 을 쓰면 안 되는 곳 */
+  className?: string;
 }) {
   return (
     <svg
@@ -108,7 +111,7 @@ export default function Icon({
       strokeWidth="1.8"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={SIZE[size]}
+      className={className ?? SIZE[size]}
     >
       {PATHS[name]}
     </svg>
