@@ -36,7 +36,7 @@ import type {
   RuleDimension,
 } from "./types";
 
-export const PAGE_SIZE = 20;
+export const PAGE_SIZE = 15;
 const TOPK_BASE = 200;
 const TOPK_EXPANDED = 500;
 

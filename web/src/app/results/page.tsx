@@ -2,10 +2,14 @@
 
 /**
  * 결과 화면 (SPEC §9 화면 3).
- * 매칭 요약 배너 + form 탭 + 카드 리스트 + 근접탈락 + 완화 안내 + 페이지네이션(20건).
+ * 매칭 요약 배너 + form 탭 + 카드 리스트 + 근접탈락 + 완화 안내 + 숫자 페이지네이션(15건).
  *
  * 자유입력은 sessionStorage 에서만 읽어 /api/match 로 보낸다 — URL 이나 서버에 남기지 않는다 (§8).
  * (form, cursor) 조합별로 응답을 캐시해 탭 전환 때마다 rate limit 을 소모하지 않게 한다.
+ *
+ * 서버는 keyset 커서(score, id)만 알고 페이지 번호를 모른다. 그래서 탭별로 "n페이지의 커서" 를
+ * 클라이언트가 기억한다 — 1페이지는 null, k+1 페이지는 k페이지 응답의 nextCursor. 아직 커서를 모르는
+ * 먼 페이지를 누르면 아는 곳부터 차례로 걸어가며 채운다(응답은 캐시되므로 두 번째부터는 즉시 뜬다).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -22,7 +26,9 @@ type Payload = MatchResponse & { ok: true };
 
 export default function ResultsPage() {
   const [tab, setTab] = useState<Tab>("all");
-  const [cursor, setCursor] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  /** 현재 탭에서 확인된 마지막 페이지 — 아직 모르면 null (렌더에서 ref 를 읽지 않으려고 state 로 복사) */
+  const [lastPage, setLastPage] = useState<number | null>(null);
   const [data, setData] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<{ message: string; noProfile?: boolean } | null>(null);
@@ -31,6 +37,11 @@ export default function ResultsPage() {
   const [aiAnswerStatus, setAiAnswerStatus] = useState<AiAnswerStatus>("not_requested");
 
   const cache = useRef(new Map<string, Payload>());
+  /**
+   * 탭별 페이지 커서. index i 가 i+1 페이지를 여는 커서다 (0번은 항상 null = 첫 페이지).
+   * 마지막 페이지를 확인하면 lastPage 에 기록해 total 로 계산한 페이지 수보다 우선한다.
+   */
+  const pageCursors = useRef(new Map<Tab, { cursors: (string | null)[]; lastPage: number | null }>());
   /**
    * 마지막으로 보낸 요청의 순번. 응답이 도착했을 때 이 값과 다르면 그 사이 다른 탭·페이지를
    * 눌렀다는 뜻이므로 버린다 — 느린 응답이 늦게 와서 새 탭 위에 옛 카드를 그리지 않게 한다.
@@ -93,37 +104,82 @@ export default function ResultsPage() {
     setLoading(false);
   }, []);
 
+  const cursorsFor = useCallback((t: Tab) => {
+    let entry = pageCursors.current.get(t);
+    if (!entry) {
+      entry = { cursors: [null], lastPage: null };
+      pageCursors.current.set(t, entry);
+    }
+    return entry;
+  }, []);
+
+  /** n 페이지 응답을 받았을 때 n+1 페이지 커서(또는 마지막 페이지 여부)를 기록한다. */
+  const rememberPage = useCallback(
+    (t: Tab, n: number, payload: Payload) => {
+      const entry = cursorsFor(t);
+      if (payload.nextCursor) {
+        if (entry.cursors.length === n) entry.cursors.push(payload.nextCursor);
+      } else {
+        entry.lastPage = n;
+      }
+      setLastPage(entry.lastPage);
+    },
+    [cursorsFor],
+  );
+
   useEffect(() => {
     let cancelled = false;
     // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
     const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
     const seq = ++reqSeq.current;
     void fetchMatch("all", null, q).then((o) => {
-      if (!cancelled && seq === reqSeq.current) apply(o, q);
+      if (cancelled || seq !== reqSeq.current) return;
+      if (o.kind === "ok") rememberPage("all", 1, o.payload);
+      apply(o, q);
     });
     return () => {
       cancelled = true;
     };
-  }, [fetchMatch, apply]);
+  }, [fetchMatch, apply, rememberPage]);
 
-  function navigate(nextTab: Tab, nextCursor: string | null) {
-    setTab(nextTab);
-    setCursor(nextCursor);
+  /**
+   * t 탭의 n 페이지로 이동한다. 커서를 모르는 페이지면 아는 마지막 페이지부터 순서대로 걸어간다.
+   * 도중에 결과가 끝나면 거기서 멈춘다 — total 로 계산한 페이지 수가 실제보다 클 수 있다.
+   */
+  async function loadPage(t: Tab, n: number) {
+    setTab(t);
     setLoading(true);
     const seq = ++reqSeq.current;
-    void fetchMatch(nextTab, nextCursor, query).then((o) => {
-      if (seq === reqSeq.current) apply(o, query);
-    });
+    const entry = cursorsFor(t);
+    let current = Math.min(n, entry.cursors.length);
+    let outcome: Outcome = await fetchMatch(t, entry.cursors[current - 1], query);
+    while (outcome.kind === "ok") {
+      rememberPage(t, current, outcome.payload);
+      if (current >= n || !outcome.payload.nextCursor) break;
+      if (seq !== reqSeq.current) return;
+      current += 1;
+      outcome = await fetchMatch(t, entry.cursors[current - 1], query);
+    }
+    if (seq !== reqSeq.current) return;
+    setPage(current);
+    setLastPage(entry.lastPage);
+    apply(outcome, query);
   }
 
   function changeTab(t: Tab) {
-    navigate(t, null);
+    void loadPage(t, 1);
   }
 
-  function nextPage() {
-    if (!data?.nextCursor) return;
-    navigate(tab, data.nextCursor);
+  function goToPage(n: number) {
+    if (n === page) return;
+    void loadPage(tab, n);
     window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  /** 지금 탭에서 보여줄 페이지 수 — total 기준이되, 마지막 페이지를 확인했다면 그 값을 쓴다. */
+  function pageCount(total: number, pageSize: number) {
+    const byTotal = Math.max(1, Math.ceil(total / Math.max(pageSize, 1)));
+    return lastPage === null ? byTotal : Math.min(byTotal, Math.max(lastPage, page));
   }
 
   /* ----------------------------- 에러/로딩 ----------------------------- */
@@ -160,7 +216,7 @@ export default function ResultsPage() {
           <h1 className="font-bold text-danger">{error.message}</h1>
           <button
             type="button"
-            onClick={() => navigate(tab, cursor)}
+            onClick={() => void loadPage(tab, page)}
             className="mt-4 rounded-lg border-2 border-danger bg-bg px-5 py-2 font-semibold text-danger"
           >
             다시 시도
@@ -182,7 +238,8 @@ export default function ResultsPage() {
 
   if (!data) return null;
 
-  const { summary, cards, nearMisses, relaxationNotice, nextCursor, demoMode, degraded } = data;
+  const { summary, cards, nearMisses, relaxationNotice, pageSize, demoMode, degraded } = data;
+  const totalPages = pageCount(summary.total, pageSize);
 
   /*
     콜드 스타트 (SPEC §3.2).
@@ -345,17 +402,9 @@ export default function ResultsPage() {
         )}
       </section>
 
-      {/* ---------------- 페이지네이션 ---------------- */}
-      {nextCursor && (
-        <nav aria-label="결과 페이지" className="mt-8 flex items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={nextPage}
-            className="rounded-lg border-2 border-line bg-bg px-4 py-2 font-semibold text-ink-2"
-          >
-            다음 →
-          </button>
-        </nav>
+      {/* ---------------- 페이지네이션 (15건 단위, 숫자) ---------------- */}
+      {totalPages > 1 && (
+        <Pagination page={page} totalPages={totalPages} busy={loading} onSelect={goToPage} />
       )}
 
       {/* ---------------- 근접 탈락 (§7.6) ---------------- */}
@@ -451,5 +500,89 @@ function TabButton({
         <span className={active ? "text-white/80" : "text-ink-3"}>{count}</span>
       </button>
     </li>
+  );
+}
+
+/** 페이지 번호 창의 크기 — 현재 페이지를 가운데 두고 최대 5개를 보여준다. */
+const PAGE_WINDOW = 5;
+
+function Pagination({
+  page,
+  totalPages,
+  busy,
+  onSelect,
+}: {
+  page: number;
+  totalPages: number;
+  busy: boolean;
+  onSelect: (n: number) => void;
+}) {
+  const start = Math.max(1, Math.min(page - Math.floor(PAGE_WINDOW / 2), totalPages - PAGE_WINDOW + 1));
+  const end = Math.min(totalPages, start + PAGE_WINDOW - 1);
+  const numbers: number[] = [];
+  for (let n = start; n <= end; n += 1) numbers.push(n);
+
+  return (
+    <nav aria-label="결과 페이지" className="mt-8">
+      <ol className="flex flex-wrap items-center justify-center gap-2">
+        {start > 1 && (
+          <li>
+            <PageButton n={1} active={false} busy={busy} onSelect={onSelect} />
+          </li>
+        )}
+        {start > 2 && (
+          <li aria-hidden="true" className="px-1 text-ink-3">
+            …
+          </li>
+        )}
+        {numbers.map((n) => (
+          <li key={n}>
+            <PageButton n={n} active={n === page} busy={busy} onSelect={onSelect} />
+          </li>
+        ))}
+        {end < totalPages - 1 && (
+          <li aria-hidden="true" className="px-1 text-ink-3">
+            …
+          </li>
+        )}
+        {end < totalPages && (
+          <li>
+            <PageButton n={totalPages} active={false} busy={busy} onSelect={onSelect} />
+          </li>
+        )}
+      </ol>
+      <p className="mt-2 text-center text-sm text-ink-3">
+        {page} / {totalPages} 페이지
+      </p>
+    </nav>
+  );
+}
+
+function PageButton({
+  n,
+  active,
+  busy,
+  onSelect,
+}: {
+  n: number;
+  active: boolean;
+  busy: boolean;
+  onSelect: (n: number) => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(n)}
+      disabled={busy}
+      aria-current={active ? "page" : undefined}
+      aria-label={`${n}페이지`}
+      className={`min-w-[2.75rem] rounded-lg border-2 px-3 py-2 font-semibold transition-colors ${
+        active
+          ? "border-brand bg-brand text-white"
+          : "border-line bg-bg text-ink-2 hover:border-ink-3"
+      } disabled:cursor-not-allowed disabled:opacity-60`}
+    >
+      {n}
+    </button>
   );
 }
