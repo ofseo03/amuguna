@@ -285,4 +285,12 @@ test("card copy is deterministic and bounded", () => {
     ],
   });
   assert.ok(buildCardCopy({ body_text: "가".repeat(200) }).summary.length <= 40);
+  assert.match(
+    buildCardCopy({ form: "product", body_text: "정기예금 상품입니다." }).apply_steps[2],
+    /금융회사/,
+  );
+  assert.match(
+    buildCardCopy({ form: "loan", body_text: "전세대출 상품입니다." }).apply_steps[0],
+    /한도·금리/,
+  );
 });

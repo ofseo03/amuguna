@@ -54,7 +54,9 @@ const LEVEL_LABEL: Record<string, string> = {
   local: "기초자치단체",
 };
 
-export function issuerLevelLabel(level: string): string {
+export function issuerLevelLabel(level: string, form?: string): string {
+  if (form === "product") return "금융회사";
+  if (form === "loan") return "취급기관";
   return LEVEL_LABEL[level] ?? level;
 }
 

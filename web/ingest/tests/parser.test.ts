@@ -415,7 +415,7 @@ test("CollectedProgram hashes stable fields and builds the embedding source", ()
     eligibility_text: "만 19세 이상",
   });
   const volatile = new CollectedProgram({ ...base.toDict(), source_url: "https://example.test/2", raw_body: { views: 9 } });
-  assert.equal(PARSER_HASH_PREFIX, "parser-v4:");
+  assert.equal(PARSER_HASH_PREFIX, "parser-v5:");
   assert.equal(base.contentHash(), volatile.contentHash());
   assert.equal(
     base.contentHash(),
@@ -427,6 +427,25 @@ test("CollectedProgram hashes stable fields and builds the embedding source", ()
   assert.equal(embedded.embeddingSource(), "본문\n만 19세 이상");
   assert.equal(eligibilitySourceText(base), "만 19세 이상");
   assert.equal(parseProgram(base).age_min, 19);
+});
+
+test("특수 대상과 복합 자격은 확정하지 않고 확인 필요로 남긴다", () => {
+  const cases: Array<[string, string]> = [
+    ["북한이탈주민 중 서울특별시 거주자", "target_group"],
+    ["어업경력 3년 이하의 어업인후계자로 병역필 또는 면제자", "industry_qualification"],
+    ["초중고 재학생인 교육급여 수급자", "education"],
+    ["다자녀 가구로 재산 기준을 충족한 자", "household"],
+    ["범죄수익을 신고한 자에게 포상금 지급", "reward_qualification"],
+    ["임대차계약을 체결하고 보증금 3억원 이하인 자", "housing_contract"],
+  ];
+  for (const [text, kind] of cases) {
+    const rules = parseEligibility(text);
+    assert.equal(rules.needs_review, true, text);
+    assert(rules.extra_conditions.some((condition) => condition.kind === kind), text);
+  }
+  assert.equal(parseEligibility("만 19세 이상 34세 이하 청년").needs_review, false);
+  assert.equal(parseEligibility("").needs_review, true);
+  assert.equal(parseEligibility("가입대상 제한 없음").needs_review, false);
 });
 
 test("EligibilityRules toRow omits pipeline-only review signals", () => {

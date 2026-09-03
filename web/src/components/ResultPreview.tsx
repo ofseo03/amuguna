@@ -52,6 +52,9 @@ function MatchCard() {
         <span className="text-ink-3">중앙부처</span>
         <span aria-hidden="true" className="text-ink-3">·</span>
         <span className="text-ink-3">고용노동부</span>
+        <span className="rounded bg-warn-soft px-2 py-0.5 font-semibold text-warn">
+          확인 필요
+        </span>
         <span className="ml-auto rounded bg-bg-sunken px-2 py-0.5 font-bold text-ink-2">
           마감 D-24
         </span>
@@ -63,8 +66,8 @@ function MatchCard() {
 
       <div className="mt-4 border-t border-line-soft pt-3">
         <p className="mb-2 text-sm text-ink-2">
-          <span className="font-semibold text-ok">매칭 근거</span> · 만 28세 ·
-          서울 거주 · 3분위 조건에 해당합니다
+          <span className="font-semibold text-warn">확인할 내용</span> · 나이·지역·소득은
+          일치하지만 무주택 조건은 확인이 필요합니다
         </p>
         <ul className="flex flex-wrap gap-1.5">
           {["만 28세", "서울 거주", "소득 3분위"].map((b) => (

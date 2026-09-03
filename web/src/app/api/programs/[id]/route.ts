@@ -4,7 +4,7 @@
  */
 import { NextResponse } from "next/server";
 import { getProgram } from "@/lib/matching";
-import { checklist, dDay, evaluate } from "@/lib/eligibility";
+import { checklist, dDay, evaluate, needsEligibilityReview } from "@/lib/eligibility";
 import { readProfile } from "@/lib/session";
 import { isDbConfigured } from "@/lib/db";
 
@@ -43,13 +43,14 @@ export async function GET(
 
   const profile = await readProfile();
   const ev = profile ? evaluate(program.rules, profile) : null;
+  const review = ev ? needsEligibilityReview(program.rules, ev.unknownDimensions) : false;
 
   return NextResponse.json({
     ok: true,
     program,
     dDay: dDay(program),
     checklist: profile ? checklist(program.rules, profile) : null,
-    eligible: ev ? ev.violations === 0 : null,
+    eligible: ev ? (ev.violations > 0 ? false : review ? null : true) : null,
     violations: ev ? ev.violations : null,
     extraConditions: program.rules.extra_conditions,
     source: { url: program.source_url, fetchedAt: program.fetched_at },

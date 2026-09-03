@@ -44,8 +44,17 @@ test("상세 API 도 프로필 없이 200 을 돌려준다", async () => {
   // 프로필이 없으면 checklist 만 null 이고 program 은 그대로 나간다
   assert.match(route, /checklist: profile \? checklist\(.*\) : null/);
   assert.match(route, /const ev = profile \? evaluate\(.*\) : null;/);
+  assert.match(route, /eligible: ev \? \(ev\.violations > 0 \? false : review \? null : true\) : null/);
+  assert.doesNotMatch(route, /eligibilityStatus/);
   // 프로필 없음을 401 로 막으면 공유된 URL 이 제3자에게 열리지 않는다
   assert.doesNotMatch(route, /no_profile/);
+});
+
+test("결과 탐색 상태는 브라우저 히스토리에 한 번만 보관한다", async () => {
+  const results = await read("../app/results/page.tsx");
+  assert.match(results, /history\.replaceState/);
+  assert.match(results, /amugunaResult/);
+  assert.doesNotMatch(results, /RESULT_STATE_STORAGE_KEY/);
 });
 
 /* ------------------------------------------------- 금소법 대응 문구 */
@@ -71,18 +80,19 @@ test("금융상품 분류에는 전용 고지가 붙는다", async () => {
 
   const detail = await read("../app/programs/[id]/page.tsx");
   assert.match(detail, /isFinancialProduct\(program\.form\) && \(/);
-  assert.match(detail, /<FinancialProductNotice \/>/);
+  assert.match(detail, /<FinancialProductNotice form=\{program\.form\} \/>/);
 
   const results = await read("../app/results/page.tsx");
   assert.match(results, /isFinancialProduct\(tab\)/);
-  assert.match(results, /<FinancialProductNotice \/>/);
+  assert.match(results, /<FinancialProductNotice form=\{tab\} \/>/);
 });
 
 test("전용 고지가 출처와 변동 가능성을 밝힌다", async () => {
   const chrome = await read("../components/SiteChrome.tsx");
   const notice = chrome.slice(chrome.indexOf("export function FinancialProductNotice"));
   assert.match(notice, /금융감독원/, "공시 출처가 없다");
-  assert.match(notice, /금융회사와 개인 신용도에 따라 달라/, "조건 변동 가능성 안내가 없다");
+  assert.match(notice, /개인 신용도에 따라/, "대출 조건 변동 가능성 안내가 없다");
+  assert.match(notice, /가입 기간·조건에 따라/, "예금 조건 변동 가능성 안내가 없다");
   assert.match(notice, /권유하는 것이 아닙니다/);
 });
 

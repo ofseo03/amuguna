@@ -118,12 +118,12 @@ const GENDER: Pattern[] = [
 const EXTRA_CONDITIONS: Array<[string, string]> = [
   ["industrial_accident", "산업재해|산재(?:노동자|근로자|장해인)"],
   ["housing", "무주택(?:자|세대주|세대구성원)?|주택\\s*미소유"],
-  ["residency_period", "\\d+\\s*(?:개월|년)\\s*이상\\s*(?:계속\\s*)?(?:거주|주민등록)"],
+  ["residency_period", "\\d+\\s*(?:개월|년)\\s*이상\\s*(?:계속\\s*)?(?:거주|주민등록)|실제\\s*거주|주민등록(?:을)?\\s*(?:두|둔)"],
   ["duplicate_support", "중복\\s*(?:수혜|지원)\\s*(?:불가|제한)|유사\\s*지원을?\\s*받지\\s*않은"],
   ["credit", "신용\\s*등급|신용\\s*점수|연체\\s*중|채무\\s*불이행"],
   [
     "business_history",
-    "사업자\\s*등록|사업\\s*개시\\s*후\\s*\\d+\\s*년|업력\\s*\\d+\\s*년|창업\\s*\\d+\\s*년\\s*(?:이내|인내)",
+    "사업자\\s*등록|사업\\s*개시\\s*후\\s*\\d+\\s*년|업력\\s*\\d+\\s*년|창업\\s*\\d+\\s*년\\s*(?:이내|인내)|(?:어업|수산업|농업)?\\s*경영\\s*\\d+\\s*년",
   ],
   [
     "employment_period",
@@ -134,13 +134,17 @@ const EXTRA_CONDITIONS: Array<[string, string]> = [
     "(?:연(?:간)?|월)\\s*소득\\s*[\\d,]+\\s*(?:원|만원|억원)\\s*(?:이하|미만)",
   ],
   ["insurance", "4대\\s*보험|고용보험\\s*가입|건강보험료\\s*본인부담"],
-  ["assets", "재산\\s*과세표준|자산\\s*\\d+\\s*(?:만원|억)|총자산"],
+  ["assets", "재산\\s*과세표준|재산\\s*(?:요건|기준|합계)|자산\\s*\\d+\\s*(?:만원|억)|총자산"],
   ["income_exception", "중위소득\\s*\\d{1,3}\\s*%\\s*(?:초과|이상)"],
   ["public_assistance", PUBLIC_ASSISTANCE_SOURCE],
-  ["household", "세대주|세대원\\s*전원|1인\\s*가구"],
-  ["education", "재학\\s*중|졸업\\s*후\\s*\\d+\\s*년"],
+  ["household", "세대주|세대원\\s*전원|1인\\s*가구|다자녀|부양자녀|미성년\\s*자녀|자녀\\s*\\d+\\s*명|부부합산|가구원"],
+  ["education", "재학\\s*중|졸업\\s*후\\s*\\d+\\s*년|초등학생|중학생|고등학생|초·?중·?고(?:등학교)?\\s*(?:학생|재학생)?|교육급여\\s*수급"],
   ["military", "병역\\s*(?:필|의무\\s*이행)|군\\s*복무"],
   ["prior_training", "교육\\s*(?:이수|수료)\\s*(?:자|필수)"],
+  ["target_group", "북한이탈주민|국가유공자|독립유공자|보훈대상자|한부모(?:가족|가구)?|다문화(?:가족|가구)?"],
+  ["industry_qualification", "(?:수산업|어업|농업|임업)\\s*경영인|어업인후계자|창업어가"],
+  ["reward_qualification", "신고한\\s*자|공로가\\s*있는\\s*자|제보(?:자|한\\s*사람)|유가족"],
+  ["housing_contract", "임대차계약|보증금[^\\n.]{0,30}(?:이하|미만)|월세금?[^\\n.]{0,30}(?:이하|미만)"],
 ];
 
 const EXTRA_CONDITION_LABELS: Record<string, string> = {
@@ -160,7 +164,14 @@ const EXTRA_CONDITION_LABELS: Record<string, string> = {
   education: "학적 조건",
   military: "병역 조건",
   prior_training: "사전 교육 조건",
+  target_group: "특정 대상·신분 조건",
+  industry_qualification: "업종·경영인 자격 조건",
+  reward_qualification: "포상 대상 조건",
+  housing_contract: "임대차·보증금 조건",
 };
+
+const EXPLICIT_UNRESTRICTED =
+  /^(?:(?:자격|가입대상)\s*(?:제한)?\s*(?:없음|없습니다)|누구나\s*(?:신청|가입)\s*(?:가능|할\s*수\s*있습니다?))[.!]?$/u;
 
 function matches(source: string, text: string): RegExpExecArray[] {
   return [...text.matchAll(new RegExp(source, "g"))];
@@ -432,11 +443,17 @@ function extractExtraConditions(text: string): ExtraCondition[] {
     for (const match of matches(source, text)) {
       const clause = clauseOf(text, match.index, match.index + match[0].length);
       const key = `${kind}\u0000${clause}`;
+      const nonRequirement = nonRequirementReason(
+        text,
+        match.index,
+        match.index + match[0].length,
+      );
       if (
         !clause ||
         seen.has(key) ||
         (kind !== "income_exception" &&
-          nonRequirementReason(text, match.index, match.index + match[0].length))
+          nonRequirement &&
+          !(nonRequirement === "면제" && /병역|군\s*복무/u.test(clause)))
       ) {
         continue;
       }
@@ -613,6 +630,17 @@ export function parseEligibility(rawText: string): EligibilityRules {
     parse_evidence: evidence,
     parse_method: "regex",
   });
+  // 구조화에 성공한 단순 조건은 자동 확인 결과로 사용할 수 있다. 다만 복합·보호
+  // 조건이 남았거나 자격 원문에서 아무 조건도 추출하지 못한 경우에는 확정하지 않는다.
+  const explicitUnrestricted = EXPLICIT_UNRESTRICTED.test(text);
+  const hasStructuredRule = rules.filledFields().length > 0;
+  const hasUnstructuredRule = rules.extra_conditions.length > 0 || protectedFields.size > 0;
+  rules.needs_review = hasUnstructuredRule || (!explicitUnrestricted && !hasStructuredRule);
+  rules.review_reason = rules.needs_review
+    ? hasUnstructuredRule
+      ? "unstructured_eligibility_conditions"
+      : "eligibility_source_requires_confirmation"
+    : null;
   rules.confidence = computeConfidence(rules);
   return rules;
 }

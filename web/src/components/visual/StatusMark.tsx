@@ -1,5 +1,5 @@
 /**
- * 자격 판정 표시 (SPEC §7.4 — 충족 / 미충족 / 추가 확인 / 조건 없음).
+ * 자격 판정 표시 (SPEC §7.4 — 충족 / 미충족 / 추가 확인 / 구조화 정보 없음).
  *
  * 이모지(✅ ❌ ⚠️ ➖)를 쓰지 않는다:
  *  - 스크린리더가 "흰색 확인 표시 버튼" 처럼 엉뚱하게 읽는다. 이 서비스에서 체크리스트는
@@ -17,7 +17,7 @@ const STYLE: Record<Status, { box: string; label: string }> = {
   pass: { box: "bg-ok-soft text-ok", label: "충족" },
   fail: { box: "bg-danger-soft text-danger", label: "미충족" },
   unknown: { box: "bg-warn-soft text-warn", label: "추가 확인 필요" },
-  none: { box: "bg-bg-sunken text-ink-3", label: "조건 없음" },
+  none: { box: "bg-bg-sunken text-ink-3", label: "구조화 정보 없음" },
 };
 
 const GLYPH: Record<Status, React.ReactNode> = {

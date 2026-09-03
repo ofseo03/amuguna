@@ -14,7 +14,9 @@ Postgres (Supabase) + `pgvector`. SPEC.md §5(데이터 모델) / §7.3(교차 �
 | `migrations/0008_application_window.sql` | 접수 시작 전 공고를 매칭·상세에서 제외하도록 RPC 갱신 |
 | `migrations/0009_operational_integrity.sql` | 원자적 임베딩 전환·수집 baseline·재검토 상태 |
 | `migrations/0010_cursor_matching.sql` | 서버 점수 정렬·커서 페이지 RPC |
-| `migrations/0012_drop_profiles.sql` | `profiles` 제거 — 프로필은 서명 쿠키에만 두고 서버에 저장하지 않는다 |
+| `migrations/0012_drop_profiles.sql` | `profiles` 제거 — 프로필은 암호화 쿠키에만 두고 서버에 저장하지 않는다 |
+| `migrations/0013_parser_v5_review_guard.sql` | v5 이전 자격 파싱 결과를 재수집 전까지 `확인 필요`로 전환 |
+| `migrations/0014_unknown_occupation.sql` | 직업 `other` 입력을 탈락이 아닌 미입력·확인 필요로 처리하도록 매칭 RPC 갱신 |
 
 ---
 
@@ -73,7 +75,7 @@ match_programs(
   p_age            int,           -- 만 나이
   p_gender         text,          -- 'M' | 'F' | NULL('선택 안 함')
   p_region_codes   text[],        -- {시도2, 시군구5} — region_prefixes() 로 만든다
-  p_occupation     text,          -- shared/occupations.json 의 code
+  p_occupation     text,          -- shared/occupations.json 의 code (`other` = 미입력·확인 필요)
   p_income_decile  int,           -- 1..10, 모르면 NULL
   p_median_income_percent int,    -- 기준중위소득 대비 %, 모르면 NULL
   p_qvec           vector(1024),          -- NULL = 의도 입력 건너뜀
@@ -228,10 +230,10 @@ p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
 
 ## 6. 웹 팀 통합 노트
 
-- `POST /api/profile` → **DB 를 쓰지 않는다.** 프로필은 서명한 httpOnly 쿠키에만 담는다. 서버에 저장하는 개인정보가 없다는 것이 §8 의 강제 장치다.
+- `GET/POST /api/profile` → **DB 를 쓰지 않는다.** 프로필은 암호화한 httpOnly 쿠키에만 담고, GET은 조건 수정 화면 복원에만 쓴다. 서버에 저장하는 개인정보가 없다는 것이 §8 의 강제 장치다.
 - `POST /api/match` → 쿠키에서 프로필을 읽어 `match_programs(age, gender, region_prefixes(region_code), occupation, income_decile, median_income_percent, qvec, 200)`.
   **자유입력 원문도 어디에도 저장하지 않는다**(§8). 임베딩 API에 보내고, 질의가 있는 최초 전체 검색에서만
-  OpenRouter에 질의와 상위 5건의 공개 메타데이터를 보내 답변 하나를 만든다. 프로필·쿠키·원문 본문은 보내지 않으며 답변도 저장하지 않는다.
+  OpenRouter에는 질의 원문 없이 상위 5건의 공개 메타데이터만 보내 답변 하나를 만든다. 프로필·쿠키·원문 본문은 보내지 않으며 답변은 탭 메모리에만 캐시한다.
 - `GET /api/programs/:id` → 상세. 자격 체크리스트(✅/❌)는 `eligibility_rules` 한 행을 읽어 프로필과 대조해 템플릿으로 조립한다. `extra_conditions` 는 "추가 확인 필요 조건"으로 그대로 노출하고 판정에 쓰지 않는다(§6.3).
 - 임베딩 API 실패 시 `p_qvec` 을 `NULL` 로 넘기면 자격 축만으로 degraded 동작한다(§8 신뢰성). 별도 코드 경로가 필요 없다.
 - `sim` 은 `p_qvec IS NULL` 일 때 `NULL` 이다. §7.4 에서 유사도 가중치 0.30 을 빼고 나머지를 정규화할 것.
@@ -240,7 +242,7 @@ p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
 
 ## 7. 개인정보 보존기간 (SPEC §8)
 
-**DB 에 보존할 개인정보가 없다.** `0012` 가 `profiles` 와 `purge_stale_profiles()` 를 제거했다. 프로필은 서명한 브라우저 쿠키에만 있고 90일 뒤 만료된다. 따라서 삭제 배치가 필요 없다.
+**DB 에 보존할 개인정보가 없다.** `0012` 가 `profiles` 와 `purge_stale_profiles()` 를 제거했다. 프로필은 암호화한 브라우저 쿠키에만 있고 90일 뒤 만료된다. 따라서 삭제 배치가 필요 없다.
 
 `0003` 과 `0006` 은 이력 보존을 위해 남겨 두었다. 새 환경도 번호 순서대로 적용하면 `0012` 에서 정리되므로 결과는 같다.
 

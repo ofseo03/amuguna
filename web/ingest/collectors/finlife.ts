@@ -27,6 +27,11 @@ export const FINLIFE_PRODUCTS = PRODUCTS.map(([, endpoint]) => endpoint);
 const API_ROOT = "https://finlife.fss.or.kr/finlifeapi";
 const SOURCE_URL = "https://finlife.fss.or.kr/finlife/main/contents.do?menuNo=700029";
 const NO_ELIGIBILITY_INFO = "[자격요건 정보 없음]";
+const JOIN_DENY: Record<string, string> = {
+  "1": "가입 제한 없음",
+  "2": "서민 전용",
+  "3": "일부 가입 제한",
+};
 
 function formatRate(value: unknown): string {
   return typeof value === "number" && Number.isInteger(value) ? value.toFixed(1) : String(value ?? "");
@@ -96,7 +101,12 @@ export class FinlifeCollector extends Collector {
     const seen = new Set<string>();
     const auth = this.requireApiKey("FINLIFE_API_KEY", this.settings.finlife_api_key);
 
-    for (const [kind, endpointName, label, form] of PRODUCTS) {
+    productLoop: for (const [productIndex, [kind, endpointName, label, form]] of PRODUCTS.entries()) {
+      if (options.maxItems !== undefined && collected.length >= options.maxItems) return collected;
+      const productLimit = options.maxItems === undefined
+        ? Number.POSITIVE_INFINITY
+        : Math.ceil((options.maxItems - collected.length) / (PRODUCTS.length - productIndex));
+      let productCount = 0;
       for (const group of FINLIFE_GROUPS) {
         let complete = false;
         for (let page = 1; page <= maxPages; page++) {
@@ -124,9 +134,8 @@ export class FinlifeCollector extends Collector {
             if (!program || seen.has(program.external_id)) continue;
             seen.add(program.external_id);
             collected.push(program);
-            if (options.maxItems !== undefined && collected.length >= options.maxItems) {
-              return collected;
-            }
+            productCount++;
+            if (productCount >= productLimit) continue productLoop;
           }
 
           const hasLastPage = result.max_page_no !== undefined &&
@@ -171,7 +180,7 @@ export class FinlifeCollector extends Collector {
       special && `[우대조건]\n${special}`,
       note && `[유의사항]\n${note}`,
       joinMember && `[가입대상]\n${joinMember}`,
-      deny && `[가입제한]\n${deny}`,
+      deny && `[가입제한]\n${JOIN_DENY[deny] ?? "금융회사 확인 필요"}`,
       firstOf(item, ["loan_inci_expn"]) && `[부대비용] ${firstOf(item, ["loan_inci_expn"])}`,
       firstOf(item, ["erly_rpay_fee"]) && `[중도상환수수료] ${firstOf(item, ["erly_rpay_fee"])}`,
       firstOf(item, ["dly_rate"]) && `[연체이율] ${firstOf(item, ["dly_rate"])}`,
@@ -198,7 +207,9 @@ export class FinlifeCollector extends Collector {
       form: firstOf(item, ["_productForm"], this.defaultForm) === "loan" ? "loan" : "product",
       issuer: company,
       issuer_level: "central",
-      benefit_amount_text: limitText ? `최고한도 ${limitText}${/^\d+$/.test(limitText) ? "원" : ""}` : "",
+      benefit_amount_text: limitText
+        ? `최고한도 ${/^\d+$/.test(limitText) ? `${Number(limitText).toLocaleString("ko-KR")}원` : limitText}`
+        : "",
       benefit_amount_min: amountMin,
       benefit_amount_max: amountMax,
       apply_url: "https://finlife.fss.or.kr/",

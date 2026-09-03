@@ -33,7 +33,7 @@ export default function LandingPage() {
             <span className="text-brand">1분이면 찾습니다.</span>
           </h1>
           <p className="t-lead mt-5 text-ink-2">
-            나이·지역·소득만 고르면, 실제로 대상이 되는 금융정보를 보여드립니다.
+            나이·성별·직업·지역·소득을 입력하면, 조건이 맞을 가능성이 있는 정보를 보여드립니다.
           </p>
           <div className="mt-8 flex flex-wrap justify-center gap-4">
             <ActionLink href="/onboarding">1분 만에 확인하기</ActionLink>

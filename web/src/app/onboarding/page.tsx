@@ -8,7 +8,7 @@
  * 결과 화면이 새로고침돼도 같은 결과를 다시 그릴 수 있도록 브라우저 탭 메모리
  * (sessionStorage)에만 잠시 두며, 탭을 닫으면 사라진다.
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -22,11 +22,14 @@ import {
   sigunguOf,
 } from "@/lib/shared-data";
 import { MAX_QUERY_LEN } from "@/lib/validation";
-import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
-import Term from "@/components/Term";
+import {
+  AI_ANSWER_STORAGE_KEY,
+  QUERY_STORAGE_KEY,
+  RESULT_STORAGE_KEY,
+} from "@/lib/client-keys";
 import StepTrail, { STEP_LABELS } from "@/components/StepTrail";
 import PrivacyAssurance from "@/components/PrivacyAssurance";
-import type { Gender } from "@/lib/types";
+import type { Gender, Profile } from "@/lib/types";
 
 /** 단계 수는 StepTrail 의 라벨 목록에서 파생한다 — 두 곳이 어긋나지 않게 */
 const TOTAL_STEPS = STEP_LABELS.length;
@@ -46,6 +49,8 @@ const EXAMPLES = [
   "가게 확장하려는데 자금이 필요해요",
   "목돈 모으고 싶어요",
   "병원비가 부담돼요",
+  "아이 교육비 지원을 찾고 있어요",
+  "취업 준비 지원이 필요해요",
 ];
 
 export default function OnboardingPage() {
@@ -53,6 +58,7 @@ export default function OnboardingPage() {
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hydrating, setHydrating] = useState(true);
 
   const [age, setAge] = useState("");
   const [gender, setGender] = useState<Gender | "unset">("unset");
@@ -63,6 +69,7 @@ export default function OnboardingPage() {
   const [incomeDecileChosen, setIncomeDecileChosen] = useState(false);
   const [householdSize, setHouseholdSize] = useState("");
   const [monthlyIncome, setMonthlyIncome] = useState("");
+  const [restoredMedianPercent, setRestoredMedianPercent] = useState<number | null>(null);
   const [query, setQuery] = useState("");
 
   const queryRef = useRef<HTMLTextAreaElement>(null);
@@ -82,14 +89,40 @@ export default function OnboardingPage() {
   const calculatedMedianPercent = householdValid && monthlyIncomeValid
     ? medianIncomePercent(householdNum, monthlyIncomeWon)
     : null;
+  const medianIncomePercentValue = calculatedMedianPercent ??
+    (calculatorEmpty ? restoredMedianPercent : null);
 
   const canAdvance =
     (step === 1 && ageValid) ||
     (step === 2 && gender !== "unset") ||
     (step === 3 && occupation !== "") ||
     (step === 4 && sidoCode !== "" && sigunguCode !== "") ||
-    (step === 5 && incomeDecileChosen && calculatorValid) ||
+    (step === 5 && (incomeDecileChosen || medianIncomePercentValue !== null) && calculatorValid) ||
     step === 6;
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/profile")
+      .then(async (response) => response.ok ? (await response.json()).profile as Profile : null)
+      .then((profile) => {
+        if (cancelled || !profile) return;
+        setAge(String(profile.age));
+        setGender(profile.gender);
+        setOccupation(profile.occupation);
+        setSidoCode(profile.sidoCode);
+        setSigunguCode(profile.sigunguCode);
+        setIncomeDecile(profile.incomeDecile);
+        setIncomeDecileChosen(true);
+        setRestoredMedianPercent(profile.medianIncomePercent);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setHydrating(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function submit(withQuery: string) {
     setSubmitting(true);
@@ -105,7 +138,7 @@ export default function OnboardingPage() {
           sidoCode,
           sigunguCode,
           incomeDecile,
-          medianIncomePercent: calculatedMedianPercent,
+          medianIncomePercent: medianIncomePercentValue,
         }),
       });
       if (!res.ok) {
@@ -123,6 +156,8 @@ export default function OnboardingPage() {
       } else {
         window.sessionStorage.removeItem(QUERY_STORAGE_KEY);
       }
+      window.sessionStorage.removeItem(RESULT_STORAGE_KEY);
+      window.sessionStorage.removeItem(AI_ANSWER_STORAGE_KEY);
       router.push("/results");
     } catch {
       setError("네트워크 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
@@ -132,6 +167,14 @@ export default function OnboardingPage() {
 
   function next() {
     if (step < TOTAL_STEPS) setStep(step + 1);
+  }
+
+  if (hydrating) {
+    return (
+      <p aria-live="polite" className="mx-auto max-w-2xl px-5 py-16 text-center text-ink-2">
+        저장된 입력 정보를 불러오고 있습니다…
+      </p>
+    );
   }
 
   return (
@@ -217,8 +260,8 @@ export default function OnboardingPage() {
               ))}
             </div>
             <p className="mt-4 text-sm text-ink-3">
-              &ldquo;선택 안 함&rdquo;을 고르면 성별 조건이 있는 지원도 모두
-              결과에 포함합니다.
+              &ldquo;선택 안 함&rdquo;을 고르면 성별 조건이 있는 지원은
+              &ldquo;확인 필요&rdquo;로 표시합니다.
             </p>
           </fieldset>
         )}
@@ -308,7 +351,7 @@ export default function OnboardingPage() {
           <div className="space-y-8">
             <fieldset>
               <legend className="mb-3 text-ink-2">
-                알고 있는 <Term name="소득분위">소득분위</Term>를 골라주세요.
+                소득분위를 고르거나 아래 기준중위소득을 계산해 주세요.
               </legend>
               <div className="grid gap-2">
                 {DECILES.map((d) => (
@@ -382,6 +425,15 @@ export default function OnboardingPage() {
                   {householdNum}인 가구 기준액 {medianIncomeAmount(householdNum).toLocaleString("ko-KR")}원 대비 약 {calculatedMedianPercent}%입니다.
                 </p>
               )}
+              {calculatedMedianPercent === null && restoredMedianPercent !== null && calculatorEmpty && (
+                <p className="mt-4 rounded-lg bg-brand-soft px-4 py-3 font-semibold text-brand-dark">
+                  저장된 기준중위소득은 약 {restoredMedianPercent}%입니다.
+                </p>
+              )}
+              <p className="mt-3 text-sm text-ink-3">
+                지원마다 기준중위소득 100%·120%·150% 이하처럼 기준이 다릅니다.
+                계산값은 해당 공고 기준과 비교하는 데 사용합니다.
+              </p>
               <p className="mt-3 text-sm text-ink-3">
                 입력한 월 금액과 가구원 수는 서버로 보내거나 저장하지 않고, 계산된 비율만 저장합니다. {" "}
                 <a href={MEDIAN_INCOME_SOURCE_URL} target="_blank" rel="noreferrer" className="underline hover:text-brand">
@@ -505,7 +557,7 @@ export default function OnboardingPage() {
                 건너뛰기
               </button>
               <span className="w-full text-sm text-ink-3 sm:w-auto">
-                건너뛰어도 대상이 되는 지원을 모두 보여드립니다.
+                건너뛰어도 조건 일부가 일치하는 후보를 보여드립니다.
               </span>
             </>
           )}
