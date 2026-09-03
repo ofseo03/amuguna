@@ -43,7 +43,7 @@ jobs:
           set -e
           if [ "$cherry_pick_status" -ne 0 ]; then
             conflicts="$(git diff --name-only --diff-filter=U | sort)"
-            expected="$(printf '%s\n' SPEC.md db/README.md web/src/app/results/page.tsx web/src/lib/matching.ts | sort)"
+            expected="$(printf '%s\n' web/src/app/results/page.tsx web/src/lib/matching.ts | sort)"
             if [ "$conflicts" != "$expected" ]; then
               echo "Unexpected cherry-pick conflicts:"
               printf '%s\n' "$conflicts"
