@@ -50,7 +50,7 @@ export const ACCENT: Record<
 };
 
 /**
- * 정보 카테고리 5종. 히어로 배지·리포트 행·결과 미리보기가 모두 이 목록을 쓴다.
+ * 현재 제공하는 정보 카테고리. 히어로 배지·리포트 행이 모두 이 목록을 쓴다.
  *
  * example 문구는 실제 공고를 흉내낸 예시이되 특정 금융회사 상품명은 쓰지 않는다 —
  * 상품명이 박히면 비교·안내가 아니라 권유·광고로 읽힐 여지가 생긴다
@@ -66,7 +66,6 @@ export const CATEGORIES: {
   { label: "대출", icon: "bank", accent: "teal", example: "버팀목 전세자금대출 한도" },
   { label: "세금", icon: "receipt", accent: "green", example: "연말정산 환급 대상 공제" },
   { label: "금융상품", icon: "link", accent: "plum", example: "ISA 비과세 한도 비교" },
-  { label: "법령", icon: "gavel", accent: "brown", example: "청년 주거지원 개정 사항" },
 ];
 
 export type IconName =

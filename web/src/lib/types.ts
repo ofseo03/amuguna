@@ -92,7 +92,7 @@ export type RuleDimension =
 
 export interface DimensionCheck {
   dimension: RuleDimension;
-  /** 이 프로그램이 해당 축에 조건을 걸고 있는가 (NULL = 조건 없음 = 통과) */
+  /** 이 프로그램에서 해당 축을 구조화했는가 */
   constrained: boolean;
   pass: boolean;
   /** 조건은 있지만 대응하는 사용자 값이 없어 자동 판정하지 않음 */
@@ -115,6 +115,8 @@ export interface ScoreBreakdown {
 /** 결과 카드 1건 */
 export interface MatchCard {
   program: Program;
+  /** 자동 확인 범위 안에서의 판정. 원문 조건이 남으면 확정하지 않는다. */
+  eligibilityStatus: "likely" | "needs_review";
   score: number;
   breakdown: ScoreBreakdown;
   sim: number;

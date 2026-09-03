@@ -15,6 +15,7 @@ import {
   dDay,
   evaluate,
   isOpen,
+  needsEligibilityReview,
   nearMissMessage,
   profileLabel,
   regionPrefixes,
@@ -347,13 +348,15 @@ function toCard(
     hasQuery,
     now,
   );
+  const needsReview = needsEligibilityReview(c.program.rules, c.unknownDimensions);
   return {
     program: c.program,
+    eligibilityStatus: needsReview ? "needs_review" : "likely",
     score: c.sortScore ?? breakdown.total,
     breakdown,
     sim: c.sim,
-    reason: buildReason(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
-    badges: buildBadges(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
+    reason: buildReason(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions, needsReview),
+    badges: buildBadges(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions, needsReview),
     dDay: dDay(c.program, now),
   };
 }
@@ -364,6 +367,8 @@ function toNearMiss(
   hasQuery: boolean,
   now: Date,
 ): NearMissCard | null {
+  // 구조화된 축 하나가 명확히 어긋난 사실은, 원문에 추가 확인 조건이나 미입력 축이
+  // 남아 있어도 사용자에게 유용하다. 화면에서는 최종 자격을 단정하지 않고 원문 확인을 안내한다.
   const d = c.violatedDimensions[0];
   if (!d) return null;
   const breakdown = scoreProgram(
@@ -388,7 +393,7 @@ const RELAXATION_NOTICE: Record<RelaxationStage, string | null> = {
   topk_expanded:
     "정확히 일치하는 결과가 적어 검색 범위를 넓혔습니다 (유사도 상위 200건 → 500건).",
   intent_dropped:
-    "찾으시는 것과 딱 맞는 건 없지만, 대상이 되는 지원을 보여드립니다.",
+    "찾으시는 것과 딱 맞는 건 없지만, 조건 일부가 일치하는 후보를 보여드립니다.",
   near_miss_only:
     "지금 조건으로 바로 받을 수 있는 지원을 찾지 못했습니다. 조건이 하나만 어긋난 지원을 보여드립니다.",
 };
@@ -536,7 +541,7 @@ export async function runMatch(
   // violations=1 행까지 top-k 로 INNER JOIN 하므로, 벡터를 NULL 로 넘겨 자격 분기를 타게 한다.
   // 유사도 항이 없으니 정렬도 hasQuery=false 공식 — 데모 백엔드와 같다.
   const nearRows = await dbPageRows(
-    profile, null, topk, false, false, "all", null, 1, 5,
+    profile, null, topk, false, false, "all", null, 1, 20,
   );
   const nearMisses = (await dbCandidatesForRows(profile, nearRows))
     .map((c) => toNearMiss(c, profile, false, now))

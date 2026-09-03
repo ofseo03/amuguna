@@ -34,7 +34,7 @@ const SOURCES: {
     covers: "중앙부처 복지서비스 목록·상세",
     url: "https://www.data.go.kr/data/15090532/openapi.do",
     status: "scheduled",
-    permission: "코드상 정기 대상. 운영 키·데이터셋 활용승인·재이용 범위는 배포 전에 별도 확인 필요",
+    permission: "공식 Open API 수집기 구현. 현재 연동 여부는 아래 DB 활성 상태 기준",
   },
   {
     key: "bizinfo",
@@ -44,7 +44,7 @@ const SOURCES: {
     covers: "소상공인·창업·중소기업 정책자금",
     url: "https://www.bizinfo.go.kr/",
     status: "scheduled",
-    permission: "코드상 정기 대상. 운영 API 키·약관·재이용 범위는 배포 전에 별도 확인 필요",
+    permission: "공식 Open API 수집기 구현. 현재 연동 여부는 아래 DB 활성 상태 기준",
   },
   {
     key: "finlife",
@@ -54,7 +54,7 @@ const SOURCES: {
     covers: "예·적금, 대출, 연금 상품",
     url: "https://finlife.fss.or.kr/",
     status: "scheduled",
-    permission: "코드상 정기 대상. 운영 발급 키의 상품·권역 범위와 이용조건은 배포 전에 실응답으로 확인 필요",
+    permission: "금융감독원 공식 비교공시 API 사용. 현재 활성 건수는 아래 DB 상태 기준",
   },
   {
     key: "gov24",
@@ -64,7 +64,7 @@ const SOURCES: {
     covers: "정부·지자체 수혜서비스",
     url: "https://www.data.go.kr/",
     status: "scheduled",
-    permission: "코드상 정기 대상. 운영 키·데이터셋 활용승인·재이용 범위는 배포 전에 별도 확인 필요",
+    permission: "공공데이터포털 공식 API 사용. 현재 활성 건수는 아래 DB 상태 기준",
   },
   {
     key: "local_welfare",
@@ -74,7 +74,7 @@ const SOURCES: {
     covers: "지방자치단체 자체 복지사업",
     url: "https://www.data.go.kr/",
     status: "scheduled",
-    permission: "코드상 정기 대상. 운영 키·데이터셋 활용승인·재이용 범위는 배포 전에 별도 확인 필요",
+    permission: "공식 Open API 수집기 구현. 현재 연동 여부는 아래 DB 활성 상태 기준",
   },
   {
     key: "kstartup",
@@ -84,7 +84,7 @@ const SOURCES: {
     covers: "창업지원 공고",
     url: "https://www.k-startup.go.kr/",
     status: "manual",
-    permission: "수집기는 구현됨. 공식 API 이용승인과 실응답 대조 전에는 정기 배치 제외",
+    permission: "수집기는 구현됐지만 현재 정기 배치에서 제외",
   },
   {
     key: "regional_portals",
@@ -119,8 +119,8 @@ const SOURCES: {
 ];
 
 const STATUS_LABEL: Record<SourceStatus, string> = {
-  scheduled: "정기 배치 대상",
-  manual: "승인 확인 후 수동 연동",
+  scheduled: "수집기 구현됨",
+  manual: "현재 정기수집 제외",
   planned: "현재 미연동",
 };
 
@@ -195,7 +195,7 @@ export default async function SourcesPage() {
                 </span>
                 <span className="text-sm text-ink-3">{s.method}</span>
                 <span className="rounded bg-bg-sunken px-2 py-0.5 text-sm text-ink-2">
-                  {STATUS_LABEL[s.status]}
+                  {stats.has(s.key) ? "현재 연동" : STATUS_LABEL[s.status]}
                 </span>
               </div>
               <h3 className="mt-2 font-bold text-ink">{s.name}</h3>
@@ -205,6 +205,9 @@ export default async function SourcesPage() {
                   DB 활성 {stats.get(s.key)?.count.toLocaleString("ko-KR")}건 · 최근 수집{" "}
                   {formatDateTime(stats.get(s.key)?.fetchedAt ?? null)}
                 </p>
+              )}
+              {s.status === "scheduled" && !stats.has(s.key) && !demo && (
+                <p className="mt-2 text-sm font-semibold text-warn">현재 DB 활성 데이터 없음</p>
               )}
               <p className="mt-2 text-sm text-ink-3">이용 범위: {s.permission}</p>
               <a
@@ -263,8 +266,7 @@ export default async function SourcesPage() {
       <section className="mt-10">
         <h2 className="text-xl font-bold text-ink">자동 처리의 한계</h2>
         <p className="mt-3 text-ink-2">
-          자격요건은 정규식으로 우선 추출하고, 추출되지 않은 항목만 언어모델로
-          보완합니다. &ldquo;관내 6개월 이상 거주하며 무주택인 자&rdquo; 같은
+          자격요건은 정규식으로 구조화합니다. &ldquo;관내 6개월 이상 거주하며 무주택인 자&rdquo; 같은
           복합 조건은 정형 필드로 만들지 않고 상세 화면의{" "}
           <strong>추가 확인 필요 조건</strong>에 원문 그대로 표시합니다. 자동
           판정을 포기하는 대신 잘못된 탈락을 만들지 않기 위한 선택입니다.

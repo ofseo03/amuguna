@@ -15,14 +15,14 @@ import Icon, { CheckMark } from "./visual/Icon";
  */
 
 /** 배지 열을 시안처럼 활 모양으로 밀어낸다 (가운데가 가장 왼쪽). */
-const ARC_OFFSET = ["14", "5", "0", "5", "14"];
+const ARC_OFFSET = ["12", "2", "2", "12"];
 
 export default function HeroVisual({ className = "" }: { className?: string }) {
   return (
     <div
       className={`relative overflow-hidden rounded-lg border border-line bg-bg-soft px-4 py-8 sm:px-8 sm:py-12 ${className}`}
       role="img"
-      aria-label="흩어져 있는 지원금·대출·세금·금융상품·법령 정보가 하나의 맞춤 리포트로 모이고, 자격 근거와 법적 고지가 함께 표시되는 화면 예시"
+      aria-label="흩어져 있는 지원금·대출·세금·금융상품 정보가 하나의 맞춤 리포트로 모이고, 자격 근거와 법적 고지가 함께 표시되는 화면 예시"
     >
       {/* 내부 요소는 위 role=img 의 설명으로 갈음한다 — 스크린리더가 장식 텍스트까지 읽지 않도록 */}
       <div aria-hidden="true" className="relative">
@@ -68,7 +68,7 @@ function Ribbons() {
          * gradientUnits 를 userSpaceOnUse 로 둔다 (기본값 objectBoundingBox 가 아니라).
          *  - 가운데 리본은 완전한 수평선이라 bbox 높이가 0 이다. objectBoundingBox 는
          *    이때 퇴화(degenerate)해서 스펙상 해당 도형이 아예 그려지지 않는다.
-         *  - 겸사겸사 5개 리본의 페이드인 지점이 각자의 bbox 가 아니라 같은 x 에 맞는다.
+         *  - 겸사겸사 리본의 페이드인 지점이 각자의 bbox 가 아니라 같은 x 에 맞는다.
          */}
         {CATEGORIES.map((c, i) => (
           <linearGradient
@@ -89,10 +89,10 @@ function Ribbons() {
       {/*
        * 각 배지 높이(y0)에서 카드 왼쪽 모서리(x=240)로 모여든다.
        * 끝점을 완전히 겹치지 않게 벌려 둔다 — 겹치면 나중에 그린 리본이 앞의 것을 덮어
-       * 5개 중 몇 개가 사라진 것처럼 보인다. 카드가 끝을 가리므로 벌어진 티는 안 난다.
+       * 일부가 사라진 것처럼 보인다. 카드가 끝을 가리므로 벌어진 티는 안 난다.
        */}
-      {[26, 93, 160, 227, 294].map((y0, i) => {
-        const yEnd = 160 + (i - 2) * 30;
+      {[40, 120, 200, 280].map((y0, i) => {
+        const yEnd = 160 + (i - 1.5) * 36;
         return (
           <path
             key={y0}
