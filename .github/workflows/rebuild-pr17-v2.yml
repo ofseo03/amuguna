@@ -1,0 +1,586 @@
+name: Rebuild PR 17 on latest main
+
+on:
+  push:
+    branches:
+      - automation/pr17-rebuild
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rebuild-pr17
+  cancel-in-progress: false
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.9.0"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Rebase PR changes and resolve pagination conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout -B pr17-fixed origin/main
+
+          # Rebuild deterministically from the reviewed PR head. The merge commit
+          # keeps main as first parent and preserves the PR's original history.
+          git merge --no-commit --no-ff 809e5d2ffcb14efd767b84d56a009caf8ae29eb9 || true
+
+          git checkout --theirs SPEC.md db/README.md web/src/lib/matching.ts
+
+          # Keep the recently merged numbered pagination in conflicting regions,
+          # while retaining non-conflicting result UX changes from PR #17.
+          git show origin/main:web/src/app/results/page.tsx > /tmp/results.ours
+          git show 4a673491b81e78b05313ecbb5b37c68e472762a8:web/src/app/results/page.tsx > /tmp/results.base
+          git show 809e5d2ffcb14efd767b84d56a009caf8ae29eb9:web/src/app/results/page.tsx > /tmp/results.theirs
+          git merge-file --ours -p /tmp/results.ours /tmp/results.base /tmp/results.theirs > web/src/app/results/page.tsx || true
+
+          git add SPEC.md db/README.md web/src/lib/matching.ts web/src/app/results/page.tsx
+          while IFS= read -r path; do
+            [ -z "$path" ] && continue
+            git checkout --theirs -- "$path"
+            git add -- "$path"
+          done < <(git diff --name-only --diff-filter=U)
+          ! git diff --name-only --diff-filter=U | grep -q .
+
+      - name: Apply reviewed MVP fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          # ------------------------------------------------------------------
+          # Matching: preserve PR #18's 15-item numbered pagination and restore
+          # the safer retrieval depth used before PR #17.
+          # ------------------------------------------------------------------
+          p = Path('web/src/lib/matching.ts')
+          s = p.read_text()
+          replacements = {
+              'export const PAGE_SIZE = 10;': 'export const PAGE_SIZE = 15;',
+              'const TOPK_BASE = 30;': 'const TOPK_BASE = 200;',
+              'const TOPK_EXPANDED = 100;': 'const TOPK_EXPANDED = 500;',
+              'top-k 30 이 전 건을 포함해 버려': 'top-k 200 이 전 건을 포함해 버려',
+              '유사도 상위 30건 → 100건': '유사도 상위 200건 → 500건',
+          }
+          for old, new in replacements.items():
+              if old in s:
+                  s = s.replace(old, new)
+              elif new not in s:
+                  raise SystemExit(f'missing matching pattern: {old}')
+          p.write_text(s)
+
+          # ------------------------------------------------------------------
+          # Unknown occupation: "해당 없음·기타·모름" must not become a hard
+          # mismatch. It remains a candidate and is surfaced as review-needed.
+          # ------------------------------------------------------------------
+          p = Path('web/src/lib/eligibility.ts')
+          s = p.read_text()
+          old = '''function passOccupation(r: EligibilityRules, p: Profile): boolean {
+            if (r.occupations === null || r.occupations.length === 0) return true;
+            return r.occupations.includes(p.occupation);
+          }'''
+          new = '''function passOccupation(r: EligibilityRules, p: Profile): boolean {
+            if (r.occupations === null || r.occupations.length === 0) return true;
+            // "해당 없음·기타·모름"은 실제 직업 불일치가 아니라 사용자 값 미확인이다.
+            // 후보를 숨기지 않고 unknownDimensions에 남겨 화면에서 "확인 필요"로 표시한다.
+            if (p.occupation === "other") return true;
+            return r.occupations.includes(p.occupation);
+          }'''
+          if old in s:
+              s = s.replace(old, new)
+          elif new not in s:
+              raise SystemExit('passOccupation pattern missing')
+          old = '''function dimensionUnknown(r: EligibilityRules, p: Profile, d: RuleDimension): boolean {
+            return (d === "gender" && r.gender !== null && p.gender === null) ||
+              (d === "income" && incomeUnknown(r, p));
+          }'''
+          new = '''function dimensionUnknown(r: EligibilityRules, p: Profile, d: RuleDimension): boolean {
+            return (d === "gender" && r.gender !== null && p.gender === null) ||
+              (d === "occupation" && isConstrained(r, d) && p.occupation === "other") ||
+              (d === "income" && incomeUnknown(r, p));
+          }'''
+          if old in s:
+              s = s.replace(old, new)
+          elif new not in s:
+              raise SystemExit('dimensionUnknown pattern missing')
+          p.write_text(s)
+
+          # ------------------------------------------------------------------
+          # Parser review state: only genuinely unstructured/protected/empty
+          # eligibility sources are downgraded. Fully parsed simple rules stay
+          # useful as likely matches while the global disclaimer still applies.
+          # ------------------------------------------------------------------
+          p = Path('web/ingest/parser.ts')
+          s = p.read_text()
+          old = '''  // 자유문장에서 모든 필수조건을 추출했다고 증명할 수 없으므로, 명시적으로 제한이
+            // 없다고 적힌 경우 외에는 원문 확인 전 확정 판정을 하지 않는다.
+            rules.needs_review = !EXPLICIT_UNRESTRICTED.test(text);
+            rules.review_reason = rules.needs_review
+              ? rules.extra_conditions.length > 0
+                ? "unstructured_eligibility_conditions"
+                : "eligibility_source_requires_confirmation"
+              : null;'''
+          new = '''  // 명확히 구조화된 단순 조건까지 모두 "확인 필요"로 낮추면 상태 표시가 무의미해진다.
+            // 실제로 남은 비정형 조건, 보호된(오탐 방지로 버린) 축, 자격 정보 자체가 없는 경우만
+            // 원문 확인 대상으로 둔다. 명시적인 "제한 없음"은 검토 불필요로 인정한다.
+            const explicitlyUnrestricted = EXPLICIT_UNRESTRICTED.test(text);
+            const hasStructuredRule = rules.filledFields().length > 0;
+            rules.needs_review = !explicitlyUnrestricted && (
+              rules.extra_conditions.length > 0 ||
+              protectedFields.size > 0 ||
+              !hasStructuredRule
+            );
+            rules.review_reason = rules.needs_review
+              ? rules.extra_conditions.length > 0 || protectedFields.size > 0
+                ? "unstructured_eligibility_conditions"
+                : "eligibility_source_requires_confirmation"
+              : null;'''
+          if old in s:
+              s = s.replace(old, new)
+          elif new not in s:
+              raise SystemExit('parser review block missing')
+          p.write_text(s)
+
+          # ------------------------------------------------------------------
+          # Forward migration: the 8-argument income matcher delegates to this
+          # 7-argument matcher, so redefining it fixes both DB paths.
+          # ------------------------------------------------------------------
+          target = Path('db/migrations/0014_unknown_occupation.sql')
+          if not target.exists():
+              src = Path('db/migrations/0008_application_window.sql').read_text()
+              src = src.replace(
+                  '-- Existing databases already ran 0002, so redefine the RPC with the same\n-- signature and add the KST application-start predicate in both query paths.',
+                  '-- Treat the onboarding value "other" (해당 없음·기타·모름) as unknown, not a\n-- definite occupation mismatch. This redefines the existing 7-argument matcher;\n-- the 8-argument income wrapper delegates to it, so both paths receive the fix.'
+              )
+              needle = '''CASE WHEN  e.occupations IS NULL
+                        OR p_occupation = ANY (e.occupations)             THEN 0 ELSE 1 END AS v_occupation,'''
+              replacement = '''CASE WHEN  e.occupations IS NULL
+                        OR p_occupation = 'other'
+                        OR p_occupation = ANY (e.occupations)             THEN 0 ELSE 1 END AS v_occupation,'''
+              if src.count(needle) != 2:
+                  raise SystemExit(f'expected two occupation predicates, found {src.count(needle)}')
+              src = src.replace(needle, replacement)
+              src = src.replace(
+                  "'자격(SQL) ∩ 의도(pgvector) 교차 검증 + 근접 탈락. 접수 시작일과 마감일을 KST 날짜로 제한한다. 서버 전용 RPC.';",
+                  "'자격(SQL) ∩ 의도(pgvector) 교차 검증 + 근접 탈락. occupation=other는 미확인으로 통과시키고 화면에서 확인 필요로 표시한다. 서버 전용 RPC.';"
+              )
+              target.write_text(src)
+
+          # ------------------------------------------------------------------
+          # Documentation: restore 200/500 retrieval and retain the 15-item
+          # numbered pagination contract already merged through PR #18.
+          # ------------------------------------------------------------------
+          for name in ['SPEC.md', 'db/README.md', 'web/README.md']:
+              p = Path(name)
+              s = p.read_text()
+              for old, new in [
+                  ('top-k 30 → 100', 'top-k 200 → 500'),
+                  ('top-k 30→100', 'top-k 200→500'),
+                  ('top-k 30 이', 'top-k 200 이'),
+                  ('상위 30건 → 100건', '상위 200건 → 500건'),
+                  ('p_topk` 30→100', 'p_topk` 200→500'),
+                  ('p_topk` 30 → 100', 'p_topk` 200 → 500'),
+              ]:
+                  s = s.replace(old, new)
+              s = s.replace('NULL::vector, 30);', 'NULL::vector, 200);')
+              s = s.replace('$1::vector,100);', '$1::vector,500);')
+              s = s.replace('$1::vector, 100);', '$1::vector, 500);')
+              s = s.replace('페이지네이션(10건 단위)', '페이지네이션(15건 단위, 숫자 페이지)')
+              s = s.replace('페이지네이션(20건 단위)', '페이지네이션(15건 단위, 숫자 페이지)')
+              s = s.replace('페이지네이션(10건)', '숫자 페이지네이션(15건)')
+              s = s.replace('페이지네이션(20건)', '숫자 페이지네이션(15건)')
+              s = s.replace('10건 단위 페이지네이션', '15건 단위 숫자 페이지네이션')
+              s = s.replace('20건 단위 페이지네이션', '15건 단위 숫자 페이지네이션')
+              s = s.replace('10건 커서를 반환', '15건 커서를 반환')
+              s = s.replace('20건 커서를 반환', '15건 커서를 반환')
+              p.write_text(s)
+
+          p = Path('db/README.md')
+          s = p.read_text()
+          line = '| `migrations/0014_unknown_occupation.sql` | 직업 `기타·모름`을 확정 탈락이 아닌 `확인 필요`로 처리 |\n'
+          if line not in s:
+              anchor = '| `migrations/0013_parser_v5_review_guard.sql` |'
+              index = s.find(anchor)
+              if index < 0:
+                  raise SystemExit('db README migration anchor missing')
+              end = s.find('\n', index) + 1
+              s = s[:end] + line + s[end:]
+          p.write_text(s)
+
+          # ------------------------------------------------------------------
+          # Regression tests for the corrected semantics.
+          # ------------------------------------------------------------------
+          p = Path('web/ingest/tests/parser.test.ts')
+          s = p.read_text().replace(
+              'assert.equal(parseEligibility("만 19세 이상 34세 이하 청년").needs_review, true);',
+              'assert.equal(parseEligibility("만 19세 이상 34세 이하 청년").needs_review, false);'
+          )
+          p.write_text(s)
+
+          p = Path('web/src/lib/income.test.mjs')
+          s = p.read_text()
+          insert = '''test("an unknown occupation stays in the candidate set and requires review", () => {
+            const occupationRules = {
+              ...rules,
+              occupations: ["student"],
+              income_decile_max: null,
+              median_income_percent_max: null,
+            };
+            const unknown = { ...profile, occupation: "other" };
+            const result = evaluate(occupationRules, unknown);
+            assert.equal(result.violations, 0);
+            assert.deepEqual(result.matchedDimensions, []);
+            assert.deepEqual(result.unknownDimensions, ["occupation"]);
+            assert.equal(
+              checklist(occupationRules, unknown).find(({ dimension }) => dimension === "occupation")?.unknown,
+              true,
+            );
+            assert.equal(needsEligibilityReview(occupationRules, result.unknownDimensions), true);
+          });
+
+          '''
+          anchor = 'test("unstructured conditions prevent a confirmed eligibility label", () => {'
+          if insert not in s:
+              if anchor not in s:
+                  raise SystemExit('income test anchor missing')
+              s = s.replace(anchor, insert + anchor)
+          p.write_text(s)
+
+          p = Path('web/src/lib/matching.test.mjs')
+          s = p.read_text()
+          needle = '''    assert.equal(withQuery.relaxation, "none");
+              assert.deepEqual('''
+          replacement = '''    assert.equal(withQuery.relaxation, "none");
+              assert.ok(withQuery.nearMisses.length > 0, "근접 탈락 기능이 빈 목록으로 퇴행하면 안 된다");
+              assert.deepEqual('''
+          if needle in s:
+              s = s.replace(needle, replacement)
+          elif '근접 탈락 기능이 빈 목록으로 퇴행하면 안 된다' not in s:
+              raise SystemExit('matching test anchor missing')
+          p.write_text(s)
+          PY
+
+      - name: Preserve successful results on 429 and restore numbered-page state
+        shell: bash
+        run: |
+          set -euo pipefail
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path('web/src/app/results/page.tsx')
+          s = p.read_text()
+
+          # Storage imports used for one-tab result/AI restoration.
+          if 'AI_ANSWER_STORAGE_KEY' not in s or 'RESULT_STORAGE_KEY' not in s:
+              single = 'import { QUERY_STORAGE_KEY } from "@/lib/client-keys";'
+              block = '''import {
+            AI_ANSWER_STORAGE_KEY,
+            QUERY_STORAGE_KEY,
+            RESULT_STORAGE_KEY,
+          } from "@/lib/client-keys";'''
+              if single not in s:
+                  raise SystemExit('client key import shape missing')
+              s = s.replace(single, block, 1)
+
+          anchor = 'type Payload = MatchResponse & { ok: true };\n'
+          helpers = '''type StoredResultSnapshot = {
+            tab: Tab;
+            page: number;
+            query: string | null;
+            payload: Payload;
+            cursors: Array<string | null>;
+            lastPage: number | null;
+            scrollY: number;
+          };
+
+          type StoredAiAnswer = {
+            query: string | null;
+            answer: string | null;
+            status: AiAnswerStatus;
+          };
+
+          function resultUrl(tab: Tab, page: number): string {
+            const params = new URLSearchParams();
+            if (tab !== "all") params.set("form", tab);
+            if (page > 1) params.set("page", String(page));
+            const search = params.toString();
+            return search ? `/results?${search}` : "/results";
+          }
+
+          function persistResultLocation(tab: Tab, page: number): void {
+            const current = typeof window.history.state === "object" && window.history.state !== null
+              ? window.history.state
+              : {};
+            window.history.replaceState(
+              { ...current, amugunaResult: { tab, page } },
+              "",
+              resultUrl(tab, page),
+            );
+          }
+
+          function readStoredJson<T>(key: string): T | null {
+            try {
+              return JSON.parse(window.sessionStorage.getItem(key) ?? "null") as T | null;
+            } catch {
+              try {
+                window.sessionStorage.removeItem(key);
+              } catch {
+                // 저장소가 막힌 환경에서도 일반 검색은 계속한다.
+              }
+              return null;
+            }
+          }
+
+          function writeStoredJson(key: string, value: unknown): void {
+            try {
+              window.sessionStorage.setItem(key, JSON.stringify(value));
+            } catch {
+              // 용량 초과·저장소 차단 시 메모리 상태만 사용한다.
+            }
+          }
+
+          '''
+          if 'type StoredResultSnapshot' not in s:
+              if anchor not in s:
+                  raise SystemExit('Payload type anchor missing')
+              s = s.replace(anchor, anchor + helpers, 1)
+
+          # Track the requested view and the last view backed by successful data.
+          ref_anchor = '  const reqSeq = useRef(0);'
+          refs = '''  const pendingView = useRef<{ tab: Tab; page: number }>({ tab: "all", page: 1 });
+            const successfulView = useRef<{ tab: Tab; page: number }>({ tab: "all", page: 1 });'''
+          if refs not in s:
+              if ref_anchor not in s:
+                  raise SystemExit('reqSeq anchor missing')
+              s = s.replace(ref_anchor, ref_anchor + '\n' + refs, 1)
+
+          match = re.search(r'(?m)^  (?:async )?function navigate\(([^)]*)\) \{', s)
+          if not match:
+              raise SystemExit('numeric navigate function missing')
+          params = [part.strip() for part in match.group(1).split(',')]
+          if len(params) < 2:
+              raise SystemExit(f'unexpected navigate params: {match.group(1)}')
+          tab_name = params[0].split(':', 1)[0].strip()
+          page_name = params[1].split('=', 1)[0].split(':', 1)[0].strip()
+          insertion = f'\n    pendingView.current = {{ tab: {tab_name}, page: {page_name} }};'
+          if 'pendingView.current' not in s[match.end():match.end() + 250]:
+              s = s[:match.end()] + insertion + s[match.end():]
+
+          setdata = '''      setData(outcome.payload);'''
+          setdata_new = '''      successfulView.current = pendingView.current;
+                setData(outcome.payload);
+                const view = pendingView.current;
+                const cursorState = pageCursors.current.get(view.tab) ?? {
+                  cursors: [null],
+                  lastPage: null,
+                };
+                writeStoredJson(RESULT_STORAGE_KEY, {
+                  tab: view.tab,
+                  page: view.page,
+                  query: q,
+                  payload: outcome.payload,
+                  cursors: cursorState.cursors,
+                  lastPage: cursorState.lastPage,
+                  scrollY: 0,
+                } satisfies StoredResultSnapshot);
+                persistResultLocation(view.tab, view.page);'''
+          if 'satisfies StoredResultSnapshot' not in s:
+              if setdata not in s:
+                  raise SystemExit('setData persistence anchor missing')
+              s = s.replace(setdata, setdata_new, 1)
+
+          ai_anchor = '''        setAiAnswer(outcome.payload.aiAnswer);
+                  setAiAnswerStatus(outcome.payload.aiAnswerStatus);'''
+          ai_new = '''        setAiAnswer(outcome.payload.aiAnswer);
+                  setAiAnswerStatus(outcome.payload.aiAnswerStatus);
+                  writeStoredJson(AI_ANSWER_STORAGE_KEY, {
+                    query: q,
+                    answer: outcome.payload.aiAnswer,
+                    status: outcome.payload.aiAnswerStatus,
+                  } satisfies StoredAiAnswer);'''
+          if 'satisfies StoredAiAnswer' not in s:
+              if ai_anchor not in s:
+                  raise SystemExit('AI persistence anchor missing')
+              s = s.replace(ai_anchor, ai_new, 1)
+
+          error_anchor = '''    } else {
+                setError({ message: outcome.message, noProfile: outcome.noProfile });
+              }
+              setLoading(false);'''
+          error_new = '''    } else {
+                const previous = successfulView.current;
+                setTab(previous.tab);
+                setPage(previous.page);
+                setLastPage(pageCursors.current.get(previous.tab)?.lastPage ?? null);
+                setError({ message: outcome.message, noProfile: outcome.noProfile });
+              }
+              setLoading(false);'''
+          if 'const previous = successfulView.current;' not in s:
+              if error_anchor not in s:
+                  raise SystemExit('apply error anchor missing')
+              s = s.replace(error_anchor, error_new, 1)
+
+          # Replace the initial fetch effect with exact numbered-page restoration.
+          start = s.find('  useEffect(() => {', s.find('const rememberPage'))
+          if start < 0:
+              raise SystemExit('initial useEffect missing')
+          end_match = re.search(r'\n  \}, \[[^\]]*\]\);', s[start:])
+          if not end_match:
+              raise SystemExit('initial useEffect end missing')
+          end = start + end_match.end()
+          new_effect = '''  useEffect(() => {
+            let cancelled = false;
+            let q: string | null = null;
+            try {
+              q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
+            } catch {
+              // 저장소가 차단된 환경에서는 자유입력 없는 검색으로 계속한다.
+            }
+
+            const stored = readStoredJson<StoredResultSnapshot>(RESULT_STORAGE_KEY);
+            const storedAi = readStoredJson<StoredAiAnswer>(AI_ANSWER_STORAGE_KEY);
+            const validStored = stored &&
+              stored.query === q &&
+              (stored.tab === "all" || FORMS.includes(stored.tab)) &&
+              Number.isInteger(stored.page) && stored.page >= 1 &&
+              stored.payload?.ok === true &&
+              Array.isArray(stored.cursors) &&
+              stored.cursors[0] === null &&
+              stored.cursors.every((value) => value === null || typeof value === "string") &&
+              (stored.lastPage === null || (Number.isInteger(stored.lastPage) && stored.lastPage >= 1));
+
+            if (validStored) {
+              const snapshot = stored as StoredResultSnapshot;
+              pageCursors.current.set(snapshot.tab, {
+                cursors: snapshot.cursors,
+                lastPage: snapshot.lastPage,
+              });
+              const cursor = snapshot.cursors[snapshot.page - 1] ?? null;
+              cache.current.set(`${snapshot.tab}|${cursor ?? "first"}`, snapshot.payload);
+              pendingView.current = { tab: snapshot.tab, page: snapshot.page };
+              successfulView.current = pendingView.current;
+              setTab(snapshot.tab);
+              setPage(snapshot.page);
+              setLastPage(snapshot.lastPage);
+              setQuery(q);
+              setData(snapshot.payload);
+              setLoading(false);
+              setError(null);
+              persistResultLocation(snapshot.tab, snapshot.page);
+              if (
+                storedAi?.query === q &&
+                (storedAi.status === "ok" || storedAi.status === "unavailable")
+              ) {
+                setAiAnswer(typeof storedAi.answer === "string" ? storedAi.answer : null);
+                setAiAnswerStatus(storedAi.status);
+              }
+              window.requestAnimationFrame(() => {
+                if (!cancelled && Number.isFinite(snapshot.scrollY)) {
+                  window.scrollTo({ top: Math.max(0, snapshot.scrollY), behavior: "auto" });
+                }
+              });
+            } else {
+              pendingView.current = { tab: "all", page: 1 };
+              const seq = ++reqSeq.current;
+              void fetchMatch("all", null, q).then((outcome) => {
+                if (cancelled || seq !== reqSeq.current) return;
+                if (outcome.kind === "ok") rememberPage("all", 1, outcome.payload);
+                apply(outcome, q);
+              });
+            }
+
+            const rememberScroll = () => {
+              const current = readStoredJson<StoredResultSnapshot>(RESULT_STORAGE_KEY);
+              if (!current) return;
+              writeStoredJson(RESULT_STORAGE_KEY, { ...current, scrollY: window.scrollY });
+            };
+            window.addEventListener("pagehide", rememberScroll);
+            return () => {
+              cancelled = true;
+              rememberScroll();
+              window.removeEventListener("pagehide", rememberScroll);
+            };
+          }, [fetchMatch, apply, rememberPage]);'''
+          s = s[:start] + new_effect + s[end:]
+
+          # Full-screen error only for cold failure; recoverable failures overlay
+          # the last successful data and roll the view back atomically.
+          s = s.replace('  if (error) {\n', '  if (error && !data) {\n', 1)
+          normal = '''  return (
+              <Shell>
+                {/* ---------------- 매칭 요약 배너 ---------------- */}'''
+          inline = '''  return (
+              <Shell>
+                {error && (
+                  <div role="alert" className="mb-4 rounded-xl border border-danger bg-danger-soft px-5 py-4">
+                    <p className="font-semibold text-danger">{error.message}</p>
+                    <p className="mt-1 text-sm text-ink-2">
+                      마지막으로 불러온 결과는 그대로 유지했습니다.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void navigate(tab, page)}
+                      disabled={loading}
+                      className="mt-3 rounded-lg border-2 border-danger bg-bg px-4 py-2 text-sm font-semibold text-danger disabled:opacity-50"
+                    >
+                      다시 시도
+                    </button>
+                  </div>
+                )}
+                {/* ---------------- 매칭 요약 배너 ---------------- */}'''
+          if '마지막으로 불러온 결과는 그대로 유지했습니다.' not in s:
+              if normal not in s:
+                  raise SystemExit('normal result return anchor missing')
+              s = s.replace(normal, inline, 1)
+
+          s = s.replace('{summary.profileLabel}{" "}', '{summary.profileLabel} 조건을 확인할 후보{" "}')
+          s = s.replace(
+              '찾으시는 것을 입력하지 않으셔서, 대상이 되는 지원을 모두 보여드립니다.',
+              '찾으시는 것을 입력하지 않으셔서, 조건 일부가 일치하는 후보를 보여드립니다.'
+          )
+          s = s.replace('<FinancialProductNotice />', '<FinancialProductNotice form={tab} />')
+          s = s.replace(
+              '이 분류에는 해당하는 지원이 없습니다. 다른 탭을 확인해 보세요.',
+              '이 분류에는 확인할 결과가 없습니다. 다른 탭을 확인해 보세요.'
+          )
+          p.write_text(s)
+          PY
+
+      - name: Verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! git grep -n '^<<<<<<<\|^=======\|^>>>>>>>' -- . ':!*.lock'
+          git diff --check
+          npm ci --prefix web
+          npm run --prefix web typecheck
+          npm run --prefix web lint
+          npm run --prefix web test
+          npm run --prefix web build
+          MOCK_EMBEDDINGS=1 npm run --prefix web ingest -- --fixtures --dry-run
+
+      - name: Commit and update PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add -A
+          git commit -m "fix: rebase PR 17 and preserve result pagination"
+          git push origin HEAD:fix/eligibility-results-ux --force
