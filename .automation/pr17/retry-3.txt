@@ -1,0 +1,1 @@
+Retry after restoring the PR branch to the reviewed head. The rebuild workflow verifies the final tree before pushing.
