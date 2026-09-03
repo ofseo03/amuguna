@@ -1,0 +1,172 @@
+name: Rebuild PR 17 on latest main
+
+on:
+  push:
+    branches:
+      - automation/pr17-rebuild
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore prepared files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/pr17-payload
+          for chunk in .automation/pr17/chunk*.b64; do
+            base64 --decode "$chunk"
+          done > /tmp/pr17-fixes.tar.gz
+          echo "1313cbf4d106ebceec6449dd3fde8356491c2f9057f8306795acade5ae369b9d  /tmp/pr17-fixes.tar.gz" | sha256sum --check
+          tar -xzf /tmp/pr17-fixes.tar.gz -C /tmp/pr17-payload
+
+      - name: Rebuild branch from latest main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main fix/eligibility-results-ux
+          git checkout -B pr17-rebuild-work origin/main
+
+          set +e
+          git cherry-pick 809e5d2ffcb14efd767b84d56a009caf8ae29eb9
+          cherry_pick_status=$?
+          set -e
+          if [ "$cherry_pick_status" -ne 0 ]; then
+            conflicts="$(git diff --name-only --diff-filter=U | sort)"
+            expected="$(printf '%s\n' SPEC.md db/README.md web/src/app/results/page.tsx web/src/lib/matching.ts | sort)"
+            if [ "$conflicts" != "$expected" ]; then
+              echo "Unexpected cherry-pick conflicts:"
+              printf '%s\n' "$conflicts"
+              exit 1
+            fi
+            git checkout --ours -- SPEC.md db/README.md web/src/app/results/page.tsx web/src/lib/matching.ts
+            git add SPEC.md db/README.md web/src/app/results/page.tsx web/src/lib/matching.ts
+            GIT_EDITOR=true git cherry-pick --continue
+          fi
+
+          git checkout origin/main -- SPEC.md db/README.md web/src/app/results/page.tsx web/src/lib/matching.ts
+
+          cp /tmp/pr17-payload/final-results-page.tsx web/src/app/results/page.tsx
+          cp /tmp/pr17-payload/matching.ts web/src/lib/matching.ts
+          cp /tmp/pr17-payload/eligibility.ts web/src/lib/eligibility.ts
+          cp /tmp/pr17-payload/income.test.mjs web/src/lib/income.test.mjs
+          cp /tmp/pr17-payload/matching.test.mjs web/src/lib/matching.test.mjs
+          cp /tmp/pr17-payload/disclosure.test.mjs web/src/lib/disclosure.test.mjs
+          cp /tmp/pr17-payload/0014_unknown_occupation.sql db/migrations/0014_unknown_occupation.sql
+
+          python <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_required(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text()
+              if old not in text:
+                  raise SystemExit(f"required text not found in {path}: {old[:80]!r}")
+              file.write_text(text.replace(old, new, 1))
+
+          parser = Path("web/ingest/parser.ts")
+          text = parser.read_text()
+          pattern = re.compile(
+              r"  // 자유문장에서 모든 필수조건을 추출했다고 증명할 수 없으므로, 명시적으로 제한이\n"
+              r"  // 없다고 적힌 경우 외에는 원문 확인 전 확정 판정을 하지 않는다\.\n"
+              r"  rules\.needs_review = !EXPLICIT_UNRESTRICTED\.test\(text\);\n"
+              r"  rules\.review_reason = rules\.needs_review\n"
+              r"    \? rules\.extra_conditions\.length > 0\n"
+              r"      \? \"unstructured_eligibility_conditions\"\n"
+              r"      : \"eligibility_source_requires_confirmation\"\n"
+              r"    : null;"
+          )
+          replacement = '''  // 명확히 구조화한 단순 조건은 likely로 사용할 수 있다. 실제 미추출·복합 조건이나
+          // 자격 정보 자체가 없는 경우만 확인 필요로 남긴다.
+          const explicitlyUnrestricted = EXPLICIT_UNRESTRICTED.test(text);
+          const hasStructuredCondition = rules.filledFields().length > 0;
+          rules.needs_review =
+            rules.extra_conditions.length > 0 ||
+            (!explicitlyUnrestricted && !hasStructuredCondition);
+          rules.review_reason = rules.extra_conditions.length > 0
+            ? "unstructured_eligibility_conditions"
+            : rules.needs_review
+              ? "eligibility_source_requires_confirmation"
+              : null;'''
+          text, count = pattern.subn(replacement, text, count=1)
+          if count != 1:
+              raise SystemExit(f"parser review block replacement count={count}")
+          parser.write_text(text)
+
+          replace_required(
+              "web/ingest/tests/parser.test.ts",
+              'assert.equal(parseEligibility("만 19세 이상 34세 이하 청년").needs_review, true);',
+              'assert.equal(parseEligibility("만 19세 이상 34세 이하 청년").needs_review, false);',
+          )
+          replace_required(
+              "web/ingest/tests/pipeline.test.ts",
+              '  assert.equal(Number(ingest.report.parse.meanConfidence.toFixed(3)), 0.557);',
+              '  assert([...db.rules.values()].some((rule) => rule.needsReview === false));\n'
+              '  assert.ok(ingest.report.parse.meanConfidence > 0.5);',
+          )
+
+          web_readme = Path("web/README.md")
+          text = web_readme.read_text()
+          text = text.replace("22건뿐이라 top-k 30 이", "22건뿐이라 top-k 200 이")
+          text = text.replace("top-k 30→100", "top-k 200→500")
+          text = text.replace("| POST | `/api/profile`", "| GET/POST | `/api/profile`")
+          web_readme.write_text(text)
+
+          spec = Path("SPEC.md")
+          text = spec.read_text()
+          replacements = [
+              ("대분류 12종 택1", "대분류 13종 택1"),
+              ("질의와 상위 5건의 제목·기관·요약·혜택·마감·원문 URL만 전송", "질의 원문 없이 상위 5건의 제목·기관·요약·혜택·마감·원문 URL만 전송"),
+              ("OpenRouter에는 프로필·쿠키·공고 원문 본문을 보내지 않고, 답변은 저장하지 않는다. 탭·페이지 이동에서는 답변을 재사용한다.", "OpenRouter에는 질의 원문·프로필·쿠키·공고 원문 본문을 보내지 않고, 답변은 브라우저 탭에만 캐시한다. 새로고침·탭·페이지 이동에서는 답변을 재사용한다."),
+              ("찾으시는 것과 딱 맞는 건 없지만, 대상이 되는 지원을 보여드립니다", "찾으시는 것과 딱 맞는 건 없지만, 조건 일부가 일치하는 후보를 보여드립니다"),
+              ("임베딩 API와 질의가 있는 최초 전체 검색의 OpenRouter에만 전송하며, OpenRouter에는 프로필·쿠키·원문 본문을 보내지 않는다", "임베딩 API에만 전송하며, OpenRouter에는 질의 원문·프로필·쿠키·원문 본문을 보내지 않는다"),
+              ("응답은 한국어 평문 1,200자로 제한한다", "응답은 한국어 평문 600자로 제한하며 길이 종료 응답은 노출하지 않는다"),
+          ]
+          for old, new in replacements:
+              text = text.replace(old, new)
+          spec.write_text(text)
+
+          db_readme = Path("db/README.md")
+          text = db_readme.read_text()
+          text = text.replace("프로필은 서명 쿠키에만 두고", "프로필은 암호화 쿠키에만 두고")
+          text = text.replace(
+              "| `migrations/0012_drop_profiles.sql` | `profiles` 제거 — 프로필은 암호화 쿠키에만 두고 서버에 저장하지 않는다 |",
+              "| `migrations/0012_drop_profiles.sql` | `profiles` 제거 — 프로필은 암호화 쿠키에만 두고 서버에 저장하지 않는다 |\n"
+              "| `migrations/0013_parser_v5_review_guard.sql` | v5 이전 자격 파싱 결과를 재수집 전까지 `확인 필요`로 전환 |\n"
+              "| `migrations/0014_unknown_occupation.sql` | 직업 `기타·모름`을 탈락시키지 않고 확인 필요 후보로 유지 |",
+          )
+          text = text.replace("`POST /api/profile`", "`GET/POST /api/profile`")
+          db_readme.write_text(text)
+          PY
+
+          git add -A
+          git reset --soft origin/main
+          git commit -m "fix: rebase eligibility UX fixes on latest main" -m "Preserve PR #18's 15-item numeric pagination, restore 200/500 retrieval recall, treat occupation 'other' as unknown, reserve needs_review for actual unresolved conditions, and keep successful results visible on request errors."
+
+      - name: Verify final tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --prefix web
+          npm run --prefix web typecheck
+          npm run --prefix web lint
+          npm run --prefix web test
+          npm run --prefix web build
+          MOCK_EMBEDDINGS=1 npm run --prefix web ingest -- --fixtures --dry-run
+
+      - name: Push verified PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push --force-with-lease=refs/heads/fix/eligibility-results-ux:809e5d2ffcb14efd767b84d56a009caf8ae29eb9 origin HEAD:refs/heads/fix/eligibility-results-ux
