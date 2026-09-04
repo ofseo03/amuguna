@@ -2,6 +2,11 @@ name: migrate-production
 
 on:
   workflow_dispatch:
+    inputs:
+      migrations:
+        description: "적용할 마이그레이션 파일 (공백 구분, 순서대로). 이미 적용된 파일은 넣지 않는다 — 0009 처럼 CREATE TABLE 을 쓰는 파일은 재적용하면 실패한다."
+        required: true
+        default: "db/migrations/0013_page_offset.sql"
 
 concurrency:
   group: migrate-production
@@ -27,12 +32,17 @@ jobs:
           [[ "$DATABASE_URL" == *"ylxkqgmwmhtdwosttnkk"* ]]
           [[ "$DATABASE_URL" == *"aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres"* ]]
 
-      - name: 0008부터 순차 적용
+      # 운영 DB 는 0012 까지 적용된 상태다 (2026-09-01, run #3: 0008·0009·0010·0012).
+      # 그 목록을 다시 부으면 0009 의 CREATE TABLE 에서 실패하므로, 이번에 적용할 파일만 입력으로 받는다.
+      - name: 입력한 마이그레이션 순차 적용
         shell: bash
+        env:
+          MIGRATIONS: ${{ inputs.migrations }}
         run: |
           set -euo pipefail
-          for f in             db/migrations/0008_application_window.sql             db/migrations/0009_operational_integrity.sql             db/migrations/0010_cursor_matching.sql             db/migrations/0012_drop_profiles.sql             db/migrations/0013_page_offset.sql
+          for f in $MIGRATIONS
           do
+            [[ "$f" == db/migrations/*.sql && -f "$f" ]] || { echo "::error::알 수 없는 파일: $f"; exit 1; }
             echo "== $f"
             psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f"
           done
@@ -44,7 +54,9 @@ jobs:
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT pg_get_functiondef('public.match_programs(integer,text,text[],text,integer,vector,integer)'::regprocedure) LIKE '%p.starts_at%'")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.ingest_embedding_state') IS NOT NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_counts(integer,text,text[],text,integer,integer,vector,integer)') IS NOT NULL")" = "t"
+          # 0013: offset 인자가 붙은 15인자 함수만 남아야 한다. 14인자 구버전이 함께 있으면 호출이 모호해진다.
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer,integer)') IS NOT NULL")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer)') IS NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.profiles') IS NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.notification_outbox') IS NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.purge_stale_profiles(integer)') IS NULL")" = "t"

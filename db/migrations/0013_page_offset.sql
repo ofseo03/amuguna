@@ -8,12 +8,15 @@
 -- cursor walk would have reached.
 BEGIN;
 
+-- The 14-argument overload from 0010 must go: keeping both would make a 14-argument call
+-- ambiguous once the new one has a default for p_offset. Re-applying this file is harmless
+-- (IF EXISTS + OR REPLACE), which the production workflow relies on.
 DROP FUNCTION IF EXISTS public.match_program_page(
   integer, text, text[], text, integer, integer, vector, integer, boolean, text,
   double precision, bigint, integer, integer
 );
 
-CREATE FUNCTION public.match_program_page(
+CREATE OR REPLACE FUNCTION public.match_program_page(
   p_age integer, p_gender text, p_region_codes text[], p_occupation text,
   p_income_decile integer, p_median_income_percent integer,
   p_query_embedding vector(1024), p_topk integer DEFAULT 200,
