@@ -1,6 +1,26 @@
 -- Apply hard eligibility rules before ranking programs by embedding similarity.
 BEGIN;
 
+-- **먼저 옛 판을 지운다 — CREATE OR REPLACE 로는 이 파일을 부을 수 없기 때문이다.**
+--
+-- `CREATE OR REPLACE` 는 인자의 DEFAULT 를 **뺄 수 없다**. 새 판은 8인자에 DEFAULT 를 두지
+-- 않는데, 운영 DB 의 8인자 판에는 DEFAULT 가 붙어 있어 이 파일이 통째로 거부됐다
+-- (run #5, 2026-09-04):
+--
+--   ERROR:  cannot remove parameter defaults from existing function
+--   HINT:   Use DROP FUNCTION match_programs(integer,text,text[],text,integer,integer,vector,integer) first.
+--
+-- 신규 환경에서는 0006 이 DEFAULT 없이 만들어 두므로 순서대로 부으면 통과한다 — 그래서 CI 의
+-- "신규 환경" 검증은 이걸 잡지 못했다. 기존 DB 가 어떤 DEFAULT 를 달고 있는지 파일이 알 수
+-- 없으므로, 시그니처만 맞춰 지우고 새로 만든다. 아래에서 권한을 다시 부여한다.
+--
+-- 이 함수를 부르는 match_program_counts·match_program_page 는 본문이 문자열(`AS $$ … $$`)이라
+-- 의존성이 기록되지 않는다. 따라서 CASCADE 없이 지워도 그 둘은 그대로 남는다.
+-- 0002·0008 의 **7인자** 판은 시그니처가 달라 여기 해당하지 않는다 (건드리지 않는다).
+DROP FUNCTION IF EXISTS public.match_programs(
+  integer, text, text[], text, integer, integer, vector, integer
+);
+
 CREATE OR REPLACE FUNCTION public.match_programs(
   p_age integer, p_gender text, p_region_codes text[], p_occupation text,
   p_income_decile integer, p_median_income_percent integer,
