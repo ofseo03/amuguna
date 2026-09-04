@@ -10,7 +10,7 @@ import type { MatchCard, NearMissCard } from "@/lib/types";
  * 목록에서 무엇을 고를지 판단할 근거가 없으면 카드 수만큼 상세를 들락거리게 된다.
  * 지원금액은 상세 화면에서만 보여준다.
  */
-export function ProgramCard({ card }: { card: MatchCard }) {
+export function ProgramCard({ card, returnHref }: { card: MatchCard; returnHref: string }) {
   const p = card.program;
   const urgent = isUrgent(card.dDay);
 
@@ -36,7 +36,7 @@ export function ProgramCard({ card }: { card: MatchCard }) {
 
       <h3 className="text-lg font-bold leading-snug text-ink">
         <Link
-          href={`/programs/${p.id}`}
+          href={`/programs/${p.id}?from=${encodeURIComponent(returnHref)}`}
           className="inline-block py-0.5 no-underline hover:text-brand hover:underline"
         >
           {p.title}
@@ -67,7 +67,7 @@ export function ProgramCard({ card }: { card: MatchCard }) {
 }
 
 /** 근접 탈락 카드 (SPEC §7.6) */
-export function NearMissItem({ card }: { card: NearMissCard }) {
+export function NearMissItem({ card, returnHref }: { card: NearMissCard; returnHref: string }) {
   const p = card.program;
   return (
     <li className="rounded-xl border border-warn bg-warn-soft p-4">
@@ -82,7 +82,7 @@ export function NearMissItem({ card }: { card: NearMissCard }) {
       </div>
       <h3 className="font-bold text-ink">
         <Link
-          href={`/programs/${p.id}`}
+          href={`/programs/${p.id}?from=${encodeURIComponent(returnHref)}`}
           className="inline-block py-0.5 no-underline hover:text-brand hover:underline"
         >
           {p.title}
