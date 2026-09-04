@@ -27,6 +27,7 @@ import Term from "@/components/Term";
 import StepTrail from "@/components/StepTrail";
 import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
+import { parseResultsLocation, resultsHref } from "@/lib/results-location";
 import { MAX_SKIP_PAGES } from "@/lib/validation";
 import type { AiAnswerStatus, AnswerResponse, MatchPage, MatchResponse, MatchTab } from "@/lib/types";
 
@@ -219,13 +220,32 @@ export default function ResultsPage() {
     let cancelled = false;
     // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
     const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
+    const location = parseResultsLocation(new URLSearchParams(window.location.search));
+    const restoredPage = Math.min(location.page, MAX_SKIP_PAGES + 1);
     const seq = ++reqSeq.current;
-    void fetchMatch(false, "all", 1, null, 0, q).then((o) => {
-      if (o.kind === "ok") rememberPage(false, "all", 1, o.view);
+    void fetchMatch(
+      location.ignoreIntent,
+      location.tab,
+      restoredPage,
+      null,
+      restoredPage - 1,
+      q,
+    ).then((o) => {
+      if (o.kind === "ok") rememberPage(location.ignoreIntent, location.tab, restoredPage, o.view);
       if (cancelled || seq !== reqSeq.current) return;
       if (o.kind === "ok") {
-        setLastPage(cursorsFor(false, "all").lastPage);
-        requestAnswer(q, o.view);
+        setIgnoreIntent(location.ignoreIntent);
+        setTab(location.tab);
+        setPage(restoredPage);
+        setLastPage(cursorsFor(location.ignoreIntent, location.tab).lastPage);
+        window.history.replaceState(
+          null,
+          "",
+          resultsHref({ ...location, page: restoredPage }),
+        );
+        if (!location.ignoreIntent && location.tab === "all" && restoredPage === 1) {
+          requestAnswer(q, o.view);
+        }
       }
       apply(o, q);
     });
@@ -272,6 +292,7 @@ export default function ResultsPage() {
       setTab(t);
       setPage(current);
       setLastPage(entry.lastPage);
+      window.history.replaceState(null, "", resultsHref({ tab: t, page: current, ignoreIntent: all }));
       // 첫 로드가 실패해 "다시 시도" 로 들어온 경우 — 안내도 이제 받는다.
       if (!all && t === "all" && current === 1) requestAnswer(query, outcome.view);
     }
@@ -353,6 +374,7 @@ export default function ResultsPage() {
   const { summary, nearMisses, relaxationNotice, pageSize, demoMode, degraded } = data;
   const tabTotal = tab === "all" ? summary.total : summary.byForm[tab];
   const totalPages = pageCount(tabTotal, pageSize);
+  const returnHref = resultsHref({ tab, page, ignoreIntent });
 
   /*
     콜드 스타트 (SPEC §3.2).
@@ -544,7 +566,7 @@ export default function ResultsPage() {
         ) : (
           <ul className="grid gap-4">
             {cards.map((c) => (
-              <ProgramCard key={c.program.id} card={c} />
+              <ProgramCard key={c.program.id} card={c} returnHref={returnHref} />
             ))}
           </ul>
         )}
@@ -568,7 +590,7 @@ export default function ResultsPage() {
           </p>
           <ul className="mt-4 grid gap-3">
             {nearMisses.map((n) => (
-              <NearMissItem key={n.program.id} card={n} />
+              <NearMissItem key={n.program.id} card={n} returnHref={returnHref} />
             ))}
           </ul>
         </section>
