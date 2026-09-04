@@ -127,6 +127,9 @@ export function clientIp(req: Request): string {
 /**
  * 세션 우선 + IP 안전망.
  *
+ * `bucket` 은 개인 축의 이름공간이다 — `/api/match`, `/api/answer`, `/api/profile` 이 각자
+ * 한도(기본 10회/분)를 갖는다. IP 축은 라우트와 무관하게 하나다.
+ *
  * 세션 쿠키가 없으면 개인 한도 대신 IP 단위 익명 한도(기본 60회/분)를 쓴다.
  * 개인 한도(10회/분)를 IP 로 대신 물리면 그것이 곧 NAT 차단이고, 반대로 축을 아예
  * 건너뛰면 쿠키를 지우는 것만으로 IP 한도(600회/분)를 다 쓰게 된다.
@@ -138,6 +141,7 @@ export function checkSessionAndIpRateLimit(
   req: Request,
   now = Date.now(),
   env: NodeJS.ProcessEnv = process.env,
+  bucket = "match",
 ): RateLimitResult {
   const sessionLimit = envLimit("RATE_LIMIT_SESSION_PER_MIN", DEFAULT_SESSION_LIMIT, env);
   const ipLimit = envLimit("RATE_LIMIT_IP_PER_MIN", DEFAULT_IP_LIMIT, env);
@@ -149,11 +153,13 @@ export function checkSessionAndIpRateLimit(
   // IP 축이 이미 막았으면 두 번째 축의 카운트를 태우지 않는다.
   // 세션이 있으면 개인 한도로, 없으면 IP 단위 익명 한도로 센다 — 어느 쪽이든
   // 두 번째 축이 반드시 존재해야 세션 쿠키를 지우는 것만으로 상한이 뛰지 않는다.
+  // 개인 축은 라우트(bucket)별로 따로 센다 — 검색·페이지 넘김으로 한도를 다 쓴 사람이
+  // 프로필 수정까지 막히면 안 된다. IP 안전망은 쿠키 회전 abuse 만 보므로 공유한다.
   const sessionResult = !ipResult.allowed
     ? null
     : sessionId
-      ? checkRateLimit(`session:${sessionId}`, sessionLimit, now)
-      : checkRateLimit(`anon:${ip}`, anonLimit, now);
+      ? checkRateLimit(`session:${bucket}:${sessionId}`, sessionLimit, now)
+      : checkRateLimit(`anon:${bucket}:${ip}`, anonLimit, now);
 
   if (!ipResult.allowed) return { ...ipResult, scope: "ip" };
   if (sessionResult && !sessionResult.allowed) return { ...sessionResult, scope: "session" };
@@ -174,7 +180,7 @@ export function checkSessionAndIpRateLimit(
  * "요청이 많아"라고 쓰지 않는다. 이 한도는 사실상 개인 단위라 걸리는 사람은 본인이 눌러서
  * 걸린 것인데, 서버 혼잡으로 읽히면 무엇을 했길래 막혔는지 짐작할 수가 없다.
  */
-export function rateLimitMessage(retryAfter: number): string {
+export function rateLimitMessage(retryAfter: number, action = "검색"): string {
   const seconds = Math.max(1, retryAfter);
-  return `잠시 뒤에 다시 검색할 수 있습니다. ${seconds}초 후에 다시 시도해 주세요.`;
+  return `잠시 뒤에 다시 ${action}할 수 있습니다. ${seconds}초 후에 다시 시도해 주세요.`;
 }

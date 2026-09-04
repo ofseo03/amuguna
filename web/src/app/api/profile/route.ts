@@ -23,14 +23,14 @@ export async function POST(req: Request) {
   }
 
   // Rate limit (§8): 외부 호출은 없지만 세션 쿠키를 발급하는 유일한 쓰기 경로다.
-  // `/api/match` 와 같은 버킷을 쓴다 — 한 사람의 API 예산은 하나이고, 온보딩은 검색 전에
-  // 한 번 지나가는 경로라 개인 한도(10회/분)를 실질적으로 소모하지 않는다.
+  // `/api/match` 와 **다른** 버킷을 쓴다 — 검색·페이지 넘김으로 개인 한도(10회/분)를 다 쓴 뒤
+  // "조건 수정" 으로 돌아온 사람이 저장까지 거부당하면 안 된다.
   // 세션 쿠키가 아직 없는 첫 방문은 IP 단위 익명 한도로 센다.
-  const rl = checkSessionAndIpRateLimit(await readSessionId(), req);
+  const rl = checkSessionAndIpRateLimit(await readSessionId(), req, Date.now(), process.env, "profile");
   if (!rl.allowed) {
     console.warn(`[api/profile] rate limited (scope=${rl.scope}, limit=${rl.limit})`);
     return NextResponse.json(
-      { ok: false, code: "rate_limited", message: rateLimitMessage(rl.retryAfter) },
+      { ok: false, code: "rate_limited", message: rateLimitMessage(rl.retryAfter, "저장") },
       { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
     );
   }

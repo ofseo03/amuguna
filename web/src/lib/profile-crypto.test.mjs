@@ -147,9 +147,13 @@ test("프로필 쿠키는 httpOnly + SameSite 로 발급된다", async () => {
   assert.match(session, /secure: process\.env\.NODE_ENV === "production"/);
 });
 
-test("두 POST 라우트 모두 CSRF 검사를 거친다", async () => {
+test("모든 POST 라우트가 CSRF 검사를 거친다", async () => {
   const { readFile } = await import("node:fs/promises");
-  for (const route of ["../app/api/match/route.ts", "../app/api/profile/route.ts"]) {
+  for (const route of [
+    "../app/api/match/route.ts",
+    "../app/api/profile/route.ts",
+    "../app/api/answer/route.ts",
+  ]) {
     const code = await readFile(new URL(route, import.meta.url), "utf8");
     assert.match(code, /checkCsrf\(req\)/, `${route} 에 CSRF 검사가 없다`);
     assert.match(code, /status: 403/, `${route} 가 CSRF 거부를 403 으로 돌려주지 않는다`);

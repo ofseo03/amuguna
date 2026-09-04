@@ -139,3 +139,22 @@ test("익명 한도도 환경변수로 조절된다", () => {
   assert.equal(checkSessionAndIpRateLimit(null, req(ip), now, env).allowed, true);
   assert.equal(checkSessionAndIpRateLimit(null, req(ip), now, env).allowed, false);
 });
+
+test("라우트별 버킷은 개인 한도를 따로 센다 — 검색으로 한도를 다 써도 프로필 저장은 된다", () => {
+  const ip = "203.0.113.40";
+  const sid = uuid(4000);
+  const now = 9_000_000;
+  for (let i = 0; i < DEFAULT_SESSION_LIMIT; i++) {
+    assert.equal(checkSessionAndIpRateLimit(sid, req(ip), now, {}, "match").allowed, true);
+  }
+  assert.equal(checkSessionAndIpRateLimit(sid, req(ip), now, {}, "match").allowed, false);
+  assert.equal(checkSessionAndIpRateLimit(sid, req(ip), now, {}, "profile").allowed, true);
+  assert.equal(checkSessionAndIpRateLimit(sid, req(ip), now, {}, "answer").allowed, true);
+  // 세션 쿠키가 없는 익명 축도 마찬가지다
+  assert.equal(checkSessionAndIpRateLimit(null, req(ip), now, {}, "profile").allowed, true);
+});
+
+test("차단 문구는 라우트가 막힌 행동을 말한다", () => {
+  assert.match(rateLimitMessage(30), /다시 검색할 수 있습니다/);
+  assert.match(rateLimitMessage(30, "저장"), /다시 저장할 수 있습니다/);
+});

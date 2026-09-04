@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for f in             db/migrations/0008_application_window.sql             db/migrations/0009_operational_integrity.sql             db/migrations/0010_cursor_matching.sql             db/migrations/0012_drop_profiles.sql
+          for f in             db/migrations/0008_application_window.sql             db/migrations/0009_operational_integrity.sql             db/migrations/0010_cursor_matching.sql             db/migrations/0012_drop_profiles.sql             db/migrations/0013_page_offset.sql
           do
             echo "== $f"
             psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -f "$f"
@@ -44,7 +44,7 @@ jobs:
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT pg_get_functiondef('public.match_programs(integer,text,text[],text,integer,vector,integer)'::regprocedure) LIKE '%p.starts_at%'")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.ingest_embedding_state') IS NOT NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_counts(integer,text,text[],text,integer,integer,vector,integer)') IS NOT NULL")" = "t"
-          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer)') IS NOT NULL")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer,integer)') IS NOT NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.profiles') IS NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.notification_outbox') IS NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.purge_stale_profiles(integer)') IS NULL")" = "t"
