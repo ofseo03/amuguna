@@ -66,6 +66,14 @@ export interface MatchInput {
   form: MatchTab;
   cursor: MatchCursor | null;
   /**
+   * 커서 다음 페이지에서 몇 페이지를 더 건너뛸지 (0 = 커서 바로 다음 페이지).
+   *
+   * 결과 화면은 페이지 번호를 보여주지만 서버는 keyset 커서만 안다. 아는 커서에서 먼 페이지까지
+   * 한 페이지씩 걸어가면 한 번의 클릭이 요청 여러 개가 되어 세션 한도(§8, 10회/분)를 태운다.
+   * 그래서 건너뛸 페이지 수를 함께 받아 요청 한 번으로 그 페이지에 닿는다.
+   */
+  skipPages?: number;
+  /**
    * 자유입력(의도) 필터를 끄고 자격 대상 전체를 돌려준다 — 결과 화면의 "전체 보기".
    *
    * 자유입력이 결과를 줄인 것을 사용자가 되돌릴 수 있어야 하므로, 완화 단계와 무관하게
@@ -271,13 +279,25 @@ async function dbPageRows(
   cursor: MatchCursor | null,
   violations: 0 | 1,
   limit: number,
+  offset = 0,
 ): Promise<DbPageRow[]> {
   const sql = getSql();
   if (!sql) throw new Error("DATABASE_URL 미설정");
   const vecLiteral = useIntent && qvec ? toPgVectorLiteral(qvec) : null;
   const dbForm = form === "all" ? null : form;
+  // 건너뛰기(offset > 0)만 0013 이 추가한 15번째 인자를 넘긴다. 마이그레이션이 아직 안 된 DB 에서도
+  // 평범한 요청은 그대로 동작하고, 먼 페이지 점프만 실패한다 (적용 뒤에는 DEFAULT 로 같은 함수다).
   const rows = vecLiteral
-    ? await sql`
+    ? offset > 0
+      ? await sql`
+        SELECT * FROM match_program_page(
+          ${profile.age}::int, ${profile.gender}::text, ${regionPrefixes(profile)}::text[],
+          ${profile.occupation}::text, ${profile.incomeDecile}::int,
+          ${profile.medianIncomePercent}::int, ${vecLiteral}::vector, ${topk}::int,
+          ${hasQuery}::boolean, ${dbForm}::text, ${cursor?.score ?? null}::double precision,
+          ${cursor?.id ?? null}::bigint, ${limit}::int, ${violations}::int, ${offset}::int
+        )`
+      : await sql`
         SELECT * FROM match_program_page(
           ${profile.age}::int, ${profile.gender}::text, ${regionPrefixes(profile)}::text[],
           ${profile.occupation}::text, ${profile.incomeDecile}::int,
@@ -285,7 +305,16 @@ async function dbPageRows(
           ${hasQuery}::boolean, ${dbForm}::text, ${cursor?.score ?? null}::double precision,
           ${cursor?.id ?? null}::bigint, ${limit}::int, ${violations}::int
         )`
-    : await sql`
+    : offset > 0
+      ? await sql`
+        SELECT * FROM match_program_page(
+          ${profile.age}::int, ${profile.gender}::text, ${regionPrefixes(profile)}::text[],
+          ${profile.occupation}::text, ${profile.incomeDecile}::int,
+          ${profile.medianIncomePercent}::int, NULL::vector, ${topk}::int,
+          ${hasQuery}::boolean, ${dbForm}::text, ${cursor?.score ?? null}::double precision,
+          ${cursor?.id ?? null}::bigint, ${limit}::int, ${violations}::int, ${offset}::int
+        )`
+      : await sql`
         SELECT * FROM match_program_page(
           ${profile.age}::int, ${profile.gender}::text, ${regionPrefixes(profile)}::text[],
           ${profile.occupation}::text, ${profile.incomeDecile}::int,
@@ -422,11 +451,12 @@ export function encodeMatchCursor(cursor: MatchCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
-function pageCards(cards: MatchCard[], cursor: MatchCursor | null): MatchPage {
+function pageCards(cards: MatchCard[], cursor: MatchCursor | null, skipPages = 0): MatchPage {
   const after = cursor
     ? cards.filter((card) => card.score < cursor.score || (card.score === cursor.score && card.program.id > cursor.id))
     : cards;
-  const window = after.slice(0, PAGE_SIZE + 1);
+  const offset = skipPages * PAGE_SIZE;
+  const window = after.slice(offset, offset + PAGE_SIZE + 1);
   const visible = window.slice(0, PAGE_SIZE);
   const last = visible.at(-1);
   return {
@@ -443,13 +473,19 @@ function pageCards(cards: MatchCard[], cursor: MatchCursor | null): MatchPage {
  * 평범한 조작 몇 번으로 rate limit(§8, 세션 10회/분)에 걸린다. 2페이지 이후만 커서로 받는다.
  */
 function tabsToFill(input: MatchInput, byForm: Record<ProgramForm, number>): MatchTab[] {
-  if (input.cursor) return [input.form];
+  // 건너뛰기 요청도 커서 요청과 같다 — 이미 결과 화면에 있는 사람이 먼 페이지를 누른 것이다.
+  if (input.cursor || skipPagesOf(input) > 0) return [input.form];
   return ["all", ...FORMS.filter((f) => byForm[f] > 0)];
+}
+
+/** 요청 탭에만 적용되는 건너뛸 페이지 수. 곁들여 보내는 다른 탭은 언제나 1페이지다. */
+function skipPagesOf(input: MatchInput): number {
+  return Math.max(0, Math.floor(input.skipPages ?? 0));
 }
 
 export async function runMatch(
   input: MatchInput,
-): Promise<Omit<MatchResponse, "aiAnswer" | "aiAnswerStatus" | "tookMs">> {
+): Promise<Omit<MatchResponse, "tookMs">> {
   const now = new Date();
   const { profile } = input;
 
@@ -537,7 +573,8 @@ export async function runMatch(
     const pages: MatchPages = {};
     for (const t of tabsToFill(input, byForm)) {
       const list = t === "all" ? allCards : allCards.filter((c) => c.program.form === t);
-      pages[t] = pageCards(list, t === input.form ? input.cursor : null);
+      const requested = t === input.form;
+      pages[t] = pageCards(list, requested ? input.cursor : null, requested ? skipPagesOf(input) : 0);
     }
     return {
       summary: { profileLabel: profileLabel(profile), total: allCards.length, byForm },
@@ -581,6 +618,7 @@ export async function runMatch(
       dbPageRows(
         profile, qvec, topk, useIntent, hasQueryForScoring, t,
         t === input.form ? input.cursor : null, 0, PAGE_SIZE + 1,
+        t === input.form ? skipPagesOf(input) * PAGE_SIZE : 0,
       ),
     ),
   );
@@ -666,14 +704,27 @@ async function isCatalogEmpty(): Promise<boolean> {
 
 /** 상세 화면용 단건 조회 */
 export async function getProgram(id: number): Promise<Program | null> {
+  return (await getPrograms([id]))[0] ?? null;
+}
+
+/**
+ * 공고 여러 건 조회 — 요청한 id 순서를 지키고, 매칭 카탈로그와 같은 노출 조건만 통과시킨다.
+ *
+ * 상세 화면(`getProgram`)과 AI 안내(`/api/answer`)가 함께 쓴다. 안내는 클라이언트가 보낸 id 로
+ * 다시 읽는다 — 카드 본문을 그대로 받으면 아무 문장이나 OpenRouter 로 흘려보내는 통로가 된다.
+ */
+export async function getPrograms(ids: number[]): Promise<Program[]> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return [];
   if (!isDbConfigured()) {
     const { demoProgram } = await import("./demo-store");
-    const program = demoProgram(id);
-    return program && isOpen(program) ? program : null;
+    return unique
+      .map((id) => demoProgram(id))
+      .filter((p): p is Program => p !== null && isOpen(p));
   }
   const sql = getSql();
-  if (!sql) return null;
-  // Keep detail visibility aligned with the active matching catalog.
+  if (!sql) return [];
+  // Keep visibility aligned with the active matching catalog.
   const rows = await sql`
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
@@ -681,11 +732,11 @@ export async function getProgram(id: number): Promise<Program | null> {
            e.extra_conditions, e.parse_method, e.confidence, e.needs_review
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
-    WHERE p.id = ${id}::bigint
+    WHERE p.id = ANY(${unique}::bigint[])
       AND p.status = 'active'
       AND (p.starts_at IS NULL OR p.starts_at <= (now() AT TIME ZONE 'Asia/Seoul')::date)
-      AND (p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date)
-    LIMIT 1`;
-  if (rows.length === 0) return null;
-  return rowToProgram(rows[0]);
+      AND (p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date)`;
+  const byId = new Map<number, Program>();
+  for (const r of rows) byId.set(Number(r.id), rowToProgram(r));
+  return unique.map((id) => byId.get(id)).filter((p): p is Program => p !== undefined);
 }

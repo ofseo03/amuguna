@@ -92,6 +92,34 @@ export function validateQuery(input: unknown): Validated<string | null> {
   return { ok: true, value: trimmed };
 }
 
+/**
+ * 한 요청으로 건너뛸 수 있는 최대 페이지 수. `match_program_page()` 의 OFFSET 상한(1500행)과
+ * 같은 값이다 — 결과 화면이 먼 페이지 번호를 눌렀을 때 아는 커서에서 여기까지는 한 번에 간다.
+ */
+export const MAX_SKIP_PAGES = 100;
+
+/** 커서 기준으로 몇 페이지를 건너뛰어 받을지. 생략·0 은 커서 바로 다음 페이지다. */
+export function validateSkipPages(input: unknown): Validated<number> {
+  if (input === undefined || input === null) return { ok: true, value: 0 };
+  if (typeof input !== "number" || !Number.isInteger(input) || input < 0 || input > MAX_SKIP_PAGES) {
+    return { ok: false, errors: [{ field: "skipPages", message: "skipPages 값이 올바르지 않습니다." }] };
+  }
+  return { ok: true, value: input };
+}
+
+/** AI 안내의 근거가 될 공고 id 목록 — 결과 상위 5건 이내, 순서는 화면의 번호 그대로다. */
+export function validateProgramIds(input: unknown, max = 5): Validated<number[]> {
+  if (
+    !Array.isArray(input) ||
+    input.length === 0 ||
+    input.length > max ||
+    !input.every((id) => Number.isSafeInteger(id) && id >= 1)
+  ) {
+    return { ok: false, errors: [{ field: "programIds", message: "programIds 값이 올바르지 않습니다." }] };
+  }
+  return { ok: true, value: [...new Set(input as number[])] };
+}
+
 export function validateForm(input: unknown): ProgramForm | "all" {
   if (typeof input === "string" && (FORMS as string[]).includes(input)) {
     return input as ProgramForm;

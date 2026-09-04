@@ -15,6 +15,7 @@ Postgres (Supabase) + `pgvector`. SPEC.md §5(데이터 모델) / §7.3(교차 �
 | `migrations/0009_operational_integrity.sql` | 원자적 임베딩 전환·수집 baseline·재검토 상태 |
 | `migrations/0010_cursor_matching.sql` | 서버 점수 정렬·커서 페이지 RPC |
 | `migrations/0012_drop_profiles.sql` | `profiles` 제거 — 프로필은 서명 쿠키에만 두고 서버에 저장하지 않는다 |
+| `migrations/0013_page_offset.sql` | `match_program_page()` 에 행 offset 추가 — 먼 페이지 번호를 요청 한 번으로 연다 |
 
 ---
 

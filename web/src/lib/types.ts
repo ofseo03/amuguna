@@ -148,7 +148,8 @@ export type RelaxationStage =
   | "intent_dropped"
   | "near_miss_only";
 
-export type AiAnswerStatus = "ok" | "not_requested" | "unavailable";
+/** `pending` 은 클라이언트 전용 — 카드는 떴고 안내를 기다리는 중이다 */
+export type AiAnswerStatus = "ok" | "not_requested" | "unavailable" | "pending";
 
 /** 결과 화면 탭 — form 별 좁혀보기 + 전체 */
 export type MatchTab = ProgramForm | "all";
@@ -205,8 +206,16 @@ export interface MatchResponse {
   catalogEmpty: boolean;
   /** 임베딩 실패 등으로 의도 축이 빠진 경우 (§8 신뢰성) */
   degraded: boolean;
-  /** 최초 검색 결과 상위 5건을 근거로 실시간 생성한 전체 안내 */
+  tookMs: number;
+}
+
+/**
+ * `POST /api/answer` — 질의가 있는 최초 검색의 상위 5건을 근거로 실시간 생성한 안내.
+ *
+ * 매칭 응답과 분리한 이유: 한 응답에 묶으면 이미 계산된 카드가 OpenRouter 를 기다리는 동안
+ * (최대 12초) 화면에 못 나온다. 카드를 먼저 그리고 안내는 뒤따라 받는다.
+ */
+export interface AnswerResponse {
   aiAnswer: string | null;
   aiAnswerStatus: AiAnswerStatus;
-  tookMs: number;
 }

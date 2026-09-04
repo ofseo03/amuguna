@@ -12,7 +12,10 @@
  *
  * 서버는 keyset 커서(score, id)만 알고 페이지 번호를 모른다. 그래서 탭별로 "n페이지의 커서" 를
  * 클라이언트가 기억한다 — 1페이지는 null, k+1 페이지는 k페이지 응답의 nextCursor. 아직 커서를 모르는
- * 먼 페이지를 누르면 아는 곳부터 차례로 걸어가며 채운다(응답은 캐시되므로 두 번째부터는 즉시 뜬다).
+ * 먼 페이지를 누르면 아는 커서 중 가장 가까운 것에 `skipPages` 를 붙여 **요청 한 번**으로 간다 —
+ * 한 페이지씩 걸어가면 클릭 한 번이 요청 여러 개가 되어 세션 한도를 태우고 도중에 끊긴다.
+ *
+ * AI 안내는 카드와 따로 받는다(`/api/answer`). 한 응답에 묶으면 카드가 OpenRouter 를 기다린다.
  *
  * 오류는 화면을 갈아엎지 않는다. 이미 받아둔 결과가 있으면 카드는 그대로 두고 배너로만 얹는다.
  */
@@ -24,7 +27,8 @@ import Term from "@/components/Term";
 import StepTrail from "@/components/StepTrail";
 import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
-import type { AiAnswerStatus, MatchPage, MatchResponse, MatchTab } from "@/lib/types";
+import { MAX_SKIP_PAGES } from "@/lib/validation";
+import type { AiAnswerStatus, AnswerResponse, MatchPage, MatchResponse, MatchTab } from "@/lib/types";
 
 type Payload = MatchResponse & { ok: true };
 /** 화면에 그리는 한 단위 — 응답의 공통부(요약·근접탈락 등) + 지금 보고 있는 탭·페이지의 카드 */
@@ -32,8 +36,17 @@ type View = { payload: Payload; page: MatchPage };
 
 /** 같은 결과를 두 번 받아오지 않기 위한 키. 전체 보기 여부까지 넣어야 두 상태를 오갈 수 있다. */
 const tabKey = (all: boolean, t: MatchTab) => `${all ? "all-eligible" : "intent"}|${t}`;
-const cacheKey = (all: boolean, t: MatchTab, cursor: string | null) =>
-  `${tabKey(all, t)}|${cursor ?? "first"}`;
+const cacheKey = (all: boolean, t: MatchTab, page: number) => `${tabKey(all, t)}|p${page}`;
+
+/** 탭 하나의 페이지 커서 기억. `cursors` 는 페이지 번호 → 그 페이지를 여는 커서 (1페이지는 null) */
+type TabCursors = { cursors: Map<number, string | null>; lastPage: number | null };
+
+/** n 이하에서 커서를 아는 가장 큰 페이지. 1페이지는 항상 안다. */
+function nearestKnownPage(entry: TabCursors, n: number): number {
+  let best = 1;
+  for (const p of entry.cursors.keys()) if (p <= n && p > best) best = p;
+  return best;
+}
 
 export default function ResultsPage() {
   const [tab, setTab] = useState<MatchTab>("all");
@@ -49,13 +62,15 @@ export default function ResultsPage() {
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   const [aiAnswerStatus, setAiAnswerStatus] = useState<AiAnswerStatus>("not_requested");
 
-  /** (전체 보기 여부, 탭, 커서) → 응답. 첫 응답 하나가 모든 탭의 1페이지를 채운다. */
+  /** (전체 보기 여부, 탭, 페이지) → 응답. 첫 응답 하나가 모든 탭의 1페이지를 채운다. */
   const cache = useRef(new Map<string, View>());
   /**
-   * 탭별 페이지 커서. index i 가 i+1 페이지를 여는 커서다 (0번은 항상 null = 첫 페이지).
+   * 탭별 페이지 커서. 건너뛰기로 받은 페이지 사이는 비어 있을 수 있다(그래서 배열이 아니라 Map).
    * 마지막 페이지를 확인하면 lastPage 에 기록해 total 로 계산한 페이지 수보다 우선한다.
    */
-  const pageCursors = useRef(new Map<string, { cursors: (string | null)[]; lastPage: number | null }>());
+  const pageCursors = useRef(new Map<string, TabCursors>());
+  /** AI 안내는 결과 화면당 한 번만 요청한다 — 탭·페이지·전체 보기 이동은 같은 안내를 유지한다 */
+  const answerRequested = useRef(false);
   /**
    * 마지막으로 보낸 요청의 순번. 응답이 도착했을 때 이 값과 다르면 그 사이 다른 탭·페이지를
    * 눌렀다는 뜻이므로 버린다 — 느린 응답이 늦게 와서 새 탭 위에 옛 카드를 그리지 않게 한다.
@@ -70,17 +85,31 @@ export default function ResultsPage() {
    * 순수 fetch — 상태를 건드리지 않고 결과만 돌려준다.
    * 상태 갱신은 전부 호출부의 .then 안에서 일어나므로 effect 본문에서 동기 setState 가 없다.
    *
+   * `page` 는 이 요청이 여는 페이지 번호(= 커서의 페이지 + skipPages). 캐시 키로만 쓴다.
    * 응답에 담겨 온 다른 탭의 1페이지도 함께 캐시에 넣는다. 그래서 탭을 눌러도 요청이 나가지 않는다.
    */
   const fetchMatch = useCallback(
-    (all: boolean, nextTab: MatchTab, nextCursor: string | null, q: string | null): Promise<Outcome> => {
-      const hit = cache.current.get(cacheKey(all, nextTab, nextCursor));
+    (
+      all: boolean,
+      nextTab: MatchTab,
+      page: number,
+      nextCursor: string | null,
+      skipPages: number,
+      q: string | null,
+    ): Promise<Outcome> => {
+      const hit = cache.current.get(cacheKey(all, nextTab, page));
       if (hit) return Promise.resolve({ kind: "ok", view: hit });
 
       return fetch("/api/match", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ query: q, form: nextTab, cursor: nextCursor, ignoreIntent: all }),
+        body: JSON.stringify({
+          query: q,
+          form: nextTab,
+          cursor: nextCursor,
+          skipPages: skipPages > 0 ? skipPages : undefined,
+          ignoreIntent: all,
+        }),
       })
         .then(async (res) => {
           const body = await res.json();
@@ -93,8 +122,8 @@ export default function ResultsPage() {
           }
           const payload = body as Payload;
           for (const [t, p] of Object.entries(payload.pages)) {
-            // 요청한 탭만 커서가 붙는다. 곁들여 온 다른 탭은 언제나 1페이지다.
-            const key = cacheKey(all, t as MatchTab, t === nextTab ? nextCursor : null);
+            // 요청한 탭만 요청한 페이지다. 곁들여 온 다른 탭은 언제나 1페이지다.
+            const key = cacheKey(all, t as MatchTab, t === nextTab ? page : 1);
             cache.current.set(key, { payload, page: p as MatchPage });
           }
           const requested = payload.pages[nextTab];
@@ -123,11 +152,6 @@ export default function ResultsPage() {
     setQuery(q);
     if (outcome.kind === "ok") {
       setView(outcome.view);
-      // 탭·페이지 응답은 not_requested 이므로 최초 전체 검색의 안내를 그대로 유지한다.
-      if (outcome.view.payload.aiAnswerStatus !== "not_requested") {
-        setAiAnswer(outcome.view.payload.aiAnswer);
-        setAiAnswerStatus(outcome.view.payload.aiAnswerStatus);
-      }
       setError(null);
     } else {
       setError({ message: outcome.message, noProfile: outcome.noProfile });
@@ -135,62 +159,110 @@ export default function ResultsPage() {
     setLoading(false);
   }, []);
 
-  const cursorsFor = useCallback((all: boolean, t: MatchTab) => {
+  const cursorsFor = useCallback((all: boolean, t: MatchTab): TabCursors => {
     const key = tabKey(all, t);
     let entry = pageCursors.current.get(key);
     if (!entry) {
-      entry = { cursors: [null], lastPage: null };
+      entry = { cursors: new Map([[1, null]]), lastPage: null };
       pageCursors.current.set(key, entry);
     }
     return entry;
   }, []);
 
-  /** n 페이지 응답을 받았을 때 n+1 페이지 커서(또는 마지막 페이지 여부)를 기록한다. */
+  /**
+   * n 페이지 응답을 받았을 때 n+1 페이지 커서(또는 마지막 페이지 여부)를 기록한다.
+   *
+   * 여기서는 화면 상태(lastPage)를 건드리지 않는다 — 버린 요청(다른 탭을 이미 눌렀다)의
+   * 늦은 응답이 지금 보고 있는 탭의 페이지 수를 잘라 버렸었다. 캐시·커서 기록은 어느 탭의
+   * 것이든 유효하므로 남기고, 화면 반영은 호출부가 순번을 확인한 뒤에 한다.
+   */
   const rememberPage = useCallback(
     (all: boolean, t: MatchTab, n: number, view: View) => {
       const entry = cursorsFor(all, t);
       if (view.page.nextCursor) {
-        if (entry.cursors.length === n) entry.cursors.push(view.page.nextCursor);
+        entry.cursors.set(n + 1, view.page.nextCursor);
       } else {
         entry.lastPage = n;
       }
-      setLastPage(entry.lastPage);
     },
     [cursorsFor],
   );
+
+  /**
+   * 질의가 있는 최초 검색의 상위 5건으로 AI 안내를 따로 받아온다 — 카드는 이미 떠 있다.
+   * 결과 화면당 한 번이고, 실패해도 카드는 그대로다 (unavailable 안내만 붙는다).
+   */
+  const requestAnswer = useCallback((q: string | null, view: View) => {
+    if (answerRequested.current) return;
+    const programIds = view.page.cards.slice(0, 5).map((c) => c.program.id);
+    if (!q?.trim() || programIds.length === 0) return;
+    answerRequested.current = true;
+    setAiAnswerStatus("pending");
+    void fetch("/api/answer", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: q, programIds }),
+    })
+      .then(async (res) => {
+        const body = (await res.json()) as Partial<AnswerResponse> & { ok?: boolean };
+        if (!res.ok || !body.ok || !body.aiAnswerStatus) throw new Error("answer failed");
+        setAiAnswer(body.aiAnswer ?? null);
+        setAiAnswerStatus(body.aiAnswerStatus);
+      })
+      .catch(() => {
+        setAiAnswer(null);
+        setAiAnswerStatus("unavailable");
+      });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
     const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
     const seq = ++reqSeq.current;
-    void fetchMatch(false, "all", null, q).then((o) => {
-      if (cancelled || seq !== reqSeq.current) return;
+    void fetchMatch(false, "all", 1, null, 0, q).then((o) => {
       if (o.kind === "ok") rememberPage(false, "all", 1, o.view);
+      if (cancelled || seq !== reqSeq.current) return;
+      if (o.kind === "ok") {
+        setLastPage(cursorsFor(false, "all").lastPage);
+        requestAnswer(q, o.view);
+      }
       apply(o, q);
     });
     return () => {
       cancelled = true;
     };
-  }, [fetchMatch, apply, rememberPage]);
+  }, [fetchMatch, apply, rememberPage, cursorsFor, requestAnswer]);
 
   /**
-   * (전체 보기 여부, t 탭)의 n 페이지로 이동한다. 커서를 모르는 페이지면 아는 마지막 페이지부터
-   * 순서대로 걸어간다. 도중에 결과가 끝나면 거기서 멈춘다 — total 로 계산한 페이지 수가 실제보다
-   * 클 수 있다. 1페이지는 첫 응답이 이미 캐시에 넣어 두었으므로 요청이 나가지 않는다.
+   * (전체 보기 여부, t 탭)의 n 페이지로 이동한다.
+   *
+   * 커서를 모르는 페이지면 아는 커서 중 n 에 가장 가까운 것에서 `skipPages` 만큼 건너뛰어
+   * **요청 한 번**으로 간다. 서버 상한(MAX_SKIP_PAGES)보다 먼 페이지만 두 번 이상 왕복한다.
+   * total 로 계산한 페이지 수가 실제보다 커서 빈 페이지가 오면 한 페이지 앞으로 물러선다.
+   * 1페이지는 첫 응답이 이미 캐시에 넣어 두었으므로 요청이 나가지 않는다.
    */
   async function loadPage(all: boolean, t: MatchTab, n: number) {
     setLoading(true);
     const seq = ++reqSeq.current;
     const entry = cursorsFor(all, t);
-    let current = Math.min(n, entry.cursors.length);
-    let outcome: Outcome = await fetchMatch(all, t, entry.cursors[current - 1], query);
-    while (outcome.kind === "ok") {
+    let target = Math.max(1, n);
+    let current = 1;
+    let outcome: Outcome;
+    for (;;) {
+      const from = nearestKnownPage(entry, target);
+      const skip = Math.min(target - from, MAX_SKIP_PAGES);
+      current = from + skip;
+      outcome = await fetchMatch(all, t, current, entry.cursors.get(from) ?? null, skip, query);
+      if (outcome.kind !== "ok") break;
       rememberPage(all, t, current, outcome.view);
-      if (current >= n || !outcome.view.page.nextCursor) break;
       if (seq !== reqSeq.current) return;
-      current += 1;
-      outcome = await fetchMatch(all, t, entry.cursors[current - 1], query);
+      if (outcome.view.page.cards.length === 0 && current > 1) {
+        entry.lastPage = current - 1;
+        target = current - 1;
+        continue;
+      }
+      if (current >= target || !outcome.view.page.nextCursor) break;
     }
     if (seq !== reqSeq.current) return;
     // 어디를 보고 있는지는 실제로 받아온 뒤에만 움직인다 — 실패했는데 탭·페이지 표시만
@@ -200,6 +272,8 @@ export default function ResultsPage() {
       setTab(t);
       setPage(current);
       setLastPage(entry.lastPage);
+      // 첫 로드가 실패해 "다시 시도" 로 들어온 경우 — 안내도 이제 받는다.
+      if (!all && t === "all" && current === 1) requestAnswer(query, outcome.view);
     }
     apply(outcome, query);
   }
@@ -392,6 +466,12 @@ export default function ResultsPage() {
             자격 여부와 신청 조건은 반드시 해당 기관의 공고 원문에서 확인해 주세요.
           </p>
         </section>
+      )}
+
+      {aiAnswerStatus === "pending" && (
+        <p role="status" aria-live="polite" className="mt-3 rounded-lg border border-line bg-bg-soft px-4 py-2 text-sm text-ink-2">
+          검색 결과를 바탕으로 AI 안내를 준비하고 있습니다…
+        </p>
       )}
 
       {aiAnswerStatus === "unavailable" && (

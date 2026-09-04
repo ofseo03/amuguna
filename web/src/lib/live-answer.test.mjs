@@ -3,27 +3,23 @@ import test from "node:test";
 
 import { generateLiveAnswer } from "./live-answer.ts";
 
-function cards(count = 6) {
+function programs(count = 6) {
   return Array.from({ length: count }, (_, index) => ({
-    reason: `PRIVATE_REASON_${index + 1}`,
-    profile: `PRIVATE_PROFILE_${index + 1}`,
-    program: {
-      title: `지원 사업 ${index + 1}`,
-      issuer: `기관 ${index + 1}`,
-      summary: `요약 ${index + 1}`,
-      benefit_amount_text: `${index + 1}백만원`,
-      ends_at: "2026-12-31",
-      is_always_open: false,
-      source_url: `https://example.test/${index + 1}`,
-      body_text: `PRIVATE_BODY_${index + 1}`,
-    },
+    title: `지원 사업 ${index + 1}`,
+    issuer: `기관 ${index + 1}`,
+    summary: `요약 ${index + 1}`,
+    benefit_amount_text: `${index + 1}백만원`,
+    ends_at: "2026-12-31",
+    is_always_open: false,
+    source_url: `https://example.test/${index + 1}`,
+    body_text: `PRIVATE_BODY_${index + 1}`,
+    eligibility_text: `PRIVATE_ELIGIBILITY_${index + 1}`,
   }));
 }
 
 const initialSearch = {
   query: "창업 자금이 필요해요",
-  cursor: null,
-  cards: cards(),
+  programs: programs(),
 };
 
 test("최초 검색은 허용된 상위 5건만 OpenRouter에 한 번 보낸다", async () => {
@@ -50,10 +46,10 @@ test("최초 검색은 허용된 상위 5건만 OpenRouter에 한 번 보낸다"
   assert.match(serialized, /창업 자금이 필요해요/);
   assert.match(serialized, /지원 사업 5/);
   assert.doesNotMatch(serialized, /지원 사업 6/);
-  assert.doesNotMatch(serialized, /PRIVATE_PROFILE|PRIVATE_REASON|PRIVATE_BODY|body_text/);
+  assert.doesNotMatch(serialized, /PRIVATE_BODY|PRIVATE_ELIGIBILITY|body_text|eligibility_text/);
 });
 
-test("검색어·첫 페이지·결과 중 하나라도 없으면 요청하지 않는다", async () => {
+test("검색어·결과 중 하나라도 없으면 요청하지 않는다", async () => {
   let calls = 0;
   const fetchImpl = async () => {
     calls++;
@@ -61,8 +57,8 @@ test("검색어·첫 페이지·결과 중 하나라도 없으면 요청하지 �
   };
   const cases = [
     { ...initialSearch, query: null },
-    { ...initialSearch, cursor: { score: 0.5, id: 1 } },
-    { ...initialSearch, cards: [] },
+    { ...initialSearch, query: "   " },
+    { ...initialSearch, programs: [] },
   ];
 
   for (const input of cases) {

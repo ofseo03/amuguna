@@ -5,25 +5,25 @@
  * 좁히는 것뿐인데 그때마다 이 라우트를 부르면 평범한 조작 몇 번으로 rate limit 에 걸린다.
  *
  * 자유입력은 이 요청 시점에만 사용하고 저장하지 않는다 (§8).
- * 질의가 있는 최초 전체 검색은 매칭 결과 상위 5건으로 실시간 AI 안내를 1회 생성한다.
+ * 실시간 AI 안내는 여기서 만들지 않는다 — 카드가 OpenRouter 를 기다리며 화면에 못 나오는 일이
+ * 없도록 클라이언트가 카드를 그린 뒤 `/api/answer` 로 따로 받는다.
  * Rate limit: 익명 세션 + IP 기준 10회/분 (§8).
  */
 import { NextResponse } from "next/server";
 import { runMatch } from "@/lib/matching";
-import { generateLiveAnswer } from "@/lib/live-answer";
 import { readProfile, readSessionId, upgradeProfileCookie } from "@/lib/session";
 import { CSRF_MESSAGE, checkCsrf } from "@/lib/csrf";
 import { checkSessionAndIpRateLimit, rateLimitMessage } from "@/lib/rate-limit";
-import { validateCursor, validateForm, validateQuery } from "@/lib/validation";
+import { validateCursor, validateForm, validateQuery, validateSkipPages } from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 /**
- * 함수 실행 상한(초). 요청 예산 = 질의 임베딩 15초 + SQL 수 회 + OpenRouter 12초 (SPEC §8 성능).
- * 명시하지 않으면 플랫폼 기본값(10~15초)이 이 예산보다 먼저 끊어, 임베딩·LLM 의 degraded
+ * 함수 실행 상한(초). 요청 예산 = 질의 임베딩 15초 + SQL 수 회 (SPEC §8 성능).
+ * 명시하지 않으면 플랫폼 기본값(10~15초)이 이 예산보다 먼저 끊어, 임베딩의 degraded
  * 경로가 실행될 기회 없이 504 가 난다. 예산 합계에 여유를 조금 더한 값이다.
  */
-export const maxDuration = 40;
+export const maxDuration = 25;
 
 export async function POST(req: Request) {
   // CSRF (§8): 검색은 임베딩·OpenRouter 비용을 만들 수 있으므로 크로스사이트 호출을 막는다
@@ -80,6 +80,10 @@ export async function POST(req: Request) {
   if (!cursor.ok) {
     return NextResponse.json({ ok: false, errors: cursor.errors }, { status: 400 });
   }
+  const skipPages = validateSkipPages(body.skipPages);
+  if (!skipPages.ok) {
+    return NextResponse.json({ ok: false, errors: skipPages.errors }, { status: 400 });
+  }
 
   const form = validateForm(body.form);
   const started = Date.now();
@@ -89,19 +93,13 @@ export async function POST(req: Request) {
       query: q.value,
       form,
       cursor: cursor.value,
+      skipPages: skipPages.value,
       ignoreIntent: body.ignoreIntent === true,
-    });
-    const ai = await generateLiveAnswer({
-      query: q.value,
-      cursor: cursor.value,
-      cards: result.pages.all?.cards ?? [],
     });
     return NextResponse.json(
       {
         ok: true,
         ...result,
-        aiAnswer: ai.text,
-        aiAnswerStatus: ai.status,
         tookMs: Date.now() - started,
       },
       {

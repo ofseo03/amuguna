@@ -391,6 +391,12 @@ body {
  */
 .tech-grid {
   position: relative;
+  /*
+   * 아래 ::before 의 z-index:-1 이 이 요소의 배경 위에 놓이려면 이 요소가 스태킹 컨텍스트여야
+   * 한다. position:relative 만으로는 컨텍스트가 생기지 않아 격자가 부모의 불투명 bg-bg 뒤로
+   * 들어가 아예 보이지 않았다.
+   */
+  isolation: isolate;
 }
 /*
  * 격자는 반드시 별도 레이어여야 한다. 컨테이너에 직접 mask 를 걸면 원과 글자까지

@@ -80,6 +80,7 @@ SPEC §5 의 예시 문구 4종으로 실측해 정한 값이다.
 |---|---|---|
 | POST | `/api/profile` | `src/app/api/profile/route.ts` |
 | POST | `/api/match` | `src/app/api/match/route.ts` |
+| POST | `/api/answer` | `src/app/api/answer/route.ts` |
 | GET | `/api/programs/:id` | `src/app/api/programs/[id]/route.ts` |
 
 ### 흐름 확인 (curl)
@@ -92,6 +93,11 @@ curl -s -c jar -X POST localhost:3000/api/profile -H 'content-type: application/
 # 2) 매칭 — 자유입력은 이 요청에만 쓰이고 저장되지 않는다
 curl -s -b jar -X POST localhost:3000/api/match -H 'content-type: application/json' \
   -d '{"query":"보증금 올려달래서 대출 알아봐요","form":"all","cursor":null}'
+#    먼 페이지는 아는 커서에 skipPages 를 붙여 요청 한 번으로 연다 (예: 1페이지 커서 null + skipPages 4 = 5페이지)
+
+# 2b) AI 안내 — 카드가 뜬 뒤 결과 상위 5건의 id 로 따로 받는다
+curl -s -b jar -X POST localhost:3000/api/answer -H 'content-type: application/json' \
+  -d '{"query":"보증금 올려달래서 대출 알아봐요","programIds":[1,2,3,4,5]}'
 
 # 3) 상세 — 세션 프로필과 대조한 자격 체크리스트 포함
 curl -s -b jar localhost:3000/api/programs/1
@@ -144,11 +150,12 @@ L2 정규화
 
 ### 질의가 있는 최초 검색 결과의 실시간 답변
 
-수집 배치는 정규식 파싱과 결정형 카드 문구만 만든다. `POST /api/match`의 **질의가 있는
-최초 전체 검색**(`form=all`, 첫 페이지)만 OpenRouter에 질의 문장과 상위 5건의 공개
-메타데이터(제목·기관·요약·혜택·마감·원문 URL)를 보내 답변 하나를 만든다. 프로필·쿠키·원문
-본문은 보내지 않고 답변을 저장하지 않는다. 탭·페이지 이동은 이 답변을 재사용한다. 최초
-응답은 OpenRouter를 최대 12초 기다리지만, 실패해도 카드 결과를 함께 반환한다.
+수집 배치는 정규식 파싱과 결정형 카드 문구만 만든다. **질의가 있는 최초 전체 검색**의
+결과 화면이 카드를 그린 뒤 `POST /api/answer` 로 상위 5건의 id 를 보내면, 서버가 그 공고의
+공개 메타데이터(제목·기관·요약·혜택·마감·원문 URL)를 다시 읽어 질의 문장과 함께 OpenRouter에
+보내 답변 하나를 만든다. 프로필·쿠키·원문 본문은 보내지 않고 답변을 저장하지 않는다.
+탭·페이지 이동은 이 답변을 재사용한다. `/api/match` 와 분리한 이유는 카드가 OpenRouter
+(최대 12초)를 기다리며 화면에 못 나오는 일을 없애기 위해서다 — 안내가 실패해도 카드는 그대로다.
 
 ---
 

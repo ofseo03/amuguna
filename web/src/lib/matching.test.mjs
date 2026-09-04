@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { encodeMatchCursor, runMatch } from "./matching.ts";
-import { validateCursor } from "./validation.ts";
+import { MAX_SKIP_PAGES, validateCursor, validateSkipPages } from "./validation.ts";
 
 test("opaque match cursor round-trips its score/id keyset", () => {
   const encoded = encodeMatchCursor({ score: 0.625, id: 42 });
@@ -134,6 +134,36 @@ test("cursorless response carries the first page of every non-empty tab", async 
     // 건수 요약은 커서와 무관하게 전체 기준이다 — 탭 배지가 페이지마다 흔들리면 안 된다.
     assert.equal(next.summary.total, result.summary.total);
   });
+});
+
+/*
+ * 먼 페이지 번호는 요청 한 번으로 간다 — 아는 커서에서 skipPages 만큼 건너뛴다.
+ * 한 페이지씩 걸어가면 클릭 한 번이 요청 여러 개가 되어 세션 한도를 태웠다.
+ */
+test("skipPages jumps past whole pages in one request and fills only the requested tab", async () => {
+  await withDemoMode(async () => {
+    const profile = { age: 28, gender: "F", occupation: "employee_office", sidoCode: "11", sigunguCode: "11620", incomeDecile: 3, medianIncomePercent: null };
+    const first = await runMatch({ profile, query: null, form: "all", cursor: null });
+    // skipPages: 0 은 생략과 같다 — 모든 탭의 1페이지가 담긴다.
+    const explicit = await runMatch({ profile, query: null, form: "all", cursor: null, skipPages: 0 });
+    assert.deepEqual(Object.keys(explicit.pages), Object.keys(first.pages));
+
+    // 번들 데모는 한 페이지에 다 들어간다 — 한 페이지를 건너뛰면 결과가 끝난 뒤다.
+    assert.ok(first.summary.total <= first.pageSize);
+    const jumped = await runMatch({ profile, query: null, form: "all", cursor: null, skipPages: 1 });
+    assert.deepEqual(Object.keys(jumped.pages), ["all"], "건너뛰기 요청은 눌린 탭만 채운다");
+    assert.deepEqual(jumped.pages.all, { cards: [], nextCursor: null });
+    assert.equal(jumped.summary.total, first.summary.total);
+  });
+});
+
+test("skipPages is a bounded non-negative integer", () => {
+  assert.deepEqual(validateSkipPages(undefined), { ok: true, value: 0 });
+  assert.deepEqual(validateSkipPages(7), { ok: true, value: 7 });
+  assert.deepEqual(validateSkipPages(MAX_SKIP_PAGES), { ok: true, value: MAX_SKIP_PAGES });
+  for (const bad of [-1, 1.5, MAX_SKIP_PAGES + 1, "3", Number.NaN]) {
+    assert.equal(validateSkipPages(bad).ok, false, String(bad));
+  }
 });
 
 /*

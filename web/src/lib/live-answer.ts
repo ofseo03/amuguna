@@ -1,4 +1,4 @@
-import type { AiAnswerStatus, MatchCard, MatchCursor } from "./types";
+import type { AiAnswerStatus, Program } from "./types";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "google/gemma-4-31b-it:free";
@@ -11,15 +11,14 @@ interface LiveAnswerResult {
 
 interface LiveAnswerInput {
   query: string | null;
-  cursor: MatchCursor | null;
-  /** 전체 탭 1페이지의 카드 — 안내는 이 상위 5건만 근거로 삼는다 */
-  cards: MatchCard[];
+  /** 최초 검색 결과 상위 5건 — 화면 순서 그대로, 안내는 이것만 근거로 삼는다 */
+  programs: Program[];
 }
 
 /**
- * 질의가 있는 최초 전체 검색 결과만 사용해 실시간 안내를 한 번 생성한다.
+ * 질의가 있는 최초 전체 검색의 상위 결과만 사용해 실시간 안내를 한 번 생성한다.
  *
- * 커서가 있는 요청은 이미 안내를 받아 간 사람이 다음 페이지를 넘기는 것이므로 다시 만들지 않는다.
+ * `/api/match` 가 아니라 `/api/answer` 가 부른다 — 카드는 먼저 그려지고 안내는 뒤따라온다.
  */
 export async function generateLiveAnswer(
   input: LiveAnswerInput,
@@ -28,19 +27,19 @@ export async function generateLiveAnswer(
   model = process.env.LLM_MODEL ?? DEFAULT_MODEL,
 ): Promise<LiveAnswerResult> {
   const query = input.query?.trim();
-  if (!query || input.cursor !== null || input.cards.length === 0) {
+  if (!query || input.programs.length === 0) {
     return { text: null, status: "not_requested" };
   }
   if (!apiKey) return { text: null, status: "unavailable" };
 
-  const results = input.cards.slice(0, 5).map((card, index) => ({
+  const results = input.programs.slice(0, 5).map((program, index) => ({
     number: index + 1,
-    title: card.program.title,
-    issuer: card.program.issuer,
-    summary: card.program.summary,
-    benefit: card.program.benefit_amount_text,
-    deadline: card.program.is_always_open ? "상시 접수" : (card.program.ends_at ?? "미정"),
-    sourceUrl: card.program.source_url,
+    title: program.title,
+    issuer: program.issuer,
+    summary: program.summary,
+    benefit: program.benefit_amount_text,
+    deadline: program.is_always_open ? "상시 접수" : (program.ends_at ?? "미정"),
+    sourceUrl: program.source_url,
   }));
 
   try {
