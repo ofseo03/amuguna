@@ -36,11 +36,29 @@ test("application windows use the Korean calendar date in every matching path", 
     new URL("../../../db/migrations/0008_application_window.sql", import.meta.url),
     "utf8",
   );
+  const eligibleFirstMigration = await readFile(
+    new URL("../../../db/migrations/0014_eligible_first_vector_search.sql", import.meta.url),
+    "utf8",
+  );
   const matching = await readFile(new URL("./matching.ts", import.meta.url), "utf8");
   const predicate = /p\.starts_at IS NULL OR p\.starts_at <= \(now\(\) AT TIME ZONE 'Asia\/Seoul'\)::date/g;
   assert.equal(baseMigration.match(predicate)?.length, 2);
   assert.equal(upgradeMigration.match(predicate)?.length, 2);
+  assert.equal(eligibleFirstMigration.match(predicate)?.length, 1);
   assert.equal(matching.match(predicate)?.length, 1);
+});
+
+test("vector top-k is selected after SQL eligibility", async () => {
+  const migration = await readFile(
+    new URL("../../../db/migrations/0014_eligible_first_vector_search.sql", import.meta.url),
+    "utf8",
+  );
+  const candidates = migration.indexOf("candidates AS MATERIALIZED");
+  const vectors = migration.indexOf("vector_scores AS");
+
+  assert.ok(candidates >= 0 && candidates < vectors);
+  assert.match(migration, /JOIN public\.program_embeddings AS pe ON pe\.program_id = c\.cand_id/);
+  assert.match(migration, /AND c\.n_violations = 0[\s\S]*ORDER BY max_sim DESC[\s\S]*LIMIT/);
 });
 
 test("mock stays usable and real-provider failures cannot produce a mock query vector", async () => {
