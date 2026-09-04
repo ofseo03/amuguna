@@ -12,7 +12,7 @@ import type { MatchCard, NearMissCard } from "@/lib/types";
  *
  * "결과 안에서 찾기"로 정렬 중이면 검색어가 걸린 카드에 그 사실을 표시한다 (`keywordScore`).
  */
-export function ProgramCard({ card }: { card: MatchCard }) {
+export function ProgramCard({ card, returnHref }: { card: MatchCard; returnHref: string }) {
   const p = card.program;
   const urgent = isUrgent(card.dDay);
 
@@ -47,7 +47,7 @@ export function ProgramCard({ card }: { card: MatchCard }) {
 
       <h3 className="text-lg font-bold leading-snug text-ink">
         <Link
-          href={`/programs/${p.id}`}
+          href={`/programs/${p.id}?from=${encodeURIComponent(returnHref)}`}
           className="inline-block py-0.5 no-underline hover:text-brand hover:underline"
         >
           {p.title}
@@ -78,7 +78,7 @@ export function ProgramCard({ card }: { card: MatchCard }) {
 }
 
 /** 근접 탈락 카드 (SPEC §7.6) */
-export function NearMissItem({ card }: { card: NearMissCard }) {
+export function NearMissItem({ card, returnHref }: { card: NearMissCard; returnHref: string }) {
   const p = card.program;
   return (
     <li className="rounded-xl border border-warn bg-warn-soft p-4">
@@ -93,7 +93,7 @@ export function NearMissItem({ card }: { card: NearMissCard }) {
       </div>
       <h3 className="font-bold text-ink">
         <Link
-          href={`/programs/${p.id}`}
+          href={`/programs/${p.id}?from=${encodeURIComponent(returnHref)}`}
           className="inline-block py-0.5 no-underline hover:text-brand hover:underline"
         >
           {p.title}

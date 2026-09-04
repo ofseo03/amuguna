@@ -24,11 +24,13 @@ import {
 } from "@/lib/format";
 import { Disclaimer, FinancialProductNotice } from "@/components/SiteChrome";
 import Term from "@/components/Term";
+import { safeResultsHref } from "@/lib/results-location";
 
 export const dynamic = "force-dynamic";
 
 interface Props {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ from?: string | string[] }>;
 }
 
 /**
@@ -44,7 +46,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return { title: program.title, description: program.summary };
 }
 
-export default async function ProgramDetailPage({ params }: Props) {
+export default async function ProgramDetailPage({ params, searchParams }: Props) {
   const { id } = await params;
   const numeric = Number(id);
   if (!Number.isInteger(numeric) || numeric <= 0) notFound();
@@ -59,11 +61,12 @@ export default async function ProgramDetailPage({ params }: Props) {
   const extras = program.rules.extra_conditions ?? [];
   const sourceUrl = externalHttpUrl(program.source_url);
   const applyUrl = externalHttpUrl(program.apply_url);
+  const returnHref = safeResultsHref((await searchParams).from);
 
   return (
     <article className="mx-auto max-w-3xl px-4 py-8">
       <nav aria-label="이동" className="mb-6">
-        <Link href="/results" className="inline-block py-1.5 text-ink-2 underline hover:text-brand">
+        <Link href={returnHref} className="inline-block py-1.5 text-ink-2 underline hover:text-brand">
           ← 결과 목록으로
         </Link>
       </nav>

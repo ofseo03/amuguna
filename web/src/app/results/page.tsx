@@ -31,7 +31,8 @@ import { Disclaimer, FinancialProductNotice, SubNav } from "@/components/SiteChr
 import Term from "@/components/Term";
 import StepTrail from "@/components/StepTrail";
 import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
-import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
+import { QUERY_STORAGE_KEY, SORT_QUERY_STORAGE_KEY } from "@/lib/client-keys";
+import { parseResultsLocation, resultsHref } from "@/lib/results-location";
 import { MAX_SKIP_PAGES, MAX_SORT_QUERY_LEN } from "@/lib/validation";
 import type { AiAnswerStatus, AnswerResponse, MatchPage, MatchResponse, MatchTab } from "@/lib/types";
 
@@ -234,13 +235,40 @@ export default function ResultsPage() {
     let cancelled = false;
     // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
     const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
+    // 결과 안에서 찾기의 낱말도 자유입력이라 URL 이 아니라 탭 메모리에서 되살린다.
+    // 탭·페이지는 URL 이 기억하고 낱말은 여기가 기억해, 상세를 봤다 돌아오면 둘 다 그대로다.
+    const sq = window.sessionStorage.getItem(SORT_QUERY_STORAGE_KEY) ?? "";
+    const location = parseResultsLocation(new URLSearchParams(window.location.search));
+    const restoredPage = Math.min(location.page, MAX_SKIP_PAGES + 1);
     const seq = ++reqSeq.current;
-    void fetchMatch(false, "all", 1, null, 0, q, "").then((o) => {
-      if (o.kind === "ok") rememberPage(false, "all", 1, o.view, "");
+    void fetchMatch(
+      location.ignoreIntent,
+      location.tab,
+      restoredPage,
+      null,
+      restoredPage - 1,
+      q,
+      sq,
+    ).then((o) => {
+      if (o.kind === "ok") {
+        rememberPage(location.ignoreIntent, location.tab, restoredPage, o.view, sq);
+      }
       if (cancelled || seq !== reqSeq.current) return;
       if (o.kind === "ok") {
-        setLastPage(cursorsFor(false, "all", "").lastPage);
-        requestAnswer(q, o.view);
+        setIgnoreIntent(location.ignoreIntent);
+        setTab(location.tab);
+        setPage(restoredPage);
+        setSortInput(sq);
+        setSortQuery(sq);
+        setLastPage(cursorsFor(location.ignoreIntent, location.tab, sq).lastPage);
+        window.history.replaceState(
+          null,
+          "",
+          resultsHref({ ...location, page: restoredPage }),
+        );
+        if (!location.ignoreIntent && location.tab === "all" && restoredPage === 1) {
+          requestAnswer(q, o.view);
+        }
       }
       apply(o, q);
     });
@@ -288,6 +316,11 @@ export default function ResultsPage() {
       setPage(current);
       setSortQuery(sq);
       setLastPage(entry.lastPage);
+      // 정렬 낱말은 URL 이 아니라 탭 메모리에 남긴다 (§8 자유입력). 실제로 적용된 뒤에만 쓰므로
+      // 요청이 429 로 막힌 검색어가 상세를 다녀온 뒤에 되살아나는 일이 없다.
+      if (sq) window.sessionStorage.setItem(SORT_QUERY_STORAGE_KEY, sq);
+      else window.sessionStorage.removeItem(SORT_QUERY_STORAGE_KEY);
+      window.history.replaceState(null, "", resultsHref({ tab: t, page: current, ignoreIntent: all }));
       // 첫 로드가 실패해 "다시 시도" 로 들어온 경우 — 안내도 이제 받는다.
       if (!all && t === "all" && current === 1) requestAnswer(query, outcome.view);
     }
@@ -383,6 +416,7 @@ export default function ResultsPage() {
   const sortMatched = sortApplied ? cards.filter((c) => c.keywordScore > 0).length : 0;
   const tabTotal = tab === "all" ? summary.total : summary.byForm[tab];
   const totalPages = pageCount(tabTotal, pageSize);
+  const returnHref = resultsHref({ tab, page, ignoreIntent });
 
   /*
     콜드 스타트 (SPEC §3.2).
@@ -588,7 +622,7 @@ export default function ResultsPage() {
         ) : (
           <ul className="grid gap-4">
             {cards.map((c) => (
-              <ProgramCard key={c.program.id} card={c} />
+              <ProgramCard key={c.program.id} card={c} returnHref={returnHref} />
             ))}
           </ul>
         )}
@@ -612,7 +646,7 @@ export default function ResultsPage() {
           </p>
           <ul className="mt-4 grid gap-3">
             {nearMisses.map((n) => (
-              <NearMissItem key={n.program.id} card={n} />
+              <NearMissItem key={n.program.id} card={n} returnHref={returnHref} />
             ))}
           </ul>
         </section>
