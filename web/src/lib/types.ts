@@ -150,22 +150,49 @@ export type RelaxationStage =
 
 export type AiAnswerStatus = "ok" | "not_requested" | "unavailable";
 
+/** 결과 화면 탭 — form 별 좁혀보기 + 전체 */
+export type MatchTab = ProgramForm | "all";
+
+/** 한 탭의 한 페이지 (15건 단위) */
+export interface MatchPage {
+  cards: MatchCard[];
+  /** 다음 페이지를 여는 keyset 커서. 마지막 페이지면 null */
+  nextCursor: string | null;
+}
+
+/**
+ * 탭별 페이지 묶음.
+ *
+ * 첫 요청(커서 없음)에는 **모든 탭의 1페이지**가 한꺼번에 담긴다 — 탭 전환은 이미 받아둔
+ * 결과를 좁히는 것뿐이므로 서버를 다시 왕복하지 않는다. 2페이지 이후만 커서로 더 받아온다.
+ */
+export type MatchPages = Partial<Record<MatchTab, MatchPage>>;
+
 export interface MatchResponse {
   /** 매칭 요약 배너용 */
   summary: {
     /** "28세 · 서울 관악구 기준" */
     profileLabel: string;
+    /** 전체 탭 기준 총 건수 (탭별 건수는 byForm) */
     total: number;
     /** form 탭별 건수 */
     byForm: Record<ProgramForm, number>;
   };
-  cards: MatchCard[];
+  pages: MatchPages;
   nearMisses: NearMissCard[];
   relaxation: RelaxationStage;
   /** 완화 적용 시 화면에 그대로 노출할 안내 문구 (§7.7) */
   relaxationNotice: string | null;
   pageSize: number;
-  nextCursor: string | null;
+  /**
+   * 자격은 되지만 자유입력(의도)과 멀어 결과에서 빠진 건수.
+   *
+   * 자유입력 한 줄이 결과를 조용히 깎으면, 대상인데 몰라서 못 받는 것을 없애자는 서비스가
+   * 대상인 것을 숨기게 된다. 몇 건이 빠졌는지 알리고 `ignoreIntent` 로 되돌릴 수 있게 한다.
+   */
+  intentHiddenCount: number;
+  /** 이 응답이 자유입력 필터를 끄고(= 전체 보기) 만들어졌는가 */
+  intentIgnored: boolean;
   /** DB 미연결 시 true — 번들 데모 데이터로 동작 중 */
   demoMode: boolean;
   /**

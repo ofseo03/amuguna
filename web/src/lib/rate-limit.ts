@@ -168,8 +168,13 @@ export function checkSessionAndIpRateLimit(
   };
 }
 
-/** 차단 시 사용자에게 보이는 문구 — 원인(과다 요청)이 아니라 행동(재시도)을 알린다. */
+/**
+ * 차단 시 사용자에게 보이는 문구 — 원인(과다 요청)이 아니라 행동(재시도)을 알린다.
+ *
+ * "요청이 많아"라고 쓰지 않는다. 이 한도는 사실상 개인 단위라 걸리는 사람은 본인이 눌러서
+ * 걸린 것인데, 서버 혼잡으로 읽히면 무엇을 했길래 막혔는지 짐작할 수가 없다.
+ */
 export function rateLimitMessage(retryAfter: number): string {
   const seconds = Math.max(1, retryAfter);
-  return `지금은 검색 요청이 많아 잠시 기다려야 합니다. ${seconds}초 후에 다시 시도해 주세요.`;
+  return `잠시 뒤에 다시 검색할 수 있습니다. ${seconds}초 후에 다시 시도해 주세요.`;
 }

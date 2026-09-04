@@ -1,5 +1,8 @@
 /**
- * POST /api/match — 카드 리스트(스코어순) + 근접탈락 + 완화 단계 + 페이지 커서 (SPEC §9).
+ * POST /api/match — 탭별 카드 리스트(스코어순) + 근접탈락 + 완화 단계 + 페이지 커서 (SPEC §9).
+ *
+ * 커서 없는 요청에는 **모든 탭의 1페이지**를 함께 담아 보낸다. 탭 전환은 이미 받아둔 결과를
+ * 좁히는 것뿐인데 그때마다 이 라우트를 부르면 평범한 조작 몇 번으로 rate limit 에 걸린다.
  *
  * 자유입력은 이 요청 시점에만 사용하고 저장하지 않는다 (§8).
  * 질의가 있는 최초 전체 검색은 매칭 결과 상위 5건으로 실시간 AI 안내를 1회 생성한다.
@@ -86,12 +89,12 @@ export async function POST(req: Request) {
       query: q.value,
       form,
       cursor: cursor.value,
+      ignoreIntent: body.ignoreIntent === true,
     });
     const ai = await generateLiveAnswer({
       query: q.value,
-      form,
       cursor: cursor.value,
-      cards: result.cards,
+      cards: result.pages.all?.cards ?? [],
     });
     return NextResponse.json(
       {

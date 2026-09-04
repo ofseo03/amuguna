@@ -27,7 +27,10 @@ import { FORMS } from "./forms";
 import type {
   MatchCard,
   MatchCursor,
+  MatchPage,
+  MatchPages,
   MatchResponse,
+  MatchTab,
   NearMissCard,
   Profile,
   Program,
@@ -59,9 +62,16 @@ export interface MatchInput {
   profile: Profile;
   /** 자유입력 (최대 200자). 건너뛰면 null. 저장하지 않는다 (§8) */
   query: string | null;
-  /** 결과를 본 뒤 좁히는 용도의 form 탭 (§5) */
-  form: ProgramForm | "all";
+  /** 결과를 본 뒤 좁히는 용도의 form 탭 (§5). 커서로 다음 페이지를 받을 때만 쓴다 */
+  form: MatchTab;
   cursor: MatchCursor | null;
+  /**
+   * 자유입력(의도) 필터를 끄고 자격 대상 전체를 돌려준다 — 결과 화면의 "전체 보기".
+   *
+   * 자유입력이 결과를 줄인 것을 사용자가 되돌릴 수 있어야 하므로, 완화 단계와 무관하게
+   * 요청만으로 §7.7 `intent_dropped` 와 같은 상태를 만든다.
+   */
+  ignoreIntent?: boolean;
 }
 
 /** 백엔드가 돌려주는 원시 후보 (자격 판정 완료, 점수 미산출) */
@@ -291,11 +301,18 @@ async function dbPageRows(
   }));
 }
 
-async function dbCandidatesForRows(profile: Profile, pageRows: DbPageRow[]): Promise<Candidate[]> {
-  if (pageRows.length === 0) return [];
+/**
+ * 여러 탭의 페이지 행을 한 번에 채울 수 있도록 프로그램 본문을 통째로 읽어 둔다.
+ *
+ * 첫 요청은 탭 수만큼 페이지 RPC 를 부르지만 그 결과는 대부분 겹치므로,
+ * 프로그램 조회는 id 를 합쳐 한 번만 한다.
+ */
+async function fetchPrograms(ids: number[]): Promise<Map<number, Program>> {
+  const byId = new Map<number, Program>();
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return byId;
   const sql = getSql();
   if (!sql) throw new Error("DATABASE_URL 미설정");
-  const ids = pageRows.map((m) => m.program_id);
   const programRows = await sql`
     SELECT p.*,
            e.age_min, e.age_max, e.gender, e.regions, e.occupations,
@@ -303,11 +320,16 @@ async function dbCandidatesForRows(profile: Profile, pageRows: DbPageRow[]): Pro
            e.extra_conditions, e.parse_method, e.confidence, e.needs_review
     FROM programs p
     LEFT JOIN eligibility_rules e ON e.program_id = p.id
-    WHERE p.id = ANY(${ids}::bigint[])`;
-
-  const byId = new Map<number, Program>();
+    WHERE p.id = ANY(${unique}::bigint[])`;
   for (const r of programRows) byId.set(Number(r.id), rowToProgram(r));
+  return byId;
+}
 
+function rowsToCandidates(
+  pageRows: DbPageRow[],
+  byId: Map<number, Program>,
+  profile: Profile,
+): Candidate[] {
   const candidates: Candidate[] = [];
   for (const m of pageRows) {
     const program = byId.get(Number(m.program_id));
@@ -315,7 +337,7 @@ async function dbCandidatesForRows(profile: Profile, pageRows: DbPageRow[]): Pro
     // violated_field 는 RPC 가 알려주지만, 매칭/위반 축 전체는 규칙으로 재평가한다.
     // (근거 문장·체크리스트가 RPC 출력 이상의 정보를 필요로 하므로)
     const ev = evaluate(program.rules, profile);
-    const cand: Candidate = {
+    candidates.push({
       program,
       sim: m.sim === null || m.sim === undefined ? 0 : Number(m.sim),
       violations: Number(m.violations),
@@ -323,8 +345,7 @@ async function dbCandidatesForRows(profile: Profile, pageRows: DbPageRow[]): Pro
       matchedDimensions: ev.matchedDimensions,
       unknownDimensions: ev.unknownDimensions,
       sortScore: m.sort_score,
-    };
-    candidates.push(cand);
+    });
   }
   return candidates;
 }
@@ -401,7 +422,7 @@ export function encodeMatchCursor(cursor: MatchCursor): string {
   return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
 }
 
-function pageCards(cards: MatchCard[], cursor: MatchCursor | null) {
+function pageCards(cards: MatchCard[], cursor: MatchCursor | null): MatchPage {
   const after = cursor
     ? cards.filter((card) => card.score < cursor.score || (card.score === cursor.score && card.program.id > cursor.id))
     : cards;
@@ -412,6 +433,18 @@ function pageCards(cards: MatchCard[], cursor: MatchCursor | null) {
     cards: visible,
     nextCursor: window.length > PAGE_SIZE && last ? encodeMatchCursor({ score: last.score, id: last.program.id }) : null,
   };
+}
+
+/**
+ * 이번 응답에 담을 탭 목록.
+ *
+ * 커서가 없으면(= 결과 화면 진입, 새로고침, 탭 초기화) **비어 있지 않은 모든 탭의 1페이지**를
+ * 함께 내려 보낸다 — 탭 전환은 이미 받아둔 결과를 좁히는 것뿐인데 그때마다 서버를 왕복하면
+ * 평범한 조작 몇 번으로 rate limit(§8, 세션 10회/분)에 걸린다. 2페이지 이후만 커서로 받는다.
+ */
+function tabsToFill(input: MatchInput, byForm: Record<ProgramForm, number>): MatchTab[] {
+  if (input.cursor) return [input.form];
+  return ["all", ...FORMS.filter((f) => byForm[f] > 0)];
 }
 
 export async function runMatch(
@@ -455,7 +488,11 @@ export async function runMatch(
   }
 
   const demoMode = !isDbConfigured();
-  const useIntentInitially = qvec !== null;
+  // "전체 보기" 요청은 의도 축을 아예 쓰지 않는다 — 자유입력이 깎은 결과를 되돌리는 장치다.
+  const ignoreIntent = Boolean(input.ignoreIntent);
+  const useIntentInitially = qvec !== null && !ignoreIntent;
+  /** 자유입력 필터가 실제로 꺼진 상태인가 (자유입력이 없거나 임베딩이 실패했으면 되돌릴 것도 없다) */
+  const intentIgnored = ignoreIntent && qvec !== null;
   // ---- §7.7 단계적 완화 ------------------------------------------------
   let stage: RelaxationStage = "none";
   let topk = TOPK_BASE;
@@ -493,16 +530,24 @@ export async function runMatch(
       },
       {} as Record<ProgramForm, number>,
     );
-    const filtered = input.form === "all" ? allCards : allCards.filter((c) => c.program.form === input.form);
-    const paged = pageCards(filtered, input.cursor);
+    // 의도 축이 실제로 걸러낸 건수. 자격은 되는데 자유입력 때문에 빠진 것들이다.
+    const intentHiddenCount = useIntent
+      ? Math.max(0, demoCandidates(profile, qvec, topk, false, now).eligible.length - allCards.length)
+      : 0;
+    const pages: MatchPages = {};
+    for (const t of tabsToFill(input, byForm)) {
+      const list = t === "all" ? allCards : allCards.filter((c) => c.program.form === t);
+      pages[t] = pageCards(list, t === input.form ? input.cursor : null);
+    }
     return {
-      summary: { profileLabel: profileLabel(profile), total: filtered.length, byForm },
-      cards: paged.cards,
+      summary: { profileLabel: profileLabel(profile), total: allCards.length, byForm },
+      pages,
       nearMisses,
       relaxation: stage,
       relaxationNotice: RELAXATION_NOTICE[stage],
       pageSize: PAGE_SIZE,
-      nextCursor: paged.nextCursor,
+      intentHiddenCount,
+      intentIgnored,
       demoMode,
       // 데모 모드는 번들 데이터가 항상 들어 있으므로 콜드 스타트가 성립하지 않는다
       catalogEmpty: false,
@@ -524,13 +569,20 @@ export async function runMatch(
   if (counts.total === 0) stage = "near_miss_only";
 
   const hasQueryForScoring = hasQueryInput && stage !== "intent_dropped" && qvec !== null;
-  const rows = await dbPageRows(
-    profile, qvec, topk, useIntent, hasQueryForScoring, input.form, input.cursor, 0, PAGE_SIZE + 1,
-  );
-  const hasNext = rows.length > PAGE_SIZE;
-  const visibleRows = rows.slice(0, PAGE_SIZE);
-  const cards = (await dbCandidatesForRows(profile, visibleRows)).map((c) =>
-    toCard(c, profile, hasQueryForScoring, now),
+
+  // 의도 축이 걸러낸 건수는 같은 조건을 의도 없이 한 번 더 세어 얻는다 (§5 "전체 보기").
+  const intentHiddenCount = useIntent
+    ? Math.max(0, (await dbCounts(profile, qvec, topk, false)).total - counts.total)
+    : 0;
+
+  const tabs = tabsToFill(input, counts.byForm);
+  const tabRows = await Promise.all(
+    tabs.map((t) =>
+      dbPageRows(
+        profile, qvec, topk, useIntent, hasQueryForScoring, t,
+        t === input.form ? input.cursor : null, 0, PAGE_SIZE + 1,
+      ),
+    ),
   );
   // 근접 탈락은 의도 필터를 적용하지 않는다 (§7.6). match_programs 의 벡터 분기는
   // violations=1 행까지 top-k 로 INNER JOIN 하므로, 벡터를 NULL 로 넘겨 자격 분기를 타게 한다.
@@ -538,27 +590,50 @@ export async function runMatch(
   const nearRows = await dbPageRows(
     profile, null, topk, false, false, "all", null, 1, 5,
   );
-  const nearMisses = (await dbCandidatesForRows(profile, nearRows))
+
+  // 탭들의 1페이지는 서로 많이 겹치므로 프로그램 본문은 id 를 합쳐 한 번만 읽는다.
+  const byId = await fetchPrograms(
+    [...tabRows.flat(), ...nearRows].map((r) => r.program_id),
+  );
+
+  const pages: MatchPages = {};
+  tabs.forEach((t, i) => {
+    const rows = tabRows[i];
+    const visibleRows = rows.slice(0, PAGE_SIZE);
+    const cards = rowsToCandidates(visibleRows, byId, profile).map((c) =>
+      toCard(c, profile, hasQueryForScoring, now),
+    );
+    const last = cards.at(-1);
+    pages[t] = {
+      cards,
+      nextCursor:
+        rows.length > PAGE_SIZE && last
+          ? encodeMatchCursor({ score: last.score, id: last.program.id })
+          : null,
+    };
+  });
+
+  const nearMisses = rowsToCandidates(nearRows, byId, profile)
     .map((c) => toNearMiss(c, profile, false, now))
     .filter((x): x is NearMissCard => x !== null)
     .slice(0, 5);
-  const last = cards.at(-1);
   // 결과가 통째로 비었을 때만 카탈로그 자체를 확인한다 — 정상 경로에 질의를 늘리지 않는다.
   const catalogEmpty =
-    cards.length === 0 && nearMisses.length === 0 ? await isCatalogEmpty() : false;
+    counts.total === 0 && nearMisses.length === 0 ? await isCatalogEmpty() : false;
 
   return {
     summary: {
       profileLabel: profileLabel(profile),
-      total: input.form === "all" ? counts.total : counts.byForm[input.form],
+      total: counts.total,
       byForm: counts.byForm,
     },
-    cards,
+    pages,
     nearMisses,
     relaxation: stage,
     relaxationNotice: RELAXATION_NOTICE[stage],
     pageSize: PAGE_SIZE,
-    nextCursor: hasNext && last ? encodeMatchCursor({ score: last.score, id: last.program.id }) : null,
+    intentHiddenCount,
+    intentIgnored,
     demoMode,
     catalogEmpty,
     degraded,
