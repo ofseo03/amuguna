@@ -118,13 +118,6 @@ export interface MatchCard {
   score: number;
   breakdown: ScoreBreakdown;
   sim: number;
-  /**
-   * 결과 내 검색어가 이 공고의 어디에 얼마나 걸렸는가 (0~1). 검색어가 없으면 0.
-   *
-   * 임베딩 유사도(`sim`)와 다른 축이다 — 카드에 보이는 글자(제목·요약·기관명·지원금액 문구)에
-   * 낱말이 들어 있는지만 본다 (`src/lib/keyword-sort.ts`). 화면은 이 값으로 "검색어 일치"를 표시한다.
-   */
-  keywordScore: number;
   /** §7.5 템플릿 조립 근거 문장 */
   reason: string;
   /** 카드 배지 (매칭에 관여한 내 속성) */
@@ -160,6 +153,13 @@ export type AiAnswerStatus = "ok" | "not_requested" | "unavailable" | "pending";
 
 /** 결과 화면 탭 — form 별 좁혀보기 + 전체 */
 export type MatchTab = ProgramForm | "all";
+
+/**
+ * 결과 화면 정렬 축 (§9 화면 3).
+ *
+ * 후보 집합은 건드리지 않고 순서만 바꾼다 — 점수 공식과 라벨은 `src/lib/result-sort.ts`.
+ */
+export type ResultSort = "relevance" | "newest" | "oldest";
 
 /** 한 탭의 한 페이지 (15건 단위) */
 export interface MatchPage {
@@ -202,13 +202,14 @@ export interface MatchResponse {
   /** 이 응답이 자유입력 필터를 끄고(= 전체 보기) 만들어졌는가 */
   intentIgnored: boolean;
   /**
-   * 결과 내 검색 정렬이 실제로 적용됐는가.
+   * 이 응답이 실제로 적용한 정렬 축 (`src/lib/result-sort.ts`).
    *
-   * 검색어를 받아도 낱말이 하나도 안 남으면(예: 문장부호만) 정렬하지 않는다. 화면이
-   * "정렬했습니다"를 잘못 띄우지 않도록 서버가 적용 여부를 그대로 알린다.
-   * 건수(`total`·`byForm`)와 근접탈락 구성은 이 값과 무관하게 같다 — 정렬은 순서만 바꾼다.
+   * 화면은 요청한 값을 그대로 믿지 않고 이 값으로 눌린 버튼을 표시한다 — 알 수 없는 값이
+   * 들어오면 서버가 기본값(`relevance`)으로 되돌리는데, 그때 화면만 다른 버튼을 눌러 두면
+   * 보고 있는 순서와 어긋난다. 건수(`total`·`byForm`)와 근접탈락 구성은 이 값과 무관하게
+   * 같다 — 정렬은 후보를 좁히지 않고 순서만 바꾼다.
    */
-  sortApplied: boolean;
+  sort: ResultSort;
   /** DB 미연결 시 true — 번들 데모 데이터로 동작 중 */
   demoMode: boolean;
   /**

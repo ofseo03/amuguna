@@ -23,7 +23,7 @@ import {
 import { getSql, isDbConfigured } from "./db";
 import { demoEmbeddingIndex, demoPrograms } from "./demo-store";
 import { scoreProgram } from "./scoring";
-import { blendSortScore, keywordScore, sortTokens } from "./keyword-sort";
+import { DEFAULT_RESULT_SORT, resultSortScore } from "./result-sort";
 import { FORMS } from "./forms";
 import type {
   MatchCard,
@@ -37,6 +37,7 @@ import type {
   Program,
   ProgramForm,
   RelaxationStage,
+  ResultSort,
   RuleDimension,
 } from "./types";
 
@@ -82,12 +83,12 @@ export interface MatchInput {
    */
   ignoreIntent?: boolean;
   /**
-   * 결과 내 검색 정렬 (최대 60자). 이미 뽑힌 결과의 **순서만** 바꾼다 — 후보를 좁히지 않는다.
+   * 결과 화면 정렬 축 — 정확도순(기본) · 최신순 · 오래된순 (`src/lib/result-sort.ts`).
    *
-   * 온보딩의 `query` 와 다른 축이다: 그쪽은 임베딩으로 집합 B 를 정의하고, 이쪽은 카드에 보이는
-   * 글자에 이 낱말이 있는지만 본다 (`src/lib/keyword-sort.ts`). 저장하지 않는다 (§8).
+   * 이미 뽑힌 결과의 **순서만** 바꾼다. 후보를 좁히지 않으므로 총 건수·탭 건수·근접탈락 구성은
+   * 어떤 축에서도 같다.
    */
-  sortQuery?: string | null;
+  sort?: ResultSort;
 }
 
 /** 백엔드가 돌려주는 원시 후보 (자격 판정 완료, 점수 미산출) */
@@ -288,19 +289,19 @@ async function dbPageRows(
   violations: 0 | 1,
   limit: number,
   offset = 0,
-  sortKeywords: string[] = [],
+  sort: ResultSort = DEFAULT_RESULT_SORT,
 ): Promise<DbPageRow[]> {
   const sql = getSql();
   if (!sql) throw new Error("DATABASE_URL 미설정");
   const dbForm = form === "all" ? null : form;
   const vector =
     useIntent && qvec ? sql`${toPgVectorLiteral(qvec)}::vector` : sql`NULL::vector`;
-  // 15·16번째 인자(0013 offset, 0014 결과 내 정렬 낱말)는 실제로 쓸 때만 넘긴다. 마이그레이션이
-  // 아직 안 된 DB 에서도 평범한 요청은 그대로 동작하고, 먼 페이지 점프와 결과 내 정렬만 실패한다
-  // (적용 뒤에는 DEFAULT 로 같은 함수다). 낱말을 넘길 때는 위치 인자라 offset 도 함께 넘겨야 한다.
+  // 15·16번째 인자(0013 offset, 0015 정렬 축)는 실제로 쓸 때만 넘긴다. 마이그레이션이 아직 안 된
+  // DB 에서도 평범한 요청은 그대로 동작하고, 먼 페이지 점프와 날짜 정렬만 실패한다 (적용 뒤에는
+  // DEFAULT 로 같은 함수다). 정렬 축을 넘길 때는 위치 인자라 offset 도 함께 넘겨야 한다.
   const optional =
-    sortKeywords.length > 0
-      ? sql`, ${offset}::int, ${sortKeywords}::text[]`
+    sort !== DEFAULT_RESULT_SORT
+      ? sql`, ${offset}::int, ${sort}::text`
       : offset > 0
         ? sql`, ${offset}::int`
         : sql``;
@@ -378,7 +379,7 @@ function toCard(
   profile: Profile,
   hasQuery: boolean,
   now: Date,
-  sortKeywords: string[] = [],
+  sort: ResultSort = DEFAULT_RESULT_SORT,
 ): MatchCard {
   const breakdown = scoreProgram(
     c.program,
@@ -388,26 +389,30 @@ function toCard(
     hasQuery,
     now,
   );
-  const keyword = keywordScore(c.program, sortKeywords);
   return {
     program: c.program,
     // DB 모드는 RPC 가 이미 같은 공식으로 섞어 준 값을 그대로 쓴다 (커서와 어긋나면 안 된다).
-    score: c.sortScore ?? blendSortScore(breakdown.total, keyword, sortKeywords.length > 0),
+    score: c.sortScore ?? resultSortScore(breakdown.total, c.program, sort),
     breakdown,
     sim: c.sim,
-    keywordScore: keyword,
     reason: buildReason(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
     badges: buildBadges(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
     dDay: dDay(c.program, now),
   };
 }
 
+/**
+ * 근접탈락은 화면의 정렬 버튼을 따르지 않는다 — 언제나 §7.4 스코어 순 상위 5건이다.
+ *
+ * 이 목록은 "조건 하나만 달라지면 신청할 수 있다"를 알려주는 안내지 사용자가 훑는 결과가
+ * 아니다. "가장 오래된 근접탈락 5건" 은 아무에게도 쓸모가 없다. 자격 축 안내라는 §7.6 의
+ * 목적에 맞게 가장 아까운 다섯 건을 그대로 둔다.
+ */
 function toNearMiss(
   c: Candidate,
   profile: Profile,
   hasQuery: boolean,
   now: Date,
-  sortKeywords: string[] = [],
 ): NearMissCard | null {
   const d = c.violatedDimensions[0];
   if (!d) return null;
@@ -421,9 +426,7 @@ function toNearMiss(
   );
   return {
     program: c.program,
-    score:
-      c.sortScore ??
-      blendSortScore(breakdown.total, keywordScore(c.program, sortKeywords), sortKeywords.length > 0),
+    score: c.sortScore ?? breakdown.total,
     violatedDimension: d,
     message: nearMissMessage(d, c.program.rules, profile),
     dDay: dDay(c.program, now),
@@ -490,10 +493,10 @@ export async function runMatch(
   const hasQueryInput = rawQuery.length > 0;
 
   /**
-   * 결과 내 검색 정렬 (§9 화면 3). 후보 집합에는 손대지 않으므로 총 건수·탭 건수·근접탈락
-   * 구성은 그대로다 — 바뀌는 것은 순서뿐이다. 낱말이 하나도 안 나오면 정렬도 하지 않는다.
+   * 결과 화면 정렬 축 (§9 화면 3). 후보 집합에는 손대지 않으므로 총 건수·탭 건수·근접탈락
+   * 구성은 그대로다 — 바뀌는 것은 순서뿐이다.
    */
-  const sortKeywords = sortTokens(input.sortQuery);
+  const sort: ResultSort = input.sort ?? DEFAULT_RESULT_SORT;
 
   let qvec: Float64Array | null = null;
   let degraded = false;
@@ -553,12 +556,12 @@ export async function runMatch(
 
     const hasQueryForScoring = hasQueryInput && stage !== "intent_dropped" && qvec !== null;
     const allCards = result.eligible
-      .map((c) => toCard(c, profile, hasQueryForScoring, now, sortKeywords))
+      .map((c) => toCard(c, profile, hasQueryForScoring, now, sort))
       .sort(compareCards);
     // 근접 탈락은 자격 축 안내라 유사도 항 없이 정렬한다 — DB 백엔드와 같은 공식이어야
     // 두 모드에서 같은 다섯 건이 나온다 (§7.6).
     const nearMisses = result.nearMiss
-      .map((c) => toNearMiss(c, profile, false, now, sortKeywords))
+      .map((c) => toNearMiss(c, profile, false, now))
       .filter((x): x is NearMissCard => x !== null)
       .sort(compareCards)
       .slice(0, 5);
@@ -588,7 +591,7 @@ export async function runMatch(
       pageSize: PAGE_SIZE,
       intentHiddenCount,
       intentIgnored,
-      sortApplied: sortKeywords.length > 0,
+      sort,
       demoMode,
       // 데모 모드는 번들 데이터가 항상 들어 있으므로 콜드 스타트가 성립하지 않는다
       catalogEmpty: false,
@@ -623,15 +626,16 @@ export async function runMatch(
         profile, qvec, topk, useIntent, hasQueryForScoring, t,
         t === input.form ? input.cursor : null, 0, PAGE_SIZE + 1,
         t === input.form ? skipPagesOf(input) * PAGE_SIZE : 0,
-        sortKeywords,
+        sort,
       ),
     ),
   );
   // 근접 탈락은 의도 필터를 적용하지 않는다 (§7.6). match_programs 의 벡터 분기는
   // violations=1 행까지 top-k 로 INNER JOIN 하므로, 벡터를 NULL 로 넘겨 자격 분기를 타게 한다.
   // 유사도 항이 없으니 정렬도 hasQuery=false 공식 — 데모 백엔드와 같다.
+  // 화면의 정렬 축도 넘기지 않는다: 이 다섯 건은 언제나 §7.4 스코어 상위다 (toNearMiss 주석).
   const nearRows = await dbPageRows(
-    profile, null, topk, false, false, "all", null, 1, 5, 0, sortKeywords,
+    profile, null, topk, false, false, "all", null, 1, 5, 0,
   );
 
   // 탭들의 1페이지는 서로 많이 겹치므로 프로그램 본문은 id 를 합쳐 한 번만 읽는다.
@@ -644,7 +648,7 @@ export async function runMatch(
     const rows = tabRows[i];
     const visibleRows = rows.slice(0, PAGE_SIZE);
     const cards = rowsToCandidates(visibleRows, byId, profile).map((c) =>
-      toCard(c, profile, hasQueryForScoring, now, sortKeywords),
+      toCard(c, profile, hasQueryForScoring, now, sort),
     );
     const last = cards.at(-1);
     pages[t] = {
@@ -657,7 +661,7 @@ export async function runMatch(
   });
 
   const nearMisses = rowsToCandidates(nearRows, byId, profile)
-    .map((c) => toNearMiss(c, profile, false, now, sortKeywords))
+    .map((c) => toNearMiss(c, profile, false, now))
     .filter((x): x is NearMissCard => x !== null)
     .slice(0, 5);
   // 결과가 통째로 비었을 때만 카탈로그 자체를 확인한다 — 정상 경로에 질의를 늘리지 않는다.
@@ -677,7 +681,7 @@ export async function runMatch(
     pageSize: PAGE_SIZE,
     intentHiddenCount,
     intentIgnored,
-    sortApplied: sortKeywords.length > 0,
+    sort,
     demoMode,
     catalogEmpty,
     degraded,
