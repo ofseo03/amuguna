@@ -1,4 +1,4 @@
-import type { AiAnswerStatus, MatchCard, MatchCursor, ProgramForm } from "./types";
+import type { AiAnswerStatus, MatchCard, MatchCursor } from "./types";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "google/gemma-4-31b-it:free";
@@ -11,12 +11,16 @@ interface LiveAnswerResult {
 
 interface LiveAnswerInput {
   query: string | null;
-  form: ProgramForm | "all";
   cursor: MatchCursor | null;
+  /** 전체 탭 1페이지의 카드 — 안내는 이 상위 5건만 근거로 삼는다 */
   cards: MatchCard[];
 }
 
-/** 질의가 있는 최초 전체 검색 결과만 사용해 실시간 안내를 한 번 생성한다. */
+/**
+ * 질의가 있는 최초 전체 검색 결과만 사용해 실시간 안내를 한 번 생성한다.
+ *
+ * 커서가 있는 요청은 이미 안내를 받아 간 사람이 다음 페이지를 넘기는 것이므로 다시 만들지 않는다.
+ */
 export async function generateLiveAnswer(
   input: LiveAnswerInput,
   fetchImpl: typeof fetch = fetch,
@@ -24,7 +28,7 @@ export async function generateLiveAnswer(
   model = process.env.LLM_MODEL ?? DEFAULT_MODEL,
 ): Promise<LiveAnswerResult> {
   const query = input.query?.trim();
-  if (!query || input.form !== "all" || input.cursor !== null || input.cards.length === 0) {
+  if (!query || input.cursor !== null || input.cards.length === 0) {
     return { text: null, status: "not_requested" };
   }
   if (!apiKey) return { text: null, status: "unavailable" };

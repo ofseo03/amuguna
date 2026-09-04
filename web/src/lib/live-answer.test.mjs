@@ -22,7 +22,6 @@ function cards(count = 6) {
 
 const initialSearch = {
   query: "창업 자금이 필요해요",
-  form: "all",
   cursor: null,
   cards: cards(),
 };
@@ -54,7 +53,7 @@ test("최초 검색은 허용된 상위 5건만 OpenRouter에 한 번 보낸다"
   assert.doesNotMatch(serialized, /PRIVATE_PROFILE|PRIVATE_REASON|PRIVATE_BODY|body_text/);
 });
 
-test("검색어·전체 첫 페이지·결과 중 하나라도 없으면 요청하지 않는다", async () => {
+test("검색어·첫 페이지·결과 중 하나라도 없으면 요청하지 않는다", async () => {
   let calls = 0;
   const fetchImpl = async () => {
     calls++;
@@ -62,7 +61,6 @@ test("검색어·전체 첫 페이지·결과 중 하나라도 없으면 요청�
   };
   const cases = [
     { ...initialSearch, query: null },
-    { ...initialSearch, form: "loan" },
     { ...initialSearch, cursor: { score: 0.5, id: 1 } },
     { ...initialSearch, cards: [] },
   ];

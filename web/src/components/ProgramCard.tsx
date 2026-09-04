@@ -3,7 +3,13 @@ import { dDayLabel, isUrgent, issuerLevelLabel } from "@/lib/format";
 import { FORM_LABEL } from "@/lib/forms";
 import type { MatchCard, NearMissCard } from "@/lib/types";
 
-/** 결과 카드 (SPEC §9 화면 3) — 제목 / 마감 D-n / 매칭 근거 배지 (요약·지원금액은 상세 화면에서만) */
+/**
+ * 결과 카드 (SPEC §9 화면 3) — 제목 / 한 줄 요약 / 마감 D-n / 매칭 근거 배지.
+ *
+ * 요약을 뺐더니 근접탈락 카드에만 설명이 남아 **대상이 아닌 것만 뭔지 알 수 있는** 화면이 됐다.
+ * 목록에서 무엇을 고를지 판단할 근거가 없으면 카드 수만큼 상세를 들락거리게 된다.
+ * 지원금액은 상세 화면에서만 보여준다.
+ */
 export function ProgramCard({ card }: { card: MatchCard }) {
   const p = card.program;
   const urgent = isUrgent(card.dDay);
@@ -36,6 +42,8 @@ export function ProgramCard({ card }: { card: MatchCard }) {
           {p.title}
         </Link>
       </h3>
+
+      <p className="mt-1 text-ink-2">{p.summary}</p>
 
       {/* 매칭 근거 — 저장된 문구가 아니라 요청 시점에 템플릿으로 조립한다 */}
       <div className="mt-4 border-t border-line-soft pt-3">

@@ -60,6 +60,9 @@ function MatchCard() {
       <p className="text-lg font-bold leading-snug text-ink">
         청년 일자리 도약장려금
       </p>
+      <p className="mt-1 text-ink-2">
+        중소기업에 정규직으로 취업한 청년에게 지급하는 장려금입니다.
+      </p>
 
       <div className="mt-4 border-t border-line-soft pt-3">
         <p className="mb-2 text-sm text-ink-2">
