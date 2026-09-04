@@ -111,6 +111,28 @@ jobs:
           $PSQL -d fresh -tAc "SELECT count(*) FROM match_program_page(28,'F',ARRAY['11'],'employee_office',3,NULL,NULL,200,false,NULL,NULL,NULL,16,0,15)"
           $PSQL -d fresh -tAc "SELECT count(*) FROM match_program_page(28,'F',ARRAY['11'],'employee_office',3,NULL,NULL,200,false,NULL,NULL,NULL,16,0,0,'newest')"
 
+      # **운영 DB 의 실제 경로.** 운영은 0012 까지만 적용돼 있고, migrate-production 은 지정한
+      # 파일만 붓는다. 그 상태에 0015 하나만 부어도 0010 의 14인자 판이 사라지고 호출이 모호해지지
+      # 않아야 한다 — 남으면 날짜 정렬만이 아니라 정확도순 기본 화면까지 `is not unique` 로 죽는다.
+      # 앞선 "신규 환경" 검증은 전 파일을 순서대로 부으므로 이 경우를 잡지 못한다.
+      - name: 업그레이드 경로 — 0012 까지인 DB 에 0015 만 적용
+        run: |
+          $PSQL -d postgres -c 'CREATE DATABASE prodlike'
+          for f in $(ls db/migrations/*.sql | awk -F/ '$NF < "0013"'); do
+            echo "== $f"
+            $PSQL -d prodlike -f "$f"
+          done
+          before=$($PSQL -d prodlike -tAc "SELECT count(*) FROM pg_proc WHERE proname = 'match_program_page'")
+          echo "0015 적용 전 오버로드 수: $before"
+          $PSQL -d prodlike -f db/migrations/0015_result_sort.sql
+          n=$($PSQL -d prodlike -tAc "SELECT count(*) FROM pg_proc WHERE proname = 'match_program_page'")
+          echo "0015 적용 후 오버로드 수: $n"
+          [ "$n" = "1" ] || { echo "::error::0012 기준 DB 에 0015 를 부었더니 오버로드가 $n 개다"; exit 1; }
+          # 웹이 실제로 보내는 세 가지 인자 수가 모두 같은 함수에 닿아야 한다.
+          $PSQL -d prodlike -tAc "SELECT count(*) FROM match_program_page(28,'F',ARRAY['11'],'employee_office',3,NULL,NULL,200,false,NULL,NULL,NULL,16,0)"
+          $PSQL -d prodlike -tAc "SELECT count(*) FROM match_program_page(28,'F',ARRAY['11'],'employee_office',3,NULL,NULL,200,false,NULL,NULL,NULL,16,0,15)"
+          $PSQL -d prodlike -tAc "SELECT count(*) FROM match_program_page(28,'F',ARRAY['11'],'employee_office',3,NULL,NULL,200,false,NULL,NULL,NULL,16,0,0,'oldest')"
+
       - name: 신규 환경 — 개인정보 테이블이 남지 않았는지 확인
         run: |
           for t in profiles notification_outbox; do

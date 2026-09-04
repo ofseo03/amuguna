@@ -25,8 +25,29 @@
 -- DB 모드는 이 함수로 같은 순서를 내야 두 모드가 같은 화면이 된다.
 BEGIN;
 
--- 0014 의 낱말(text[]) 판은 지운다. 같은 자리의 인자만 text 로 바뀌므로 남겨 두면 NULL 을
--- 넘기는 16인자 호출이 모호해진다. 재적용은 무해하다 (IF EXISTS + OR REPLACE).
+-- **먼저 옛 오버로드를 전부 지운다 — 이 파일 하나만 부어도 되게.**
+--
+-- 새 판은 마지막 두 인자에 DEFAULT 가 있어 14·15·16인자 호출을 모두 받는다. 그래서 옛 판이
+-- 하나라도 남으면 그 인자 수의 호출이 통째로 `is not unique` 로 죽는다 — 날짜 정렬만이 아니라
+-- **정확도순 기본 화면까지** 함께 죽는다는 뜻이다. 운영 DB 가 0010·0013·0014 중 어디에 서
+-- 있는지는 파일이 알 수 없으므로, 셋 다 지우고 시작한다. `migrate-production` 워크플로가
+-- 이 파일만 입력으로 받아도 안전한 상태로 수렴해야 한다.
+--
+--   0010 — 14인자 (p_offset·p_sort 없음)
+--   0013 — 15인자 (p_offset 까지)
+--   0014 — 16인자, 마지막이 낱말 배열(text[]) — 새 판과 자리가 같고 타입만 다르다
+--
+-- 셋 다 IF EXISTS 라 재적용은 무해하다 (CREATE OR REPLACE 와 함께 멱등이다).
+DROP FUNCTION IF EXISTS public.match_program_page(
+  integer, text, text[], text, integer, integer, vector, integer, boolean, text,
+  double precision, bigint, integer, integer
+);
+
+DROP FUNCTION IF EXISTS public.match_program_page(
+  integer, text, text[], text, integer, integer, vector, integer, boolean, text,
+  double precision, bigint, integer, integer, integer
+);
+
 DROP FUNCTION IF EXISTS public.match_program_page(
   integer, text, text[], text, integer, integer, vector, integer, boolean, text,
   double precision, bigint, integer, integer, integer, text[]

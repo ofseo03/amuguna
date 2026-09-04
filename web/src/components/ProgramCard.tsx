@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { dDayLabel, isUrgent, issuerLevelLabel } from "@/lib/format";
+import { dDayLabel, formatDate, isUrgent, issuerLevelLabel } from "@/lib/format";
 import { FORM_LABEL } from "@/lib/forms";
+import { recencyDate } from "@/lib/result-sort";
 import type { MatchCard, NearMissCard } from "@/lib/types";
 
 /**
@@ -9,10 +10,24 @@ import type { MatchCard, NearMissCard } from "@/lib/types";
  * 요약을 뺐더니 근접탈락 카드에만 설명이 남아 **대상이 아닌 것만 뭔지 알 수 있는** 화면이 됐다.
  * 목록에서 무엇을 고를지 판단할 근거가 없으면 카드 수만큼 상세를 들락거리게 된다.
  * 지원금액은 상세 화면에서만 보여준다.
+ *
+ * `showDate` 는 최신순·오래된순으로 볼 때만 켠다. 카드에는 마감일만 있고 **줄을 세운 기준인
+ * 공고일이 없어서**, 날짜순을 눌러도 왜 이 순서인지 화면에서 확인할 방법이 없었다. 기본 화면
+ * (정확도순)은 공고일과 무관하게 정렬되므로 그대로 둔다 — 쓰이지 않는 날짜를 늘 붙여 두면
+ * 마감일과 헷갈린다.
  */
-export function ProgramCard({ card, returnHref }: { card: MatchCard; returnHref: string }) {
+export function ProgramCard({
+  card,
+  returnHref,
+  showDate = false,
+}: {
+  card: MatchCard;
+  returnHref: string;
+  showDate?: boolean;
+}) {
   const p = card.program;
   const urgent = isUrgent(card.dDay);
+  const posted = showDate ? recencyDate(p) : null;
 
   return (
     <li className="rounded-lg border border-line bg-bg p-5 transition-colors hover:border-ink-3">
@@ -25,6 +40,11 @@ export function ProgramCard({ card, returnHref }: { card: MatchCard; returnHref:
           ·
         </span>
         <span className="text-ink-3">{p.issuer}</span>
+        {posted && (
+          <span className="rounded bg-bg-sunken px-2 py-0.5 text-ink-2">
+            공고일 {formatDate(posted)}
+          </span>
+        )}
         <span
           className={`ml-auto rounded px-2 py-0.5 font-bold ${
             urgent ? "bg-danger-soft text-danger" : "bg-bg-sunken text-ink-2"

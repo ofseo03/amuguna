@@ -322,6 +322,46 @@ async function dbPageRows(
 }
 
 /**
+ * 이 DB 의 `match_program_page()` 가 정렬 축(16번째 인자)을 받는가 — `0015_result_sort.sql` 적용 여부.
+ *
+ * 웹 배포와 마이그레이션은 따로 움직인다. 코드가 먼저 나가고 DB 가 아직 옛 함수만 알고 있으면
+ * 16인자 호출은 `function ... does not exist` 로 죽고, 그 예외가 라우트까지 올라가 결과 화면이
+ * 통째로 "결과를 불러오지 못했습니다" 가 됐다. 건수도 카드도 멀쩡한데 순서 버튼 하나 때문에
+ * 아무것도 못 보는 상태다 — 그래서 부르기 전에 한 번 물어보고, 없으면 순서만 포기한다.
+ *
+ * 프로세스당 한 번만 확인한다. 마이그레이션이 적용되면 다음 배포(또는 인스턴스 교체)에서 다시
+ * 물어보므로, 잘못된 false 가 오래 남지 않는다.
+ */
+let sortCapability: Promise<boolean> | null = null;
+
+export function resetSortCapabilityCache(): void {
+  sortCapability = null;
+}
+
+const SORT_CAPABLE_SIGNATURE =
+  "public.match_program_page(integer,text,text[],text,integer,integer,vector," +
+  "integer,boolean,text,double precision,bigint,integer,integer,integer,text)";
+
+function pageFnSupportsSort(): Promise<boolean> {
+  if (sortCapability) return sortCapability;
+  sortCapability = (async () => {
+    const sql = getSql();
+    if (!sql) return false;
+    try {
+      const rows = await sql<{ ok: boolean }[]>`
+        SELECT to_regprocedure(${SORT_CAPABLE_SIGNATURE}) IS NOT NULL AS ok`;
+      return rows[0]?.ok === true;
+    } catch (error) {
+      // 확인 자체가 실패하면 "없다"고 본다 — 정렬을 포기하고 결과를 보여주는 쪽이,
+      // 확인 실패를 이유로 결과 화면을 통째로 없애는 쪽보다 낫다.
+      console.error("[matching] 정렬 축 지원 여부 확인 실패", error);
+      return false;
+    }
+  })();
+  return sortCapability;
+}
+
+/**
  * 여러 탭의 페이지 행을 한 번에 채울 수 있도록 프로그램 본문을 통째로 읽어 둔다.
  *
  * 첫 요청은 탭 수만큼 페이지 RPC 를 부르지만 그 결과는 대부분 겹치므로,
@@ -496,7 +536,7 @@ export async function runMatch(
    * 결과 화면 정렬 축 (§9 화면 3). 후보 집합에는 손대지 않으므로 총 건수·탭 건수·근접탈락
    * 구성은 그대로다 — 바뀌는 것은 순서뿐이다.
    */
-  const sort: ResultSort = input.sort ?? DEFAULT_RESULT_SORT;
+  const requestedSort: ResultSort = input.sort ?? DEFAULT_RESULT_SORT;
 
   let qvec: Float64Array | null = null;
   let degraded = false;
@@ -530,6 +570,15 @@ export async function runMatch(
   }
 
   const demoMode = !isDbConfigured();
+  /**
+   * 실제로 적용할 정렬 축. 데모 모드는 TypeScript 로 세우므로 언제나 요청대로 되고,
+   * DB 모드는 `0015_result_sort.sql` 이 적용된 DB 에서만 날짜 정렬을 할 수 있다.
+   * 못 하면 순서만 §7.4 스코어로 되돌리고 결과는 그대로 보여준다 (`sortUnavailable`).
+   */
+  const sortSupported =
+    requestedSort === DEFAULT_RESULT_SORT || demoMode || (await pageFnSupportsSort());
+  const sort: ResultSort = sortSupported ? requestedSort : DEFAULT_RESULT_SORT;
+  const sortUnavailable = !sortSupported;
   // "전체 보기" 요청은 의도 축을 아예 쓰지 않는다 — 자유입력이 깎은 결과를 되돌리는 장치다.
   const ignoreIntent = Boolean(input.ignoreIntent);
   const useIntentInitially = qvec !== null && !ignoreIntent;
@@ -592,6 +641,7 @@ export async function runMatch(
       intentHiddenCount,
       intentIgnored,
       sort,
+      sortUnavailable,
       demoMode,
       // 데모 모드는 번들 데이터가 항상 들어 있으므로 콜드 스타트가 성립하지 않는다
       catalogEmpty: false,
@@ -682,6 +732,7 @@ export async function runMatch(
     intentHiddenCount,
     intentIgnored,
     sort,
+    sortUnavailable,
     demoMode,
     catalogEmpty,
     degraded,

@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       migrations:
-        description: "적용할 마이그레이션 파일 (공백 구분, 순서대로). 이미 적용된 파일은 넣지 않는다 — 0009 처럼 CREATE TABLE 을 쓰는 파일은 재적용하면 실패한다."
+        description: "적용할 마이그레이션 파일 (공백 구분, 순서대로). 이미 적용된 파일은 넣지 않는다 — 0009 처럼 CREATE TABLE 을 쓰는 파일은 재적용하면 실패한다. 0013·0014_keyword_sort 는 넣지 않는다: 둘 다 match_program_page 만 고치고 0015 가 그 결과를 통째로 대체한다."
         required: true
-        default: "db/migrations/0015_result_sort.sql"
+        default: "db/migrations/0014_eligible_first_vector_search.sql db/migrations/0015_result_sort.sql"
 
 concurrency:
   group: migrate-production
