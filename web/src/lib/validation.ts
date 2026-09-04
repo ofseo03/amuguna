@@ -4,8 +4,9 @@
  * 클라이언트 검증은 UX 용일 뿐이고, 신뢰 경계는 여기다.
  */
 import { isValidOccupation, isValidSido, isValidSigungu } from "./shared-data";
-import type { Gender, MatchCursor, Profile, ProgramForm } from "./types";
+import type { Gender, MatchCursor, Profile, ProgramForm, ResultSort } from "./types";
 import { FORMS } from "./forms";
+import { DEFAULT_RESULT_SORT, isResultSort } from "./result-sort";
 
 export const MAX_QUERY_LEN = 200;
 
@@ -93,33 +94,14 @@ export function validateQuery(input: unknown): Validated<string | null> {
 }
 
 /**
- * 결과 내 검색 정렬의 검색어 길이 상한.
+ * 결과 화면 정렬 축 — 화면의 버튼 셋 중 하나다.
  *
- * 온보딩 자유입력(200자)과 달리 이건 문장이 아니라 낱말 몇 개다 — "전세 청년" 처럼 쓴다.
- * 길이를 짧게 잡아 두면 화면의 입력칸이 무엇을 기대하는지 그 자체로 말해 준다.
+ * `form` 탭과 같은 이유로 거절하지 않고 기본값으로 되돌린다: 정렬은 후보를 좁히지 않으므로
+ * 모르는 값이 와도 보여줄 결과는 그대로 있고, 400 으로 끊으면 결과 화면만 통째로 사라진다.
+ * 실제로 적용한 축은 응답의 `sort` 로 되돌려 주므로 화면이 잘못된 버튼을 누르고 있을 일은 없다.
  */
-export const MAX_SORT_QUERY_LEN = 60;
-
-/** 결과 내 검색어 — 저장하지 않고 이 요청의 정렬에만 쓴다 (§8). 잘라내지 않고 거절한다. */
-export function validateSortQuery(input: unknown): Validated<string | null> {
-  if (input === null || input === undefined || input === "") return { ok: true, value: null };
-  if (typeof input !== "string") {
-    return {
-      ok: false,
-      errors: [{ field: "sortQuery", message: "결과 내 검색어 형식이 올바르지 않습니다." }],
-    };
-  }
-  const trimmed = input.trim();
-  if (trimmed.length === 0) return { ok: true, value: null };
-  if ([...trimmed].length > MAX_SORT_QUERY_LEN) {
-    return {
-      ok: false,
-      errors: [
-        { field: "sortQuery", message: `결과 내 검색어는 ${MAX_SORT_QUERY_LEN}자를 넘을 수 없습니다.` },
-      ],
-    };
-  }
-  return { ok: true, value: trimmed };
+export function validateResultSort(input: unknown): ResultSort {
+  return isResultSort(input) ? input : DEFAULT_RESULT_SORT;
 }
 
 /**

@@ -16,7 +16,8 @@ Postgres (Supabase) + `pgvector`. SPEC.md §5(데이터 모델) / §7.3(교차 �
 | `migrations/0010_cursor_matching.sql` | 서버 점수 정렬·커서 페이지 RPC |
 | `migrations/0012_drop_profiles.sql` | `profiles` 제거 — 프로필은 서명 쿠키에만 두고 서버에 저장하지 않는다 |
 | `migrations/0013_page_offset.sql` | `match_program_page()` 에 행 offset 추가 — 먼 페이지 번호를 요청 한 번으로 연다 |
-| `migrations/0014_keyword_sort.sql` | `match_program_page()` 에 결과 내 검색 낱말 추가 — 후보는 그대로 두고 순서만 다시 매긴다 |
+| `migrations/0014_keyword_sort.sql` | `match_program_page()` 에 결과 내 검색 낱말 추가 — 후보는 그대로 두고 순서만 다시 매긴다 (0015 가 대체) |
+| `migrations/0015_result_sort.sql` | `match_program_page()` 의 낱말 인자를 정렬 축(`relevance`/`newest`/`oldest`)으로 교체 |
 
 ---
 
@@ -150,16 +151,17 @@ const rows = await sql`
 - **top-k 선절단** — HNSW top-k 는 자격 필터 *이전에* 잘린다(사후 필터). 자격 통과분이 top-k 안에 적으면 교집합이 실제보다 작아진다. 완화 순서는 SPEC §7.7 그대로: ① `p_topk` 200→500 ② `p_qvec = NULL` ③ 근접 탈락만 노출. 그래도 부족하면 pgvector 0.8+ 의 `hnsw.iterative_scan`.
 - **`p_topk` 방어** — `NULL`→200, 0·음수→1, 상한 5000 으로 클램프한다.
 - **페이지 정렬** — `match_program_page()`가 §7.4 스코어와 `id` tie-break로 정렬해 15건 커서를 반환한다. 웹은 전체 후보를 메모리에 올리지 않는다.
-- **결과 내 검색 정렬 (`p_keywords`, 0014)** — 정규화된 낱말 배열을 넘기면 `sort_score` 가
-  `0.995 × 검색어점수 + 0.005 × §7.4 스코어` 가 된다. 검색어 점수는 낱말마다 `title` 1.00 /
-  `summary` 0.60 / `issuer` 0.50 / `benefit_amount_text` 0.35 중 **가장 앞자리 하나**를 세어(합산이
-  아니다) 낱말 수로 나눈 뒤 소수 둘째 자리로 끊은 값이다. 눈금이 0.01 이라 `0.995 × 0.01` 이
-  `0.005 × 1` 보다 커서 **검색어가 항상 먼저** 순서를 정하고, §7.4 스코어는 동점일 때만 쓰인다.
+- **결과 정렬 (`p_sort`, 0015)** — `'newest'` / `'oldest'` 를 넘기면 `sort_score` 가
+  `0.99999 × 공고일점수 + 0.00001 × §7.4 스코어` 가 된다. 그 밖의 값(기본값 `'relevance'`, NULL
+  포함)은 §7.4 스코어 그대로다. **공고일 = `COALESCE(starts_at, (fetched_at AT TIME ZONE
+  'Asia/Seoul')::date)`** 이고, `1970-01-01` 부터 40000일(약 2079년)을 0~1 로 편 값이 공고일
+  점수다(`oldest` 는 `1 - 그 값`). 하루의 간격 `0.99999 × 1/40000` 이 §7.4 스코어의 최대 차이
+  `0.00001 × 1` 보다 커서 **날짜가 항상 먼저** 순서를 정하고, §7.4 스코어는 같은 날짜일 때만
+  쓰인다. 두 항 모두 0~1 이라 합도 0~1 이고 keyset 커서(0~1 검증)가 그대로 유효하다 —
+  정렬 키를 늘리지 않았으므로 `p_offset` 건너뛰기도 축과 무관하게 그대로 동작한다.
   후보 집합·건수는 조금도 달라지지 않는다 — 바뀌는 것은 `ORDER BY` 뿐이다.
-  **낱말 쪼개기(NFC·소문자화·구두점 제거·한 글자 제외)는 웹이 한다**(`web/src/lib/keyword-sort.ts`
-  의 `sortTokens`). 여기는 이미 소문자로 정규화된 낱말을 받아 `strpos` 로 대조만 하므로, 직접
-  호출할 때도 같은 전처리를 거친 값을 넘겨야 한다. 점수 공식은 그 파일과 한 글자도 어긋나면 안 된다
-  — 데모 모드는 TypeScript 로, DB 모드는 이 함수로 같은 순서를 내야 두 모드가 같은 화면이 된다.
+  점수 공식은 `web/src/lib/result-sort.ts` 와 한 글자도 어긋나면 안 된다 — 데모 모드는
+  TypeScript 로, DB 모드는 이 함수로 같은 순서를 내야 두 모드가 같은 화면이 된다.
 
 ---
 
@@ -241,7 +243,7 @@ p.ends_at IS NULL OR p.ends_at >= (now() AT TIME ZONE 'Asia/Seoul')::date
 ## 6. 웹 팀 통합 노트
 
 - `POST /api/profile` → **DB 를 쓰지 않는다.** 프로필은 서명한 httpOnly 쿠키에만 담는다. 서버에 저장하는 개인정보가 없다는 것이 §8 의 강제 장치다.
-- `POST /api/match` → 쿠키에서 프로필을 읽어 `match_programs(age, gender, region_prefixes(region_code), occupation, income_decile, median_income_percent, qvec, 200)`. 결과 화면의 "결과 안에서 찾기" 낱말은 `match_program_page()` 의 `p_keywords` 로만 흘러간다 — 후보를 좁히지 않으므로 `match_program_counts()` 는 그대로 호출한다.
+- `POST /api/match` → 쿠키에서 프로필을 읽어 `match_programs(age, gender, region_prefixes(region_code), occupation, income_decile, median_income_percent, qvec, 200)`. 결과 화면의 정렬 버튼은 `match_program_page()` 의 `p_sort` 로만 흘러간다 — 후보를 좁히지 않으므로 `match_program_counts()` 는 그대로 호출한다.
   **자유입력 원문도 어디에도 저장하지 않는다**(§8). 임베딩 API에 보내고, 질의가 있는 최초 전체 검색에서만
   OpenRouter에 질의와 상위 5건의 공개 메타데이터를 보내 답변 하나를 만든다. 프로필·쿠키·원문 본문은 보내지 않으며 답변도 저장하지 않는다.
 - `GET /api/programs/:id` → 상세. 자격 체크리스트(✅/❌)는 `eligibility_rules` 한 행을 읽어 프로필과 대조해 템플릿으로 조립한다. `extra_conditions` 는 "추가 확인 필요 조건"으로 그대로 노출하고 판정에 쓰지 않는다(§6.3).

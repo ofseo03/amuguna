@@ -18,8 +18,8 @@ import {
   validateCursor,
   validateForm,
   validateQuery,
+  validateResultSort,
   validateSkipPages,
-  validateSortQuery,
 } from "@/lib/validation";
 
 export const runtime = "nodejs";
@@ -91,11 +91,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, errors: skipPages.errors }, { status: 400 });
   }
 
-  // 결과 내 검색 정렬 — 후보를 좁히지 않고 순서만 바꾼다. 저장하지 않는다 (§8).
-  const sortQuery = validateSortQuery(body.sortQuery);
-  if (!sortQuery.ok) {
-    return NextResponse.json({ ok: false, errors: sortQuery.errors }, { status: 400 });
-  }
+  // 결과 화면 정렬 축 — 후보를 좁히지 않고 순서만 바꾼다. 모르는 값은 기본값으로 되돌린다.
+  const sort = validateResultSort(body.sort);
 
   const form = validateForm(body.form);
   const started = Date.now();
@@ -107,7 +104,7 @@ export async function POST(req: Request) {
       cursor: cursor.value,
       skipPages: skipPages.value,
       ignoreIntent: body.ignoreIntent === true,
-      sortQuery: sortQuery.value,
+      sort,
     });
     return NextResponse.json(
       {

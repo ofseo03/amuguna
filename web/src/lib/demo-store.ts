@@ -6,6 +6,8 @@
  * - program_embeddings 를 흉내내어 문단 단위 청크 임베딩을 최초 1회 계산해 캐시 (§7.1)
  * - ends_at 은 demo_ends_in_days 로부터 프로세스 기동 시각 기준으로 계산한다
  *   (절대 날짜로 박으면 시간이 지나 전 건 만료 → 데모가 빈 화면이 된다)
+ * - starts_at 도 같은 이유로 demo_starts_days_ago(오늘로부터 N일 전)에서 계산한다.
+ *   결과 화면의 최신순·오래된순은 공고일로 줄을 세우므로 날짜가 흩어져 있어야 시연된다.
  */
 import raw from "@/demo/programs.json";
 import { mockEmbed } from "./embedding";
@@ -37,6 +39,8 @@ interface RawProgram {
   apply_url: string | null;
   apply_method: string | null;
   starts_at: string | null;
+  /** 접수 시작일 = 오늘로부터 N일 전. 없으면 `starts_at` 을 그대로 쓴다. */
+  demo_starts_days_ago?: number | null;
   demo_ends_in_days: number | null;
   is_always_open: boolean;
   source_url: string;
@@ -75,7 +79,10 @@ function build(): { programs: Program[]; fetchedAt: string } {
     benefit_amount_max: p.benefit_amount_max,
     apply_url: p.apply_url,
     apply_method: p.apply_method,
-    starts_at: p.starts_at,
+    starts_at:
+      p.demo_starts_days_ago === null || p.demo_starts_days_ago === undefined
+        ? p.starts_at
+        : toKstDate(-p.demo_starts_days_ago, base),
     ends_at: p.demo_ends_in_days === null ? null : toKstDate(p.demo_ends_in_days, base),
     is_always_open: p.is_always_open,
     source_url: p.source_url,
