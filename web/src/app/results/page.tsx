@@ -62,6 +62,9 @@ const tabKey = (all: boolean, t: MatchTab, s: ResultSort) =>
 const cacheKey = (all: boolean, t: MatchTab, page: number, s: ResultSort) =>
   `${tabKey(all, t, s)}|p${page}`;
 
+/** 실패한 요청이 무엇을 부르려 했는지 — "다시 시도" 가 그대로 다시 부른다 */
+type RetryTarget = { all: boolean; tab: MatchTab; page: number; sort: ResultSort };
+
 /** 탭 하나의 페이지 커서 기억. `cursors` 는 페이지 번호 → 그 페이지를 여는 커서 (1페이지는 null) */
 type TabCursors = { cursors: Map<number, string | null>; lastPage: number | null };
 
@@ -79,7 +82,16 @@ export default function ResultsPage() {
   const [lastPage, setLastPage] = useState<number | null>(null);
   const [view, setView] = useState<View | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<{ message: string; noProfile?: boolean } | null>(null);
+  /**
+   * 오류와 함께, **실패한 그 요청**을 기억한다.
+   *
+   * "다시 시도" 가 화면에 남아 있는 상태(`tab`·`page`·`sort`)를 다시 부르면, 사용자가 방금 누른
+   * 것과 다른 것을 부르게 된다 — 최신순을 눌러 429 가 났는데 다시 시도를 누르면 정확도순만 한 번
+   * 더 불러오고 오류만 사라져, 눌렀던 정렬이 조용히 없던 일이 된다. 탭·페이지도 마찬가지다.
+   */
+  const [error, setError] = useState<
+    { message: string; noProfile?: boolean; retry: RetryTarget } | null
+  >(null);
   const [query, setQuery] = useState<string | null>(null);
   /** 자유입력으로 좁힌 결과를 되돌려(§5 "전체 보기") 자격 대상 전체를 보고 있는가 */
   const [ignoreIntent, setIgnoreIntent] = useState(false);
@@ -176,13 +188,13 @@ export default function ResultsPage() {
    * 429 한 번에 보고 있던 카드와 탭이 전부 사라지면 사용자는 결과를 잃는다. `view` 는 그대로 두고
    * 배너로만 알린다 — 프로필이 없는 경우(no_profile)만 보여줄 결과 자체가 없으므로 화면을 바꾼다.
    */
-  const apply = useCallback((outcome: Outcome, q: string | null) => {
+  const apply = useCallback((outcome: Outcome, q: string | null, retry: RetryTarget) => {
     setQuery(q);
     if (outcome.kind === "ok") {
       setView(outcome.view);
       setError(null);
     } else {
-      setError({ message: outcome.message, noProfile: outcome.noProfile });
+      setError({ message: outcome.message, noProfile: outcome.noProfile, retry });
     }
     setLoading(false);
   }, []);
@@ -280,7 +292,12 @@ export default function ResultsPage() {
           requestAnswer(q, o.view);
         }
       }
-      apply(o, q);
+      apply(o, q, {
+        all: location.ignoreIntent,
+        tab: location.tab,
+        page: restoredPage,
+        sort: location.sort,
+      });
     });
     return () => {
       cancelled = true;
@@ -335,7 +352,7 @@ export default function ResultsPage() {
       // 첫 로드가 실패해 "다시 시도" 로 들어온 경우 — 안내도 이제 받는다.
       if (!all && t === "all" && current === 1) requestAnswer(query, outcome.view);
     }
-    apply(outcome, query);
+    apply(outcome, query, { all, tab: t, page: current, sort: s });
   }
 
   function changeTab(t: MatchTab) {
@@ -402,7 +419,12 @@ export default function ResultsPage() {
   if (error && !view) {
     return (
       <Shell>
-        <ErrorNotice message={error.message} onRetry={() => void loadPage(ignoreIntent, tab, page)} />
+        <ErrorNotice
+          message={error.message}
+          onRetry={() =>
+            void loadPage(error.retry.all, error.retry.tab, error.retry.page, error.retry.sort)
+          }
+        />
       </Shell>
     );
   }
@@ -482,7 +504,9 @@ export default function ResultsPage() {
         <div className="mb-4">
           <ErrorNotice
             message={error.message}
-            onRetry={() => void loadPage(ignoreIntent, tab, page)}
+            onRetry={() =>
+              void loadPage(error.retry.all, error.retry.tab, error.retry.page, error.retry.sort)
+            }
           />
         </div>
       )}
@@ -578,7 +602,12 @@ export default function ResultsPage() {
       )}
 
       {/* ---------------- 정렬 ---------------- */}
-      <SortControls applied={appliedSort} busy={loading} onSelect={changeSort} />
+      <SortControls
+        applied={appliedSort}
+        unavailable={data.sortUnavailable}
+        busy={loading}
+        onSelect={changeSort}
+      />
 
       {/* ---------------- form 탭 ---------------- */}
       <nav aria-label="분류별 좁혀보기" className="mt-6">
@@ -621,7 +650,13 @@ export default function ResultsPage() {
         ) : (
           <ul className="grid gap-4">
             {cards.map((c) => (
-              <ProgramCard key={c.program.id} card={c} returnHref={returnHref} />
+              <ProgramCard
+                key={c.program.id}
+                card={c}
+                returnHref={returnHref}
+                // 날짜순으로 볼 때만 공고일을 함께 보여준다 — 줄을 세운 기준을 화면에서 확인할 수 있게
+                showDate={appliedSort !== DEFAULT_RESULT_SORT}
+              />
             ))}
           </ul>
         )}
@@ -743,10 +778,13 @@ function TabButton({
  */
 function SortControls({
   applied,
+  unavailable,
   busy,
   onSelect,
 }: {
   applied: ResultSort;
+  /** 날짜 정렬을 눌렀는데 서버가 아직 그 축을 세우지 못한 상태 (`sortUnavailable`) */
+  unavailable: boolean;
   busy: boolean;
   onSelect: (s: ResultSort) => void;
 }) {
@@ -777,6 +815,16 @@ function SortControls({
         <strong className="text-ink">{RESULT_SORT_LABEL[applied]}</strong>으로 보고 있습니다 —{" "}
         {RESULT_SORT_HINT[applied]}
       </p>
+      {/*
+        날짜 정렬을 아직 못 하는 서버에서도 결과는 그대로 보여준다. 왜 눌렀는데 순서가 그대로인지
+        말해 주지 않으면 버튼이 고장 난 것처럼 보이므로, 건수와 카드는 멀쩡하다는 점을 함께 알린다.
+      */}
+      {unavailable && (
+        <p role="status" className="mt-2 rounded-lg border border-warn bg-warn-soft px-4 py-2 text-sm text-ink-2">
+          날짜순 정렬은 지금 준비 중이라 <strong className="text-ink">정확도순</strong>으로
+          보여드리고 있습니다. 결과 건수와 내용은 그대로입니다.
+        </p>
+      )}
     </section>
   );
 }
