@@ -42,6 +42,7 @@ npm run sync:shared  # ../shared/*.json → src/data/ 재복사
 | 벡터 검색 | 인메모리 코사인 (`src/lib/demo-store.ts`) | pgvector HNSW |
 | 스코어링 | `src/lib/scoring.ts` (동일) | `src/lib/scoring.ts` (동일) |
 | 근접탈락·완화 | `src/lib/matching.ts` (동일) | `src/lib/matching.ts` (동일) |
+| 결과 내 정렬 | `src/lib/keyword-sort.ts` | `match_program_page(p_keywords)` — 같은 공식 |
 | 프로필 | 암호화 쿠키 (동일) | 암호화 쿠키 (동일) — DB 저장 없음 |
 
 스코어링·근거 문장·근접탈락·빈결과 완화는 **두 모드가 같은 코드를 탄다.**
@@ -72,7 +73,7 @@ SPEC §5 의 예시 문구 4종으로 실측해 정한 값이다.
 |---|---|---|---|
 | 1 | 랜딩 | `/` | `src/app/page.tsx` |
 | 2 | 온보딩 6단계 | `/onboarding` | `src/app/onboarding/page.tsx` |
-| 3 | 결과 | `/results` | `src/app/results/page.tsx` |
+| 3 | 결과 | `/results` | `src/app/results/page.tsx` — 매칭 요약 + **결과 안에서 찾기(정렬)** + `form` 탭 + 카드 + 근접탈락 |
 | 4 | 상세 | `/programs/[id]` | `src/app/programs/[id]/page.tsx` |
 | 5 | 개인정보처리방침 / 출처 | `/privacy`, `/sources` | `src/app/privacy`, `src/app/sources` |
 
@@ -95,6 +96,11 @@ curl -s -b jar -X POST localhost:3000/api/match -H 'content-type: application/js
   -d '{"query":"보증금 올려달래서 대출 알아봐요","form":"all","cursor":null}'
 #    먼 페이지는 아는 커서에 skipPages 를 붙여 요청 한 번으로 연다 (예: 1페이지 커서 null + skipPages 4 = 5페이지)
 
+# 2a) 결과 안에서 찾기 — 같은 후보를 검색어에 맞게 다시 줄 세운다 (건수는 그대로다)
+curl -s -b jar -X POST localhost:3000/api/match -H 'content-type: application/json' \
+  -d '{"query":"보증금 올려달래서 대출 알아봐요","form":"all","cursor":null,"sortQuery":"전세"}'
+#    응답의 sortApplied 가 실제 적용 여부, 카드의 keywordScore 가 어디에 걸렸는지를 알려준다
+
 # 2b) AI 안내 — 카드가 뜬 뒤 결과 상위 5건의 id 로 따로 받는다
 curl -s -b jar -X POST localhost:3000/api/answer -H 'content-type: application/json' \
   -d '{"query":"보증금 올려달래서 대출 알아봐요","programIds":[1,2,3,4,5]}'
@@ -112,6 +118,7 @@ curl -s -b jar localhost:3000/api/programs/1
 | `src/lib/embedding.ts` | 질의 임베딩 + **mock 임베딩 계약 알고리즘** | §7.2 |
 | `src/lib/eligibility.ts` | 자격 판정, 근거 문장 템플릿, 근접탈락 문구, 체크리스트 | §7.3 §7.5 §7.6 |
 | `src/lib/scoring.ts` | 5요소 가중 스코어링 | §7.4 |
+| `src/lib/keyword-sort.ts` | 결과 안에서 찾기 — 임베딩 없이 글자 대조로 순서만 다시 매긴다 | §9 화면 3 |
 | `src/lib/matching.ts` | 두 백엔드 오케스트레이션 + 빈결과 완화 | §7.3 §7.7 |
 | `src/lib/demo-store.ts` | 번들 데이터셋 로더 + 청크 임베딩 인덱스 | §7.1 |
 | `src/lib/db.ts` | Supabase 접속 (`postgres`) | — |
@@ -134,6 +141,28 @@ curl -s -b jar localhost:3000/api/programs/1
 포함된다. T1인 `gov24`와 `local_welfare`는 기본 정기 배치 대상이며, 배포 전에 데이터셋별
 활용승인과 첫 성공 응답을 반드시 대조한다. T2인 `kstartup`은 승인 후
 `npm run ingest -- --source kstartup`처럼 소스별로 검증한다.
+
+### 결과 안에서 찾기는 임베딩이 아니다
+
+온보딩의 "원하는 것" 한 줄은 임베딩으로 **집합 B 를 정의**한다 — 결과를 좁히는 장치다.
+결과 화면의 "결과 안에서 찾기"는 그것과 다른 축이다. 후보 집합에 손대지 않고 **순서만** 바꾼다.
+
+- 카드에 실제로 보이는 글자만 본다 — 제목(1.00) · 요약(0.60) · 기관명(0.50) · 지원금액 문구(0.35).
+  낱말마다 이 중 **가장 앞자리 하나**를 세어(합산이 아니다) 낱말 수로 나눈다.
+- 그 값이 §7.4 스코어보다 **항상 먼저** 순서를 정한다 (`0.995 : 0.005`). 낱말을 넣었는데 금액이
+  큰 건이 위로 새치기하면 "검색어에 맞게 정렬"이 아니기 때문이다.
+- **거르지 않는다.** 걸리지 않은 공고는 아래로 내려갈 뿐이고 `total`·`byForm`·근접탈락은 그대로다.
+- 입력 중에는 요청을 보내지 않는다. 한 글자에 한 번씩 나가면 세션 한도(§8, 10회/분)를 태워
+  보고 있던 결과까지 잃는다. 제출(Enter·정렬 버튼)에서만 한 번 나간다.
+
+임베딩을 한 번 더 걸지 않은 이유는 세 가지다. ① 결과 화면에서 사람이 찾는 건 대개 "전세",
+"청년" 같은 낱말이고, 글자 대조는 왜 그 순서인지 화면에서 그대로 확인된다. ② 의도 축이 이미
+임베딩을 쓰므로 같은 축을 두 번 걸면 결과가 두 번 눌린다. ③ 질의 임베딩은 외부 API 호출(최대
+15초)이라 정렬을 바꿀 때마다 부를 것이 아니다.
+
+`src/lib/keyword-sort.ts` 의 공식은 `db/migrations/0014_keyword_sort.sql` 의
+`match_program_page()` 와 **완전히 같아야 한다** — 데모 모드는 TypeScript 로, DB 모드는 SQL 로
+같은 순서를 내야 두 모드가 같은 화면이 된다 (낱말 쪼개기는 양쪽 모두 웹에서 한다).
 
 ### mock 임베딩은 손대지 말 것
 

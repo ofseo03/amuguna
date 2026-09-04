@@ -15,6 +15,11 @@
  * 먼 페이지를 누르면 아는 커서 중 가장 가까운 것에 `skipPages` 를 붙여 **요청 한 번**으로 간다 —
  * 한 페이지씩 걸어가면 클릭 한 번이 요청 여러 개가 되어 세션 한도를 태우고 도중에 끊긴다.
  *
+ * **결과 안에서 찾기**(`sortQuery`)는 후보를 좁히지 않고 순서만 바꾼다 — 검색어에 걸린 건이 위로
+ * 올라올 뿐 한 건도 사라지지 않는다. 임베딩을 쓰지 않으므로 온보딩의 "원하는 것" 과 다른 축이고,
+ * 결과 건수·탭 건수·근접탈락 구성은 그대로다. 캐시와 커서는 검색어별로 따로 기억한다 — 같은 키에
+ * 섞이면 정렬을 바꾼 뒤 2페이지가 옛 순서의 커서로 열린다.
+ *
  * AI 안내는 카드와 따로 받는다(`/api/answer`). 한 응답에 묶으면 카드가 OpenRouter 를 기다린다.
  *
  * 오류는 화면을 갈아엎지 않는다. 이미 받아둔 결과가 있으면 카드는 그대로 두고 배너로만 얹는다.
@@ -27,16 +32,21 @@ import Term from "@/components/Term";
 import StepTrail from "@/components/StepTrail";
 import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
-import { MAX_SKIP_PAGES } from "@/lib/validation";
+import { MAX_SKIP_PAGES, MAX_SORT_QUERY_LEN } from "@/lib/validation";
 import type { AiAnswerStatus, AnswerResponse, MatchPage, MatchResponse, MatchTab } from "@/lib/types";
 
 type Payload = MatchResponse & { ok: true };
 /** 화면에 그리는 한 단위 — 응답의 공통부(요약·근접탈락 등) + 지금 보고 있는 탭·페이지의 카드 */
 type View = { payload: Payload; page: MatchPage };
 
-/** 같은 결과를 두 번 받아오지 않기 위한 키. 전체 보기 여부까지 넣어야 두 상태를 오갈 수 있다. */
-const tabKey = (all: boolean, t: MatchTab) => `${all ? "all-eligible" : "intent"}|${t}`;
-const cacheKey = (all: boolean, t: MatchTab, page: number) => `${tabKey(all, t)}|p${page}`;
+/**
+ * 같은 결과를 두 번 받아오지 않기 위한 키. 전체 보기 여부까지 넣어야 두 상태를 오갈 수 있다.
+ * 결과 안에서 찾기(`sq`)도 키의 일부다 — 순서가 달라지면 페이지 커서도 다른 줄을 가리킨다.
+ */
+const tabKey = (all: boolean, t: MatchTab, sq: string) =>
+  `${all ? "all-eligible" : "intent"}|${t}|${sq}`;
+const cacheKey = (all: boolean, t: MatchTab, page: number, sq: string) =>
+  `${tabKey(all, t, sq)}|p${page}`;
 
 /** 탭 하나의 페이지 커서 기억. `cursors` 는 페이지 번호 → 그 페이지를 여는 커서 (1페이지는 null) */
 type TabCursors = { cursors: Map<number, string | null>; lastPage: number | null };
@@ -59,6 +69,9 @@ export default function ResultsPage() {
   const [query, setQuery] = useState<string | null>(null);
   /** 자유입력으로 좁힌 결과를 되돌려(§5 "전체 보기") 자격 대상 전체를 보고 있는가 */
   const [ignoreIntent, setIgnoreIntent] = useState(false);
+  /** 결과 안에서 찾기 — 입력칸에 적힌 글자와, 실제로 서버에 보내 적용된 검색어를 나눠 둔다. */
+  const [sortInput, setSortInput] = useState("");
+  const [sortQuery, setSortQuery] = useState("");
   const [aiAnswer, setAiAnswer] = useState<string | null>(null);
   const [aiAnswerStatus, setAiAnswerStatus] = useState<AiAnswerStatus>("not_requested");
 
@@ -96,8 +109,9 @@ export default function ResultsPage() {
       nextCursor: string | null,
       skipPages: number,
       q: string | null,
+      sq: string,
     ): Promise<Outcome> => {
-      const hit = cache.current.get(cacheKey(all, nextTab, page));
+      const hit = cache.current.get(cacheKey(all, nextTab, page, sq));
       if (hit) return Promise.resolve({ kind: "ok", view: hit });
 
       return fetch("/api/match", {
@@ -109,6 +123,7 @@ export default function ResultsPage() {
           cursor: nextCursor,
           skipPages: skipPages > 0 ? skipPages : undefined,
           ignoreIntent: all,
+          sortQuery: sq || undefined,
         }),
       })
         .then(async (res) => {
@@ -123,7 +138,7 @@ export default function ResultsPage() {
           const payload = body as Payload;
           for (const [t, p] of Object.entries(payload.pages)) {
             // 요청한 탭만 요청한 페이지다. 곁들여 온 다른 탭은 언제나 1페이지다.
-            const key = cacheKey(all, t as MatchTab, t === nextTab ? page : 1);
+            const key = cacheKey(all, t as MatchTab, t === nextTab ? page : 1, sq);
             cache.current.set(key, { payload, page: p as MatchPage });
           }
           const requested = payload.pages[nextTab];
@@ -159,8 +174,8 @@ export default function ResultsPage() {
     setLoading(false);
   }, []);
 
-  const cursorsFor = useCallback((all: boolean, t: MatchTab): TabCursors => {
-    const key = tabKey(all, t);
+  const cursorsFor = useCallback((all: boolean, t: MatchTab, sq: string): TabCursors => {
+    const key = tabKey(all, t, sq);
     let entry = pageCursors.current.get(key);
     if (!entry) {
       entry = { cursors: new Map([[1, null]]), lastPage: null };
@@ -177,8 +192,8 @@ export default function ResultsPage() {
    * 것이든 유효하므로 남기고, 화면 반영은 호출부가 순번을 확인한 뒤에 한다.
    */
   const rememberPage = useCallback(
-    (all: boolean, t: MatchTab, n: number, view: View) => {
-      const entry = cursorsFor(all, t);
+    (all: boolean, t: MatchTab, n: number, view: View, sq: string) => {
+      const entry = cursorsFor(all, t, sq);
       if (view.page.nextCursor) {
         entry.cursors.set(n + 1, view.page.nextCursor);
       } else {
@@ -220,11 +235,11 @@ export default function ResultsPage() {
     // 자유입력은 URL 이 아니라 탭 메모리에서만 읽는다 (§8 — 서버·주소창에 남기지 않는다)
     const q = window.sessionStorage.getItem(QUERY_STORAGE_KEY);
     const seq = ++reqSeq.current;
-    void fetchMatch(false, "all", 1, null, 0, q).then((o) => {
-      if (o.kind === "ok") rememberPage(false, "all", 1, o.view);
+    void fetchMatch(false, "all", 1, null, 0, q, "").then((o) => {
+      if (o.kind === "ok") rememberPage(false, "all", 1, o.view, "");
       if (cancelled || seq !== reqSeq.current) return;
       if (o.kind === "ok") {
-        setLastPage(cursorsFor(false, "all").lastPage);
+        setLastPage(cursorsFor(false, "all", "").lastPage);
         requestAnswer(q, o.view);
       }
       apply(o, q);
@@ -242,10 +257,10 @@ export default function ResultsPage() {
    * total 로 계산한 페이지 수가 실제보다 커서 빈 페이지가 오면 한 페이지 앞으로 물러선다.
    * 1페이지는 첫 응답이 이미 캐시에 넣어 두었으므로 요청이 나가지 않는다.
    */
-  async function loadPage(all: boolean, t: MatchTab, n: number) {
+  async function loadPage(all: boolean, t: MatchTab, n: number, sq: string = sortQuery) {
     setLoading(true);
     const seq = ++reqSeq.current;
-    const entry = cursorsFor(all, t);
+    const entry = cursorsFor(all, t, sq);
     let target = Math.max(1, n);
     let current = 1;
     let outcome: Outcome;
@@ -253,9 +268,9 @@ export default function ResultsPage() {
       const from = nearestKnownPage(entry, target);
       const skip = Math.min(target - from, MAX_SKIP_PAGES);
       current = from + skip;
-      outcome = await fetchMatch(all, t, current, entry.cursors.get(from) ?? null, skip, query);
+      outcome = await fetchMatch(all, t, current, entry.cursors.get(from) ?? null, skip, query, sq);
       if (outcome.kind !== "ok") break;
-      rememberPage(all, t, current, outcome.view);
+      rememberPage(all, t, current, outcome.view, sq);
       if (seq !== reqSeq.current) return;
       if (outcome.view.page.cards.length === 0 && current > 1) {
         entry.lastPage = current - 1;
@@ -266,11 +281,12 @@ export default function ResultsPage() {
     }
     if (seq !== reqSeq.current) return;
     // 어디를 보고 있는지는 실제로 받아온 뒤에만 움직인다 — 실패했는데 탭·페이지 표시만
-    // 옮겨가면 화면에 남은 카드와 어긋난다.
+    // 옮겨가면 화면에 남은 카드와 어긋난다. 정렬 검색어도 마찬가지다.
     if (outcome.kind === "ok") {
       setIgnoreIntent(all);
       setTab(t);
       setPage(current);
+      setSortQuery(sq);
       setLastPage(entry.lastPage);
       // 첫 로드가 실패해 "다시 시도" 로 들어온 경우 — 안내도 이제 받는다.
       if (!all && t === "all" && current === 1) requestAnswer(query, outcome.view);
@@ -291,6 +307,18 @@ export default function ResultsPage() {
   /** §5 자유입력이 숨긴 결과를 펴고 접는다. 두 상태 모두 캐시되므로 오갈 때 요청은 한 번뿐이다. */
   function toggleIgnoreIntent() {
     void loadPage(!ignoreIntent, "all", 1);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  /**
+   * 결과 안에서 찾기 — 순서만 바꾸므로 탭과 전체 보기 상태는 그대로 두고 1페이지로만 돌아간다.
+   * 매 글자마다 보내지 않는다: 요청 한 번이 세션 한도(§8, 10회/분) 한 칸이라 제출할 때만 보낸다.
+   */
+  function applySort(next: string) {
+    const trimmed = next.trim().slice(0, MAX_SORT_QUERY_LEN);
+    if (trimmed === sortQuery) return;
+    setSortInput(trimmed);
+    void loadPage(ignoreIntent, tab, 1, trimmed);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -350,7 +378,9 @@ export default function ResultsPage() {
 
   const data = view.payload;
   const cards = view.page.cards;
-  const { summary, nearMisses, relaxationNotice, pageSize, demoMode, degraded } = data;
+  const { summary, nearMisses, relaxationNotice, pageSize, sortApplied, demoMode, degraded } = data;
+  /** 지금 보고 있는 페이지에서 검색어에 실제로 걸린 건수 — 정렬이 무엇을 했는지 눈으로 확인시킨다 */
+  const sortMatched = sortApplied ? cards.filter((c) => c.keywordScore > 0).length : 0;
   const tabTotal = tab === "all" ? summary.total : summary.byForm[tab];
   const totalPages = pageCount(tabTotal, pageSize);
 
@@ -503,6 +533,20 @@ export default function ResultsPage() {
         </p>
       )}
 
+      {/* ---------------- 결과 안에서 찾기 (정렬) ---------------- */}
+      <ResultSearch
+        value={sortInput}
+        applied={sortQuery}
+        active={sortApplied}
+        matched={sortMatched}
+        shown={cards.length}
+        page={page}
+        busy={loading}
+        onChange={setSortInput}
+        onSubmit={() => applySort(sortInput)}
+        onClear={() => applySort("")}
+      />
+
       {/* ---------------- form 탭 ---------------- */}
       <nav aria-label="분류별 좁혀보기" className="mt-6">
         <p className="mb-2 text-sm text-ink-3">
@@ -648,6 +692,131 @@ function TabButton({
         <span className={active ? "text-white/80" : "text-ink-3"}>{count}</span>
       </button>
     </li>
+  );
+}
+
+/**
+ * 결과 안에서 찾기 (결과 화면 정렬).
+ *
+ * 탭이 "어떤 종류인가" 로 좁힌다면 이건 "무슨 말이 들어 있나" 로 줄을 다시 세운다. 임베딩이
+ * 아니라 카드에 실제로 보이는 글자(제목·요약·기관명·지원금액 문구)를 대조하므로, 왜 이 순서인지
+ * 사용자가 화면에서 그대로 확인할 수 있다 (`src/lib/keyword-sort.ts`).
+ *
+ * **거르지 않고 순서만 바꾼다.** 대상인데 몰라서 못 받는 것을 없애자는 서비스가 낱말 하나로
+ * 대상인 것을 숨기면 안 된다 (§5). 그래서 안내 문구도 "숨기지 않는다"를 먼저 말한다.
+ *
+ * 입력 중에는 요청을 보내지 않는다 — 한 글자에 한 번씩 나가면 세션 한도(§8, 10회/분)를 태워
+ * 결과가 통째로 사라진다. 제출(Enter·버튼)에서만 한 번 나간다.
+ */
+function ResultSearch({
+  value,
+  applied,
+  active,
+  matched,
+  shown,
+  page,
+  busy,
+  onChange,
+  onSubmit,
+  onClear,
+}: {
+  value: string;
+  /** 실제로 적용되어 지금 순서를 만든 검색어 (없으면 빈 문자열) */
+  applied: string;
+  /** 서버가 낱말을 실제로 뽑아 정렬에 썼는가 — 문장부호만 넣으면 false 다 */
+  active: boolean;
+  matched: number;
+  shown: number;
+  /** 지금 보고 있는 페이지 번호 — 걸린 게 없을 때 할 수 있는 말이 페이지마다 다르다 */
+  page: number;
+  busy: boolean;
+  onChange: (v: string) => void;
+  onSubmit: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <section
+      aria-labelledby="result-search-heading"
+      className="mt-6 rounded-xl border border-line bg-bg-soft px-5 py-4"
+    >
+      <h2 id="result-search-heading" className="text-base font-bold text-ink">
+        결과 안에서 찾기
+      </h2>
+      <p id="result-search-help" className="mt-1 text-sm text-ink-2">
+        낱말을 넣으면 제목·요약·기관명·지원금액 문구에 그 말이 들어 있는 지원을 위로 올립니다.{" "}
+        <strong className="text-ink">결과를 숨기지 않고 순서만 바꿉니다.</strong>
+      </p>
+      <form
+        role="search"
+        className="mt-3 flex flex-wrap items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSubmit();
+        }}
+      >
+        <label htmlFor="result-search" className="text-sm font-semibold text-ink-2">
+          찾을 낱말
+        </label>
+        <input
+          id="result-search"
+          type="search"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          maxLength={MAX_SORT_QUERY_LEN}
+          placeholder="예: 전세 청년"
+          aria-describedby="result-search-help"
+          className="min-w-[12rem] flex-1 rounded-lg border-2 border-line bg-bg px-4 py-2 text-ink placeholder:text-ink-3 focus:border-brand"
+        />
+        <button
+          type="submit"
+          disabled={busy}
+          className="rounded-lg bg-brand px-5 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          정렬
+        </button>
+        {applied !== "" && (
+          <button
+            type="button"
+            onClick={onClear}
+            disabled={busy}
+            className="rounded-lg border-2 border-line bg-bg px-4 py-2 font-semibold text-ink-2 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            지우기
+          </button>
+        )}
+      </form>
+      {applied !== "" && (
+        <p role="status" aria-live="polite" className="mt-2 text-sm text-ink-2">
+          {/*
+            걸린 건이 위로 올라오므로 1페이지에 하나도 없으면 어디에도 없다 — 그때는 "순서를
+            바꿨다"고 말하지 않는다(실제로 달라진 게 없다). 뒤쪽 페이지라면 앞 페이지에 있다고
+            일러 준다. 없는 곳을 뒤지게 두지 않는다.
+          */}
+          {active && matched > 0 ? (
+            <>
+              <strong className="text-ink">&ldquo;{applied}&rdquo;</strong> 기준으로 순서를
+              바꿨습니다 — 이 페이지의 {shown}건 중{" "}
+              <strong className="text-ink">{matched}건</strong>에 이 말이 들어 있습니다.
+            </>
+          ) : active && page > 1 ? (
+            <>
+              <strong className="text-ink">&ldquo;{applied}&rdquo;</strong> 이(가) 들어 있는
+              지원은 앞 페이지에 모여 있습니다.
+            </>
+          ) : active ? (
+            <>
+              <strong className="text-ink">&ldquo;{applied}&rdquo;</strong> 이(가) 들어 있는
+              지원이 없어 원래 순서 그대로 보여드립니다.
+            </>
+          ) : (
+            <>
+              <strong className="text-ink">&ldquo;{applied}&rdquo;</strong> 에서 찾을 낱말을
+              알아내지 못해 원래 순서를 그대로 두었습니다.
+            </>
+          )}
+        </p>
+      )}
+    </section>
   );
 }
 

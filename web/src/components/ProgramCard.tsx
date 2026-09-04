@@ -9,6 +9,8 @@ import type { MatchCard, NearMissCard } from "@/lib/types";
  * 요약을 뺐더니 근접탈락 카드에만 설명이 남아 **대상이 아닌 것만 뭔지 알 수 있는** 화면이 됐다.
  * 목록에서 무엇을 고를지 판단할 근거가 없으면 카드 수만큼 상세를 들락거리게 된다.
  * 지원금액은 상세 화면에서만 보여준다.
+ *
+ * "결과 안에서 찾기"로 정렬 중이면 검색어가 걸린 카드에 그 사실을 표시한다 (`keywordScore`).
  */
 export function ProgramCard({ card }: { card: MatchCard }) {
   const p = card.program;
@@ -20,6 +22,15 @@ export function ProgramCard({ card }: { card: MatchCard }) {
         <span className="rounded bg-bg-sunken px-2 py-0.5 font-semibold text-ink-2">
           {FORM_LABEL[p.form]}
         </span>
+        {/*
+          결과 안에서 찾기로 순서가 바뀌었을 때, 이 카드가 왜 위에 있는지 표시한다.
+          순서만 보고 "왜 이게 먼저지" 하고 되묻게 두지 않는다 — 걸린 카드는 걸렸다고 말한다.
+        */}
+        {card.keywordScore > 0 && (
+          <span className="rounded bg-brand-soft px-2 py-0.5 font-semibold text-brand-dark">
+            검색어 일치
+          </span>
+        )}
         <span className="text-ink-3">{issuerLevelLabel(p.issuer_level)}</span>
         <span aria-hidden="true" className="text-ink-3">
           ·

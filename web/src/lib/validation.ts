@@ -93,6 +93,36 @@ export function validateQuery(input: unknown): Validated<string | null> {
 }
 
 /**
+ * 결과 내 검색 정렬의 검색어 길이 상한.
+ *
+ * 온보딩 자유입력(200자)과 달리 이건 문장이 아니라 낱말 몇 개다 — "전세 청년" 처럼 쓴다.
+ * 길이를 짧게 잡아 두면 화면의 입력칸이 무엇을 기대하는지 그 자체로 말해 준다.
+ */
+export const MAX_SORT_QUERY_LEN = 60;
+
+/** 결과 내 검색어 — 저장하지 않고 이 요청의 정렬에만 쓴다 (§8). 잘라내지 않고 거절한다. */
+export function validateSortQuery(input: unknown): Validated<string | null> {
+  if (input === null || input === undefined || input === "") return { ok: true, value: null };
+  if (typeof input !== "string") {
+    return {
+      ok: false,
+      errors: [{ field: "sortQuery", message: "결과 내 검색어 형식이 올바르지 않습니다." }],
+    };
+  }
+  const trimmed = input.trim();
+  if (trimmed.length === 0) return { ok: true, value: null };
+  if ([...trimmed].length > MAX_SORT_QUERY_LEN) {
+    return {
+      ok: false,
+      errors: [
+        { field: "sortQuery", message: `결과 내 검색어는 ${MAX_SORT_QUERY_LEN}자를 넘을 수 없습니다.` },
+      ],
+    };
+  }
+  return { ok: true, value: trimmed };
+}
+
+/**
  * 한 요청으로 건너뛸 수 있는 최대 페이지 수. `match_program_page()` 의 OFFSET 상한(1500행)과
  * 같은 값이다 — 결과 화면이 먼 페이지 번호를 눌렀을 때 아는 커서에서 여기까지는 한 번에 간다.
  */
