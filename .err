@@ -1,1 +1,0 @@
-psql:db/migrations/0009_operational_integrity.sql:11: ERROR:  relation "ingest_embedding_state" already exists
