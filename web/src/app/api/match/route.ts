@@ -14,7 +14,13 @@ import { runMatch } from "@/lib/matching";
 import { readProfile, readSessionId, upgradeProfileCookie } from "@/lib/session";
 import { CSRF_MESSAGE, checkCsrf } from "@/lib/csrf";
 import { checkSessionAndIpRateLimit, rateLimitMessage } from "@/lib/rate-limit";
-import { validateCursor, validateForm, validateQuery, validateSkipPages } from "@/lib/validation";
+import {
+  validateCursor,
+  validateForm,
+  validateQuery,
+  validateSkipPages,
+  validateSortQuery,
+} from "@/lib/validation";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -85,6 +91,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, errors: skipPages.errors }, { status: 400 });
   }
 
+  // 결과 내 검색 정렬 — 후보를 좁히지 않고 순서만 바꾼다. 저장하지 않는다 (§8).
+  const sortQuery = validateSortQuery(body.sortQuery);
+  if (!sortQuery.ok) {
+    return NextResponse.json({ ok: false, errors: sortQuery.errors }, { status: 400 });
+  }
+
   const form = validateForm(body.form);
   const started = Date.now();
   try {
@@ -95,6 +107,7 @@ export async function POST(req: Request) {
       cursor: cursor.value,
       skipPages: skipPages.value,
       ignoreIntent: body.ignoreIntent === true,
+      sortQuery: sortQuery.value,
     });
     return NextResponse.json(
       {

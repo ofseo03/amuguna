@@ -6,7 +6,7 @@ on:
       migrations:
         description: "적용할 마이그레이션 파일 (공백 구분, 순서대로). 이미 적용된 파일은 넣지 않는다 — 0009 처럼 CREATE TABLE 을 쓰는 파일은 재적용하면 실패한다."
         required: true
-        default: "db/migrations/0013_page_offset.sql"
+        default: "db/migrations/0014_keyword_sort.sql"
 
 concurrency:
   group: migrate-production
@@ -54,8 +54,10 @@ jobs:
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT pg_get_functiondef('public.match_programs(integer,text,text[],text,integer,vector,integer)'::regprocedure) LIKE '%p.starts_at%'")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.ingest_embedding_state') IS NOT NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_counts(integer,text,text[],text,integer,integer,vector,integer)') IS NOT NULL")" = "t"
-          # 0013: offset 인자가 붙은 15인자 함수만 남아야 한다. 14인자 구버전이 함께 있으면 호출이 모호해진다.
-          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer,integer)') IS NOT NULL")" = "t"
+          # 0014: offset(0013) 과 결과 내 정렬 낱말(0014)이 붙은 16인자 함수만 남아야 한다.
+          # 15·14인자 구버전이 함께 있으면 인자를 생략한 호출이 모호해진다.
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer,integer,text[])') IS NOT NULL")" = "t"
+          test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer,integer)') IS NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regprocedure('public.match_program_page(integer,text,text[],text,integer,integer,vector,integer,boolean,text,double precision,bigint,integer,integer)') IS NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.profiles') IS NULL")" = "t"
           test "$(psql -v ON_ERROR_STOP=1 "$DATABASE_URL" -Atc "SELECT to_regclass('public.notification_outbox') IS NULL")" = "t"

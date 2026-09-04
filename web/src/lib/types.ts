@@ -118,6 +118,13 @@ export interface MatchCard {
   score: number;
   breakdown: ScoreBreakdown;
   sim: number;
+  /**
+   * 결과 내 검색어가 이 공고의 어디에 얼마나 걸렸는가 (0~1). 검색어가 없으면 0.
+   *
+   * 임베딩 유사도(`sim`)와 다른 축이다 — 카드에 보이는 글자(제목·요약·기관명·지원금액 문구)에
+   * 낱말이 들어 있는지만 본다 (`src/lib/keyword-sort.ts`). 화면은 이 값으로 "검색어 일치"를 표시한다.
+   */
+  keywordScore: number;
   /** §7.5 템플릿 조립 근거 문장 */
   reason: string;
   /** 카드 배지 (매칭에 관여한 내 속성) */
@@ -194,6 +201,14 @@ export interface MatchResponse {
   intentHiddenCount: number;
   /** 이 응답이 자유입력 필터를 끄고(= 전체 보기) 만들어졌는가 */
   intentIgnored: boolean;
+  /**
+   * 결과 내 검색 정렬이 실제로 적용됐는가.
+   *
+   * 검색어를 받아도 낱말이 하나도 안 남으면(예: 문장부호만) 정렬하지 않는다. 화면이
+   * "정렬했습니다"를 잘못 띄우지 않도록 서버가 적용 여부를 그대로 알린다.
+   * 건수(`total`·`byForm`)와 근접탈락 구성은 이 값과 무관하게 같다 — 정렬은 순서만 바꾼다.
+   */
+  sortApplied: boolean;
   /** DB 미연결 시 true — 번들 데모 데이터로 동작 중 */
   demoMode: boolean;
   /**
