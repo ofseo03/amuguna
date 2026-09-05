@@ -1,7 +1,8 @@
 /**
- * 스코어링 (SPEC §7.4).
+ * 종합 점수: 질문 없는 추천순은 네 항목 각각 25%.
+ * 질문이 있는 날짜 정렬의 동점 처리는 기존 §7.4 가중치를 유지한다.
  *
- *   score = 0.30 · 유사도       (입력 건너뛰면 0, 나머지 가중치 정규화)
+ *   score = 0.30 · 유사도       (질문이 있는 날짜 정렬의 동점 처리)
  *         + 0.25 · 조건_구체성  (내 속성 중 몇 개가 매칭에 관여했나)
  *         + 0.20 · 지역_근접성  (기초 > 광역 > 전국)
  *         + 0.15 · 금액_규모    (log 정규화)
@@ -79,17 +80,8 @@ export function combine(
       WEIGHTS.amountScale * parts.amountScale +
       WEIGHTS.deadlineUrgency * parts.deadlineUrgency;
   } else {
-    const rest =
-      WEIGHTS.specificity +
-      WEIGHTS.regionProximity +
-      WEIGHTS.amountScale +
-      WEIGHTS.deadlineUrgency;
     total =
-      (WEIGHTS.specificity * parts.specificity +
-        WEIGHTS.regionProximity * parts.regionProximity +
-        WEIGHTS.amountScale * parts.amountScale +
-        WEIGHTS.deadlineUrgency * parts.deadlineUrgency) /
-      rest;
+      (parts.specificity + parts.regionProximity + parts.amountScale + parts.deadlineUrgency) / 4;
   }
   return { ...parts, total };
 }

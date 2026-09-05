@@ -99,9 +99,14 @@ jobs:
       # 두 번 부어도 같은 결과여야 하고(OR REPLACE), 구버전 오버로드가 남아 호출을 모호하게 만들면 안 된다.
       # 재적용 검증은 **가장 최근** RPC 마이그레이션으로 한다. 옛 RPC 파일(0013)을 나중에 다시 부으면
       # 그 파일이 만든 구버전 오버로드가 되살아나 호출이 모호해지므로, 그건 지원하는 동작이 아니다.
-      - name: 0015 재적용 — 멱등성과 단일 시그니처 확인
+      - name: Query relevance SQL regression
         run: |
-          $PSQL -d fresh -f db/migrations/0015_result_sort.sql
+          $PSQL -d fresh -f db/tests/query_aware_ranking.sql
+
+      - name: 0016 재적용 — 멱등성과 단일 시그니처 확인
+        run: |
+          $PSQL -d fresh -f db/migrations/0016_query_aware_ranking.sql
+          $PSQL -d fresh -f db/tests/query_aware_ranking.sql
           n=$($PSQL -d fresh -tAc "SELECT count(*) FROM pg_proc WHERE proname = 'match_program_page'")
           echo "match_program_page 오버로드 수: $n"
           [ "$n" = "1" ] || { echo "::error::match_program_page 오버로드가 $n 개다"; exit 1; }
