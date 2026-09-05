@@ -10,7 +10,8 @@ import {
   recencyDate,
   recencyScore,
   resultSortScore,
-  resultSortLabel,
+  RESULT_SORT_LABEL,
+  deadlineScore,
   resultSortHint,
 } from "./result-sort.ts";
 import { combine } from "./scoring.ts";
@@ -55,8 +56,8 @@ const program = (over = {}) => ({
   ...over,
 });
 
-test("정렬 축은 셋뿐이고 기본은 질문에 따라 관련도순 또는 추천순이다", () => {
-  assert.deepEqual([...RESULT_SORTS], ["relevance", "newest", "oldest"]);
+test("정렬 축은 셋뿐이고 기본 이름은 항상 추천순이다", () => {
+  assert.deepEqual([...RESULT_SORTS], ["relevance", "newest", "deadline"]);
   assert.equal(DEFAULT_RESULT_SORT, "relevance");
   assert.ok(isResultSort("newest"));
   assert.ok(!isResultSort("newest "));
@@ -65,7 +66,8 @@ test("정렬 축은 셋뿐이고 기본은 질문에 따라 관련도순 또는 
 
 test("모르는 정렬 축은 거절하지 않고 기본값으로 되돌린다", () => {
   // 정렬은 후보를 좁히지 않으므로 400 으로 끊으면 보여줄 수 있는 결과 화면만 사라진다
-  assert.equal(validateResultSort("oldest"), "oldest");
+  assert.equal(validateResultSort("deadline"), "deadline");
+  assert.equal(validateResultSort("oldest"), "relevance");
   assert.equal(validateResultSort(undefined), "relevance");
   assert.equal(validateResultSort("아무거나"), "relevance");
   assert.equal(validateResultSort(7), "relevance");
@@ -79,13 +81,12 @@ test("공고일은 접수 시작일, 없으면 수집일(KST)이다", () => {
   assert.equal(recencyScore(program({ fetched_at: "" })), 0);
 });
 
-test("날짜가 늦을수록 최신순 점수가 크고, 오래된순은 그 반대다", () => {
+test("날짜가 늦을수록 최신순 점수가 크다", () => {
   const older = program({ starts_at: "2020-01-01" });
   const newer = program({ starts_at: "2026-01-01" });
   assert.ok(resultSortScore(0.5, newer, "newest") > resultSortScore(0.5, older, "newest"));
-  assert.ok(resultSortScore(0.5, older, "oldest") > resultSortScore(0.5, newer, "oldest"));
   // 커서 검증(0~1)을 벗어나지 않는다
-  for (const sort of ["newest", "oldest"]) {
+  for (const sort of ["newest", "deadline"]) {
     for (const p of [older, newer, program({ starts_at: "1970-01-01" })]) {
       const score = resultSortScore(1, p, sort);
       assert.ok(score >= 0 && score <= 1, `${sort} ${score}`);
@@ -93,36 +94,36 @@ test("날짜가 늦을수록 최신순 점수가 크고, 오래된순은 그 반
   }
 });
 
-test("날짜가 §7.4 스코어보다 항상 먼저 순서를 정한다", () => {
-  // 하루 차이가 만드는 간격이 §7.4 스코어 0 대 1 의 차이보다 커야 한다
+test("날짜가 추천 점수보다 항상 먼저 순서를 정한다", () => {
+  // 하루 차이가 만드는 간격이 추천 점수 0 대 1 의 차이보다 커야 한다
   const dayGap = RECENCY_WEIGHT / RECENCY_SPAN_DAYS;
   assert.ok(dayGap > BASE_TIEBREAK * 1);
 
   const a = program({ starts_at: "2026-01-02" });
   const b = program({ starts_at: "2026-01-01" });
   assert.ok(resultSortScore(0, a, "newest") > resultSortScore(1, b, "newest"));
-  // 같은 날짜일 때만 §7.4 스코어가 정한다
+  // 같은 날짜일 때만 추천 점수가 정한다
   assert.ok(resultSortScore(0.9, a, "newest") > resultSortScore(0.1, a, "newest"));
 });
 
-test("정확도순은 §7.4 스코어를 그대로 쓴다", () => {
+test("질문 없는 추천순은 추천 점수를 그대로 쓴다", () => {
   assert.equal(resultSortScore(0.42, program({ starts_at: "2026-01-01" }), "relevance"), 0.42);
 });
 
 test("정렬은 순서만 바꾸고 한 건도 숨기지 않는다", async () => {
   const plain = await demoMatch({});
   const newest = await demoMatch({ sort: "newest" });
-  const oldest = await demoMatch({ sort: "oldest" });
+  const deadline = await demoMatch({ sort: "deadline" });
 
   assert.equal(plain.sort, "relevance");
   assert.equal(newest.sort, "newest");
 
-  for (const sorted of [newest, oldest]) {
+  for (const sorted of [newest, deadline]) {
     // 건수는 어느 축에서도 달라지지 않는다 — 정렬은 후보 집합을 건드리지 않는다
     assert.equal(sorted.summary.total, plain.summary.total);
     assert.deepEqual(sorted.summary.byForm, plain.summary.byForm);
     assert.equal(sorted.intentHiddenCount, plain.intentHiddenCount);
-    // 근접탈락은 정렬 버튼을 따르지 않는다 — 언제나 §7.4 스코어 상위 5건이다 (§7.6)
+    // 근접탈락은 정렬 버튼을 따르지 않는다 — 언제나 추천 점수 상위 5건이다 (§7.6)
     assert.deepEqual(
       sorted.nearMisses.map((n) => n.program.id),
       plain.nearMisses.map((n) => n.program.id),
@@ -130,28 +131,20 @@ test("정렬은 순서만 바꾸고 한 건도 숨기지 않는다", async () =>
   }
 });
 
-test("최신순은 공고일 내림차순, 오래된순은 오름차순으로 줄을 세운다", async () => {
-  const newest = await demoMatch({ sort: "newest" });
-  const oldest = await demoMatch({ sort: "oldest" });
-
-  const dates = (r) => r.pages.all.cards.map((c) => recencyDate(c.program));
-  const newestDates = dates(newest);
-  const oldestDates = dates(oldest);
-
-  for (let i = 1; i < newestDates.length; i += 1) {
-    assert.ok(newestDates[i - 1] >= newestDates[i], `${newestDates[i - 1]} >= ${newestDates[i]}`);
-  }
-  for (let i = 1; i < oldestDates.length; i += 1) {
-    assert.ok(oldestDates[i - 1] <= oldestDates[i], `${oldestDates[i - 1]} <= ${oldestDates[i]}`);
-  }
-  // 두 축이 실제로 다른 줄을 세운다 (데모 데이터의 공고일이 흩어져 있어야 성립한다)
-  assert.notDeepEqual(
-    newest.pages.all.cards.map((c) => c.program.id),
-    oldest.pages.all.cards.map((c) => c.program.id),
-  );
-  // 점수는 어느 축에서도 내림차순으로 유지된다 — keyset 커서가 여기에 기댄다
-  for (const cards of [newest.pages.all.cards, oldest.pages.all.cards]) {
-    for (let i = 1; i < cards.length; i += 1) assert.ok(cards[i - 1].score >= cards[i].score);
+test("최신순은 시작일 내림차순, 마감 임박순은 유효한 마감일 오름차순이다", async () => {
+  for (const query of [null, "청년 주거 보증금 대출"]) {
+    const newest = await demoMatch({ sort: "newest", query });
+    const deadline = await demoMatch({ sort: "deadline", query });
+    const dates = newest.pages.all.cards.map(c => recencyDate(c.program));
+    for (let i = 1; i < dates.length; i++) assert.ok(dates[i - 1] >= dates[i]);
+    const due = deadline.pages.all.cards.map(c => c.program.is_always_open || !c.program.ends_at ? "9999-12-31" : c.program.ends_at);
+    for (let i = 1; i < due.length; i++) assert.ok(due[i - 1] <= due[i]);
+    assert.equal(newest.summary.total, deadline.summary.total);
+    const cards = deadline.pages.all.cards;
+    assert.ok(cards.length > 1);
+    const first = cards[0];
+    const next = await demoMatch({ sort: "deadline", query, cursor: { score: first.score, id: first.program.id } });
+    assert.deepEqual(next.pages.all.cards.map(c => c.program.id), cards.slice(1).map(c => c.program.id));
   }
 });
 
@@ -185,10 +178,11 @@ test("관련도순은 종합점수와 무관하게 음수까지 유사도 순서
   assert.ok(high > low);
   assert.ok(low >= 0 && high <= 1);
   assert.equal(resultSortScore(0.8, program(), "relevance"), 0.8);
-  assert.equal(resultSortLabel("relevance", true), "관련도순");
-  assert.equal(resultSortLabel("relevance", false), "추천순");
+  assert.equal(RESULT_SORT_LABEL.relevance, "추천순");
   assert.match(resultSortHint("relevance", true), /입력한 내용/);
-  assert.equal(resultSortLabel("newest", true), "최신순");
+  assert.equal(RESULT_SORT_LABEL.newest, "최신순");
+  assert.equal(RESULT_SORT_LABEL.deadline, "마감 임박순");
+  assert.match(resultSortHint("relevance", false), /25%/);
 });
 
 test("자연어 질문은 유사도순, 공백 및 전체 보기는 네 항목 추천순이다", async () => {
@@ -234,4 +228,35 @@ test("임베딩 API 실패 시 질문이 있어도 추천순으로 돌아간다"
       if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
     }
   }
+});
+
+
+test("마감 임박순은 오늘·내일·먼 미래 뒤에 상시·미정을 둔다", () => {
+  const today = program({ ends_at: "2026-09-05" });
+  const tomorrow = program({ ends_at: "2026-09-06" });
+  const distant = program({ ends_at: "2099-12-31" });
+  const farEarlier = program({ ends_at: "2099-01-01" });
+  assert.ok(resultSortScore(0, farEarlier, "deadline") > resultSortScore(1, distant, "deadline"));
+  const latest = program({ ends_at: "9999-12-31" });
+  assert.ok(resultSortScore(0, distant, "deadline") > resultSortScore(1, latest, "deadline"));
+  const always = program({ ends_at: "2026-09-04", is_always_open: true });
+  const unknown = program({ ends_at: null });
+  assert.ok(resultSortScore(0, today, "deadline") > resultSortScore(1, tomorrow, "deadline"));
+  assert.ok(resultSortScore(0, tomorrow, "deadline") > resultSortScore(1, distant, "deadline"));
+  for (const p of [always, unknown]) {
+    assert.equal(deadlineScore(p), 0);
+    assert.ok(resultSortScore(0, latest, "deadline") > resultSortScore(1, p, "deadline"));
+  }
+});
+
+test("날짜가 같으면 질문 유무에 따른 추천 기준으로 순위를 정한다", () => {
+  const same = program({ starts_at: "2026-09-05", ends_at: "2026-09-10" });
+  for (const sort of ["newest", "deadline"]) {
+    // 종합 점수가 반대여도 질문이 있으면 유사도가 높은 쪽이 먼저다.
+    assert.ok(resultSortScore(0, same, sort, 0.9) > resultSortScore(1, same, sort, 0.2));
+    assert.ok(resultSortScore(1, same, sort) > resultSortScore(0, same, sort));
+  }
+  const later = program({ starts_at: "2026-09-06", ends_at: "2026-09-11" });
+  assert.ok(resultSortScore(0, later, "newest", -1) > resultSortScore(1, same, "newest", 1));
+  assert.ok(resultSortScore(0, same, "deadline", -1) > resultSortScore(1, later, "deadline", 1));
 });

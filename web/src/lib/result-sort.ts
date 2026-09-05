@@ -6,9 +6,9 @@
  * 어떤 정렬에서도 같다. 바뀌는 것은 줄 세우는 순서뿐이다.
  *
  * 축은 셋이다.
- *  - `relevance` — 유효한 질문은 관련도순, 없으면 유사도를 제외한 추천순.
+ *  - `relevance` — 추천순 — 질문이 있으면 유사도, 없으면 네 항목 균등 점수.
  *  - `newest`    (최신순)   — 공고일이 늦은 것부터
- *  - `oldest`    (오래된순) — 공고일이 이른 것부터
+ *  - `deadline`  (마감 임박순) — 마감이 가까운 것부터, 상시·미정은 뒤로
  *
  * **왜 낱말 입력이 아니라 버튼인가.** 결과 화면에서 사람이 고르고 싶은 건 대개 "무슨 말이
  * 들어 있나"가 아니라 "새 공고부터 보자" 같은 **한 가지 축**이다. 낱말을 치게 하면 무엇을
@@ -20,36 +20,32 @@
  * `sort_score` 안에 접어 넣는다 — `ORDER BY sort_score DESC, id ASC` 한 줄이 세 축을 모두
  * 처리하고, 페이지 커서·건너뛰기·캐시가 축과 무관하게 그대로 동작한다.
  *
- * 이 파일의 공식은 `db/migrations/0016_query_aware_ranking.sql` 의 `match_program_page()` 와
+ * 이 파일의 공식은 `db/migrations/0017_deadline_sort.sql` 의 `match_program_page()` 와
  * **완전히 같아야 한다.** 데모 모드는 여기서, DB 모드는 SQL 에서 같은 순서를 내야 한다.
  */
 import { kstDate, toDateString } from "./eligibility";
 import type { Program, ResultSort } from "./types";
 
-export const RESULT_SORTS: readonly ResultSort[] = ["relevance", "newest", "oldest"];
+export const RESULT_SORTS: readonly ResultSort[] = ["relevance", "newest", "deadline"];
 
-/** 기본 정렬은 실제 사용한 질문에 따라 관련도순 또는 추천순이다. */
+/** 기본 정렬 이름은 추천순이며 설명만 실제 질문 사용 여부에 따라 바뀐다. */
 export const DEFAULT_RESULT_SORT: ResultSort = "relevance";
 
 export const RESULT_SORT_LABEL: Record<ResultSort, string> = {
   relevance: "추천순",
   newest: "최신순",
-  oldest: "오래된순",
+  deadline: "마감 임박순",
 };
 
 /** 버튼 밑에 붙는 한 줄 설명 — 무엇을 기준으로 세운 줄인지 말해 준다. */
 export const RESULT_SORT_HINT: Record<ResultSort, string> = {
   relevance: "조건 구체성·지역·금액·마감을 각각 25%씩 반영합니다.",
-  newest: "공고일이 늦은 것부터 보여드립니다.",
-  oldest: "공고일이 이른 것부터 보여드립니다.",
+  newest: "접수 시작일이 최근인 순서입니다. 시작일이 없으면 수집일을 사용합니다.",
+  deadline: "마감이 가까운 순서입니다. 상시 모집과 마감일 미정은 뒤에 표시합니다.",
 };
 
 export function isResultSort(value: unknown): value is ResultSort {
   return typeof value === "string" && (RESULT_SORTS as readonly string[]).includes(value);
-}
-
-export function resultSortLabel(sort: ResultSort, usesSimilarity: boolean): string {
-  return sort === "relevance" && usesSimilarity ? "관련도순" : RESULT_SORT_LABEL[sort];
 }
 
 export function resultSortHint(sort: ResultSort, usesSimilarity: boolean): string {
@@ -58,23 +54,12 @@ export function resultSortHint(sort: ResultSort, usesSimilarity: boolean): strin
     : RESULT_SORT_HINT[sort];
 }
 
-/**
- * 공고일을 0~1 로 펴는 창. 1970-01-01 부터 40000일(약 2079년)까지다.
- *
- * 하루의 간격이 `1/40000 = 0.000025` 로 일정해, 아래 tie-break 항(최대 0.00001)보다 항상 크다.
- * 창을 벗어난 날짜는 양 끝으로 붙는다 — 그런 공고는 어차피 노출 대상이 아니다.
- */
-export const RECENCY_SPAN_DAYS = 40_000;
+/** 네 자리 연도(9999년까지)를 담는 날짜 범위. 마감 미정용 눈금을 별도로 남긴다. */
+export const RECENCY_SPAN_DAYS = 4_000_000;
 
-/**
- * 날짜가 먼저, §7.4 스코어는 **같은 날짜일 때만** 순서를 정한다.
- *
- * 두 항의 합이 1 을 넘지 않아야 keyset 커서 검증(0~1)이 그대로 유효하다. 그래서 1 을 둘로
- * 나눠 쓴다: 하루 차이가 만드는 `0.99999 × 0.000025 = 0.0000249975` 는 §7.4 스코어가 만들 수
- * 있는 최대 차이 `0.00001 × 1` 보다 크므로, 날짜가 다르면 언제나 날짜가 이긴다.
- */
-export const RECENCY_WEIGHT = 0.99999;
-export const BASE_TIEBREAK = 0.00001;
+/** 하루 간격(약 0.00000025)이 추천 동점 항(최대 0.00000001)보다 크다. */
+export const RECENCY_WEIGHT = 0.99999999;
+export const BASE_TIEBREAK = 0.00000001;
 
 /** SQL 의 `round(x, 12)` 와 같은 눈금 — 두 백엔드가 같은 값을 내도록 맞춘다. */
 function round12(x: number): number {
@@ -107,18 +92,21 @@ export function recencyScore(program: Program): number {
   return Math.min(1, Math.max(0, days / RECENCY_SPAN_DAYS));
 }
 
-/**
- * 최종 정렬 점수 (0~1). 질문이 있으면 순수 유사도, 없으면 추천 점수를 쓴다.
- *
- * 두 날짜 정렬은 방향만 반대다: 최신순은 공고일을 그대로, 오래된순은 뒤집어 쓴다. 어느 쪽이든
- * `ORDER BY sort_score DESC, id ASC` 한 줄로 정렬되므로 페이지 커서가 그대로 유효하다.
- */
+/** 마감일을 모르는 공고는 0, 날짜가 있는 공고는 최소 한 날짜 눈금을 남긴다. */
+export function deadlineScore(program: Program): number {
+  if (program.is_always_open || !program.ends_at) return 0;
+  const date = toDateString(program.ends_at);
+  if (!date) return 0;
+  const days = Date.parse(`${date}T00:00:00Z`) / DAY_MS;
+  if (!Number.isFinite(days)) return 0;
+  return 1 - Math.min(RECENCY_SPAN_DAYS - 1, Math.max(0, days)) / RECENCY_SPAN_DAYS;
+}
+
+/** 날짜가 같으면 해당 검색의 추천 점수로 정렬한다. 기존 0~1 커서를 유지한다. */
 export function resultSortScore(base: number, program: Program, sort: ResultSort, similarity: number | null = null): number {
-  if (sort !== "newest" && sort !== "oldest") {
-    // 음수 유사도도 순서를 보존하면서 기존 0~1 커서에 담는다.
-    return round12(similarity === null ? base : (Math.max(-1, Math.min(1, similarity)) + 1) / 2);
-  }
-  const recency = recencyScore(program);
-  const oriented = sort === "oldest" ? 1 - recency : recency;
-  return round12(RECENCY_WEIGHT * oriented + BASE_TIEBREAK * base);
+  // 음수 유사도도 순서를 보존하면서 기존 0~1 커서에 담는다.
+  const recommendation = similarity === null ? base : (Math.max(-1, Math.min(1, similarity)) + 1) / 2;
+  if (sort !== "newest" && sort !== "deadline") return round12(recommendation);
+  const dateScore = sort === "deadline" ? deadlineScore(program) : recencyScore(program);
+  return round12(RECENCY_WEIGHT * dateScore + BASE_TIEBREAK * recommendation);
 }

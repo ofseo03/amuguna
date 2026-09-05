@@ -102,11 +102,13 @@ jobs:
       - name: Query relevance SQL regression
         run: |
           $PSQL -d fresh -f db/tests/query_aware_ranking.sql
+          $PSQL -d fresh -f db/tests/deadline_sort.sql
 
-      - name: 0016 재적용 — 멱등성과 단일 시그니처 확인
+      - name: 0017 재적용 — 멱등성과 단일 시그니처 확인
         run: |
-          $PSQL -d fresh -f db/migrations/0016_query_aware_ranking.sql
+          $PSQL -d fresh -f db/migrations/0017_deadline_sort.sql
           $PSQL -d fresh -f db/tests/query_aware_ranking.sql
+          $PSQL -d fresh -f db/tests/deadline_sort.sql
           n=$($PSQL -d fresh -tAc "SELECT count(*) FROM pg_proc WHERE proname = 'match_program_page'")
           echo "match_program_page 오버로드 수: $n"
           [ "$n" = "1" ] || { echo "::error::match_program_page 오버로드가 $n 개다"; exit 1; }
