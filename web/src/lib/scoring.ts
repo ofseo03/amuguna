@@ -64,8 +64,7 @@ export function deadlineUrgencyScore(prog: Program, now = new Date()): number {
 }
 
 /**
- * 가중 합산. hasQuery=false 면 유사도 항을 빼고 나머지 가중치를 정규화한다
- * (0.25/0.20/0.15/0.10 의 합 0.70 으로 나눔).
+ * 질문이 없으면 유사도를 제외한 네 항목을 각각 25% 반영한다.
  */
 export function combine(
   parts: Omit<ScoreBreakdown, "total">,
