@@ -36,8 +36,8 @@ import { parseResultsLocation, resultsHref } from "@/lib/results-location";
 import {
   DEFAULT_RESULT_SORT,
   RESULT_SORTS,
-  RESULT_SORT_HINT,
-  RESULT_SORT_LABEL,
+  resultSortHint,
+  resultSortLabel,
 } from "@/lib/result-sort";
 import { MAX_SKIP_PAGES } from "@/lib/validation";
 import type {
@@ -587,7 +587,8 @@ export default function ResultsPage() {
 
       {degraded && (
         <p className="mt-3 rounded-lg border border-warn bg-warn-soft px-4 py-2 text-sm text-ink-2">
-          검색 엔진 일부에 문제가 있어 자격 조건만으로 결과를 구성했습니다.
+          내용 기반 검색을 사용할 수 없어 자격 조건만으로 결과를 구성했습니다.
+          {appliedSort === "relevance" && " 조건 기반 추천순으로 표시합니다."}
         </p>
       )}
 
@@ -604,6 +605,7 @@ export default function ResultsPage() {
       {/* ---------------- 정렬 ---------------- */}
       <SortControls
         applied={appliedSort}
+        usesSimilarity={data.usesSimilarity}
         unavailable={data.sortUnavailable}
         busy={loading}
         onSelect={changeSort}
@@ -778,11 +780,13 @@ function TabButton({
  */
 function SortControls({
   applied,
+  usesSimilarity,
   unavailable,
   busy,
   onSelect,
 }: {
   applied: ResultSort;
+  usesSimilarity: boolean;
   /** 날짜 정렬을 눌렀는데 서버가 아직 그 축을 세우지 못한 상태 (`sortUnavailable`) */
   unavailable: boolean;
   busy: boolean;
@@ -807,13 +811,13 @@ function SortControls({
                 : "border-line bg-bg text-ink-2 hover:border-ink-3"
             } disabled:cursor-not-allowed disabled:opacity-60`}
           >
-            {RESULT_SORT_LABEL[s]}
+            {resultSortLabel(s, usesSimilarity)}
           </button>
         ))}
       </div>
       <p role="status" aria-live="polite" className="mt-2 text-sm text-ink-2">
-        <strong className="text-ink">{RESULT_SORT_LABEL[applied]}</strong>으로 보고 있습니다 —{" "}
-        {RESULT_SORT_HINT[applied]}
+        <strong className="text-ink">{resultSortLabel(applied, usesSimilarity)}</strong>으로 보고 있습니다 —{" "}
+        {resultSortHint(applied, usesSimilarity)}
       </p>
       {/*
         날짜 정렬을 아직 못 하는 서버에서도 결과는 그대로 보여준다. 왜 눌렀는데 순서가 그대로인지
@@ -821,7 +825,7 @@ function SortControls({
       */}
       {unavailable && (
         <p role="status" className="mt-2 rounded-lg border border-warn bg-warn-soft px-4 py-2 text-sm text-ink-2">
-          날짜순 정렬은 지금 준비 중이라 <strong className="text-ink">정확도순</strong>으로
+          날짜순 정렬은 지금 준비 중이라 <strong className="text-ink">{resultSortLabel("relevance", usesSimilarity)}</strong>으로
           보여드리고 있습니다. 결과 건수와 내용은 그대로입니다.
         </p>
       )}

@@ -432,7 +432,7 @@ function toCard(
   return {
     program: c.program,
     // DB 모드는 RPC 가 이미 같은 공식으로 섞어 준 값을 그대로 쓴다 (커서와 어긋나면 안 된다).
-    score: c.sortScore ?? resultSortScore(breakdown.total, c.program, sort),
+    score: c.sortScore ?? resultSortScore(breakdown.total, c.program, sort, hasQuery ? c.sim : null),
     breakdown,
     sim: c.sim,
     reason: buildReason(c.matchedDimensions, c.program.rules, profile, c.unknownDimensions),
@@ -603,7 +603,7 @@ export async function runMatch(
     }
     if (result.eligible.length === 0) stage = "near_miss_only";
 
-    const hasQueryForScoring = hasQueryInput && stage !== "intent_dropped" && qvec !== null;
+    const hasQueryForScoring = useIntent;
     const allCards = result.eligible
       .map((c) => toCard(c, profile, hasQueryForScoring, now, sort))
       .sort(compareCards);
@@ -642,6 +642,7 @@ export async function runMatch(
       intentIgnored,
       sort,
       sortUnavailable,
+      usesSimilarity: hasQueryForScoring,
       demoMode,
       // 데모 모드는 번들 데이터가 항상 들어 있으므로 콜드 스타트가 성립하지 않는다
       catalogEmpty: false,
@@ -662,7 +663,7 @@ export async function runMatch(
   }
   if (counts.total === 0) stage = "near_miss_only";
 
-  const hasQueryForScoring = hasQueryInput && stage !== "intent_dropped" && qvec !== null;
+  const hasQueryForScoring = useIntent;
 
   // 의도 축이 걸러낸 건수는 같은 조건을 의도 없이 한 번 더 세어 얻는다 (§5 "전체 보기").
   const intentHiddenCount = useIntent
@@ -733,6 +734,7 @@ export async function runMatch(
     intentIgnored,
     sort,
     sortUnavailable,
+    usesSimilarity: hasQueryForScoring,
     demoMode,
     catalogEmpty,
     degraded,

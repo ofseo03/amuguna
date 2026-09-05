@@ -10,7 +10,10 @@ import {
   recencyDate,
   recencyScore,
   resultSortScore,
+  resultSortLabel,
+  resultSortHint,
 } from "./result-sort.ts";
+import { combine } from "./scoring.ts";
 import { validateResultSort } from "./validation.ts";
 import { runMatch } from "./matching.ts";
 
@@ -52,7 +55,7 @@ const program = (over = {}) => ({
   ...over,
 });
 
-test("정렬 축은 셋뿐이고 기본은 정확도순이다", () => {
+test("정렬 축은 셋뿐이고 기본은 질문에 따라 관련도순 또는 추천순이다", () => {
   assert.deepEqual([...RESULT_SORTS], ["relevance", "newest", "oldest"]);
   assert.equal(DEFAULT_RESULT_SORT, "relevance");
   assert.ok(isResultSort("newest"));
@@ -165,4 +168,70 @@ test("정렬한 결과도 커서로 이어서 받을 수 있다", async () => {
   assert.equal(firstIds.filter((id) => secondIds.includes(id)).length, 0);
   const lastOfFirst = first.pages.all.cards.at(-1);
   assert.ok(second.pages.all.cards.every((c) => c.score <= lastOfFirst.score));
+});
+
+
+test("질문이 없으면 유사도는 제외하고 네 항목에 각각 25%를 적용한다", () => {
+  const zero = { similarity: 1, specificity: 0, regionProximity: 0, amountScale: 0, deadlineUrgency: 0 };
+  assert.equal(combine(zero, false).total, 0);
+  for (const key of ["specificity", "regionProximity", "amountScale", "deadlineUrgency"]) {
+    assert.equal(combine({ ...zero, [key]: 1 }, false).total, 0.25);
+  }
+});
+
+test("관련도순은 종합점수와 무관하게 음수까지 유사도 순서를 보존한다", () => {
+  const low = resultSortScore(1, program(), "relevance", -0.8);
+  const high = resultSortScore(0, program(), "relevance", -0.2);
+  assert.ok(high > low);
+  assert.ok(low >= 0 && high <= 1);
+  assert.equal(resultSortScore(0.8, program(), "relevance"), 0.8);
+  assert.equal(resultSortLabel("relevance", true), "관련도순");
+  assert.equal(resultSortLabel("relevance", false), "추천순");
+  assert.match(resultSortHint("relevance", true), /입력한 내용/);
+  assert.equal(resultSortLabel("newest", true), "최신순");
+});
+
+test("자연어 질문은 유사도순, 공백 및 전체 보기는 네 항목 추천순이다", async () => {
+  const related = await demoMatch({ query: "청년 주거 보증금 대출" });
+  assert.equal(related.usesSimilarity, true);
+  const cards = related.pages.all.cards;
+  assert.ok(cards.length > 1);
+  for (let i = 1; i < cards.length; i++) assert.ok(cards[i - 1].sim >= cards[i].sim);
+  for (const card of cards) assert.equal(card.score, resultSortScore(0, card.program, "relevance", card.sim));
+  for (const input of [{ query: "  " }, { query: "청년 주거 보증금 대출", ignoreIntent: true }]) {
+    const result = await demoMatch(input);
+    assert.equal(result.usesSimilarity, false);
+    for (const c of result.pages.all.cards) {
+      const b = c.breakdown;
+      assert.equal(c.score, resultSortScore((b.specificity + b.regionProximity + b.amountScale + b.deadlineUrgency) / 4, c.program, "relevance"));
+    }
+  }
+  const last = cards[0];
+  const next = await demoMatch({ query: "청년 주거 보증금 대출", cursor: { score: last.score, id: last.program.id } });
+  assert.deepEqual(next.pages.all.cards.map(c => c.program.id), cards.slice(1).map(c => c.program.id));
+});
+
+test("임베딩 API 실패 시 질문이 있어도 추천순으로 돌아간다", async () => {
+  const saved = { ...process.env };
+  const originalFetch = globalThis.fetch;
+  delete process.env.DATABASE_URL;
+  delete process.env.MOCK_EMBEDDINGS;
+  process.env.EMBEDDING_PROVIDER = "voyage";
+  process.env.EMBEDDING_API_KEY = "test-only-key";
+  globalThis.fetch = async () => { throw new Error("test embedding unavailable"); };
+  try {
+    const result = await runMatch({ profile: P1, query: "실패 검증 전용 질문", form: "all", cursor: null });
+    assert.equal(result.degraded, true);
+    assert.equal(result.usesSimilarity, false);
+    assert.ok(result.pages.all.cards.length > 0);
+    for (const c of result.pages.all.cards) {
+      const b = c.breakdown;
+      assert.equal(c.score, resultSortScore((b.specificity + b.regionProximity + b.amountScale + b.deadlineUrgency) / 4, c.program, "relevance"));
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const key of ["DATABASE_URL", "MOCK_EMBEDDINGS", "EMBEDDING_PROVIDER", "EMBEDDING_API_KEY"]) {
+      if (saved[key] === undefined) delete process.env[key]; else process.env[key] = saved[key];
+    }
+  }
 });
