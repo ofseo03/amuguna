@@ -6,7 +6,7 @@
  * 어떤 정렬에서도 같다. 바뀌는 것은 줄 세우는 순서뿐이다.
  *
  * 축은 셋이다.
- *  - `relevance` (정확도순) — §7.4 스코어 그대로. 기본값이고, 아무것도 누르지 않은 화면이다.
+ *  - `relevance` — 유효한 질문은 관련도순, 없으면 유사도를 제외한 추천순.
  *  - `newest`    (최신순)   — 공고일이 늦은 것부터
  *  - `oldest`    (오래된순) — 공고일이 이른 것부터
  *
@@ -20,7 +20,7 @@
  * `sort_score` 안에 접어 넣는다 — `ORDER BY sort_score DESC, id ASC` 한 줄이 세 축을 모두
  * 처리하고, 페이지 커서·건너뛰기·캐시가 축과 무관하게 그대로 동작한다.
  *
- * 이 파일의 공식은 `db/migrations/0015_result_sort.sql` 의 `match_program_page()` 와
+ * 이 파일의 공식은 `db/migrations/0016_query_aware_ranking.sql` 의 `match_program_page()` 와
  * **완전히 같아야 한다.** 데모 모드는 여기서, DB 모드는 SQL 에서 같은 순서를 내야 한다.
  */
 import { kstDate, toDateString } from "./eligibility";
@@ -28,24 +28,34 @@ import type { Program, ResultSort } from "./types";
 
 export const RESULT_SORTS: readonly ResultSort[] = ["relevance", "newest", "oldest"];
 
-/** 아무것도 고르지 않은 화면 — §7.4 스코어 순서 그대로다. */
+/** 기본 정렬은 실제 사용한 질문에 따라 관련도순 또는 추천순이다. */
 export const DEFAULT_RESULT_SORT: ResultSort = "relevance";
 
 export const RESULT_SORT_LABEL: Record<ResultSort, string> = {
-  relevance: "정확도순",
+  relevance: "추천순",
   newest: "최신순",
   oldest: "오래된순",
 };
 
 /** 버튼 밑에 붙는 한 줄 설명 — 무엇을 기준으로 세운 줄인지 말해 준다. */
 export const RESULT_SORT_HINT: Record<ResultSort, string> = {
-  relevance: "내 조건과 얼마나 맞는지를 기준으로 세웁니다.",
+  relevance: "조건 구체성·지역·금액·마감을 각각 25%씩 반영합니다.",
   newest: "공고일이 늦은 것부터 보여드립니다.",
   oldest: "공고일이 이른 것부터 보여드립니다.",
 };
 
 export function isResultSort(value: unknown): value is ResultSort {
   return typeof value === "string" && (RESULT_SORTS as readonly string[]).includes(value);
+}
+
+export function resultSortLabel(sort: ResultSort, usesSimilarity: boolean): string {
+  return sort === "relevance" && usesSimilarity ? "관련도순" : RESULT_SORT_LABEL[sort];
+}
+
+export function resultSortHint(sort: ResultSort, usesSimilarity: boolean): string {
+  return sort === "relevance" && usesSimilarity
+    ? "입력한 내용과 의미가 가까운 것부터 보여드립니다."
+    : RESULT_SORT_HINT[sort];
 }
 
 /**
@@ -98,13 +108,16 @@ export function recencyScore(program: Program): number {
 }
 
 /**
- * 최종 정렬 점수 (0~1). `relevance` 면 §7.4 스코어 그대로다 — 기본 화면은 조금도 달라지지 않는다.
+ * 최종 정렬 점수 (0~1). 질문이 있으면 순수 유사도, 없으면 추천 점수를 쓴다.
  *
  * 두 날짜 정렬은 방향만 반대다: 최신순은 공고일을 그대로, 오래된순은 뒤집어 쓴다. 어느 쪽이든
  * `ORDER BY sort_score DESC, id ASC` 한 줄로 정렬되므로 페이지 커서가 그대로 유효하다.
  */
-export function resultSortScore(base: number, program: Program, sort: ResultSort): number {
-  if (sort !== "newest" && sort !== "oldest") return round12(base);
+export function resultSortScore(base: number, program: Program, sort: ResultSort, similarity: number | null = null): number {
+  if (sort !== "newest" && sort !== "oldest") {
+    // 음수 유사도도 순서를 보존하면서 기존 0~1 커서에 담는다.
+    return round12(similarity === null ? base : (Math.max(-1, Math.min(1, similarity)) + 1) / 2);
+  }
   const recency = recencyScore(program);
   const oriented = sort === "oldest" ? 1 - recency : recency;
   return round12(RECENCY_WEIGHT * oriented + BASE_TIEBREAK * base);

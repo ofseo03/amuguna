@@ -210,6 +210,8 @@ export interface MatchResponse {
    * 같다 — 정렬은 후보를 좁히지 않고 순서만 바꾼다.
    */
   sort: ResultSort;
+  /** 기본 정렬에 사용할 유효한 질문이 있는가. 실패·의도 해제 시 false. */
+  usesSimilarity: boolean;
   /**
    * 날짜 정렬을 요청했지만 DB 가 아직 그 기능을 모르는 상태 (`0015_result_sort.sql` 미적용).
    *

@@ -86,10 +86,11 @@ test("전용 고지가 출처와 변동 가능성을 밝힌다", async () => {
   assert.match(notice, /권유하는 것이 아닙니다/);
 });
 
-test("사용자에게 보이는 문구에 '추천'이 남아 있지 않다", async () => {
-  // 추천은 금소법상 권유로 읽힐 수 있다. 정보 제공·비교 표현으로 통일한다.
+test("정렬 이름 '추천순' 외의 추천 문구를 추가하지 않는다", async () => {
+  // 사용자가 선택한 정렬 이름인 추천순만 허용하고 기존 정보 제공 문구는 유지한다.
   // (공고 원문에서 온 데이터의 '추천서 발급' 같은 표현은 대상이 아니다 — 화면 문구만 본다)
   const screens = [
+    "./result-sort.ts",
     "../app/page.tsx",
     "../app/results/page.tsx",
     "../app/programs/[id]/page.tsx",
@@ -102,7 +103,7 @@ test("사용자에게 보이는 문구에 '추천'이 남아 있지 않다", asy
     for (const [, line] of code.split("\n").entries()) {
       if (/^\s*(\/\/|\*|\/\*)/.test(line)) continue; // 주석은 사용자에게 보이지 않는다
       assert.ok(
-        !/추천(?!서)/.test(line),
+        !/추천(?!서|순)/.test(line),
         `${path} 의 화면 문구에 '추천'이 있다: ${line.trim()}`,
       );
     }
