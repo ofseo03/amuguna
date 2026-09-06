@@ -15,6 +15,7 @@ import {
   dDay,
   evaluate,
   isOpen,
+  isReachableNearMiss,
   nearMissMessage,
   profileLabel,
   regionPrefixes,
@@ -44,6 +45,17 @@ import type {
 export const PAGE_SIZE = 15;
 const TOPK_BASE = 200;
 const TOPK_EXPANDED = 500;
+
+/** 화면에 보여주는 근접탈락 건수 (§7.6) */
+const NEAR_MISS_SHOWN = 5;
+/**
+ * DB 에서 받아 오는 근접탈락 후보 수.
+ *
+ * 되돌릴 수 없는 위반(나이 상한 초과)을 `toNearMiss()` 가 걸러내므로, 보여줄 5건보다 넉넉히
+ * 받아야 한다. 딱 5건만 받으면 나이가 지난 사람일수록 — 즉 이 안내가 가장 필요한 사람일수록 —
+ * 화면에서 근접탈락이 통째로 사라진다. 걸러지는 것이 상위에 몰리는 최악을 감안한 여유값이다.
+ */
+const NEAR_MISS_FETCH = 25;
 
 /**
  * 데모 모드의 집합 B 소속 판정 하한.
@@ -447,6 +459,9 @@ function toCard(
  * 이 목록은 "조건 하나만 달라지면 신청할 수 있다"를 알려주는 안내지 사용자가 훑는 결과가
  * 아니다. "가장 오래된 근접탈락 5건" 은 아무에게도 쓸모가 없다. 자격 축 안내라는 §7.6 의
  * 목적에 맞게 가장 아까운 다섯 건을 그대로 둔다.
+ *
+ * 되돌릴 수 없는 위반(나이 상한 초과)은 여기서 걸러진다 — `isReachableNearMiss()` 주석 참고.
+ * 데모·DB 두 백엔드가 같은 함수를 지나므로 어느 모드에서도 같은 다섯 건이 나온다.
  */
 function toNearMiss(
   c: Candidate,
@@ -456,6 +471,7 @@ function toNearMiss(
 ): NearMissCard | null {
   const d = c.violatedDimensions[0];
   if (!d) return null;
+  if (!isReachableNearMiss(d, c.program.rules, profile)) return null;
   const breakdown = scoreProgram(
     c.program,
     profile,
@@ -613,7 +629,7 @@ export async function runMatch(
       .map((c) => toNearMiss(c, profile, false, now))
       .filter((x): x is NearMissCard => x !== null)
       .sort(compareCards)
-      .slice(0, 5);
+      .slice(0, NEAR_MISS_SHOWN);
     const byForm = FORMS.reduce(
       (acc, f) => {
         acc[f] = allCards.filter((c) => c.program.form === f).length;
@@ -685,7 +701,7 @@ export async function runMatch(
   // 유사도 항이 없으니 정렬도 hasQuery=false 공식 — 데모 백엔드와 같다.
   // 화면의 정렬 축도 넘기지 않는다: 이 다섯 건은 언제나 §7.4 스코어 상위다 (toNearMiss 주석).
   const nearRows = await dbPageRows(
-    profile, null, topk, false, false, "all", null, 1, 5, 0,
+    profile, null, topk, false, false, "all", null, 1, NEAR_MISS_FETCH, 0,
   );
 
   // 탭들의 1페이지는 서로 많이 겹치므로 프로그램 본문은 id 를 합쳐 한 번만 읽는다.
@@ -713,7 +729,7 @@ export async function runMatch(
   const nearMisses = rowsToCandidates(nearRows, byId, profile)
     .map((c) => toNearMiss(c, profile, false, now))
     .filter((x): x is NearMissCard => x !== null)
-    .slice(0, 5);
+    .slice(0, NEAR_MISS_SHOWN);
   // 결과가 통째로 비었을 때만 카탈로그 자체를 확인한다 — 정상 경로에 질의를 늘리지 않는다.
   const catalogEmpty =
     counts.total === 0 && nearMisses.length === 0 ? await isCatalogEmpty() : false;
