@@ -214,3 +214,58 @@ async function withDemoMode(body) {
     }
   }
 }
+
+/*
+  §7.6 — 근접 탈락은 **바꿀 수 있는 조건**만 안내한다.
+
+  나이 상한을 넘긴 사람에게 "만 19~34세면 대상입니다 (현재 만 84세)" 를 보여 주면, 화면 절반이
+  영원히 해당될 수 없는 목록으로 찬다. 페르소나 80명 점검에서 50세 이상 40명 전원이 청년 상품을
+  근접탈락으로 안내받았다. 나이 하한 미달(청소년)은 기다리면 충족되므로 그대로 남긴다.
+*/
+test("near-miss drops age-ceiling violations but keeps age-floor ones", async () => {
+  const previous = {
+    DATABASE_URL: process.env.DATABASE_URL,
+    EMBEDDING_PROVIDER: process.env.EMBEDDING_PROVIDER,
+    MOCK_EMBEDDINGS: process.env.MOCK_EMBEDDINGS,
+  };
+  delete process.env.DATABASE_URL;
+  process.env.EMBEDDING_PROVIDER = "mock";
+  process.env.MOCK_EMBEDDINGS = "1";
+  try {
+    const base = { gender: "F", occupation: "retired", sidoCode: "46", sigunguCode: "46150", incomeDecile: 1, medianIncomePercent: null };
+    const elder = await runMatch({
+      profile: { ...base, age: 84 },
+      query: null,
+      form: "all",
+      cursor: null,
+    });
+    for (const n of elder.nearMisses) {
+      const { age_max } = n.program.rules;
+      assert.ok(
+        age_max === null || 84 <= age_max,
+        `되돌릴 수 없는 나이 상한 위반이 남았다: ${n.program.title} (${n.message})`,
+      );
+    }
+    assert.ok(
+      elder.nearMisses.every((n) => n.program.title !== "청년도약계좌"),
+      "84세에게 청년 상품을 '조건 하나만 달라지면' 으로 안내하지 않는다",
+    );
+
+    // 나이 하한 미달은 남는다 — 기다리면 대상이 된다.
+    const teen = await runMatch({
+      profile: { ...base, age: 15, occupation: "student" },
+      query: null,
+      form: "all",
+      cursor: null,
+    });
+    const ageFloor = teen.nearMisses.filter(
+      (n) => n.violatedDimension === "age" && (n.program.rules.age_min ?? 0) > 15,
+    );
+    assert.ok(ageFloor.length > 0, "15세에게 '만 19세 이상이면 대상' 안내는 남아야 한다");
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});

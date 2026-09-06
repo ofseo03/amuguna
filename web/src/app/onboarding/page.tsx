@@ -23,6 +23,7 @@ import {
 } from "@/lib/shared-data";
 import { MAX_QUERY_LEN } from "@/lib/validation";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
+import { clearSnapshot } from "@/lib/results-snapshot";
 import Term from "@/components/Term";
 import StepTrail, { STEP_LABELS } from "@/components/StepTrail";
 import PrivacyAssurance from "@/components/PrivacyAssurance";
@@ -117,6 +118,8 @@ export default function OnboardingPage() {
         setSubmitting(false);
         return;
       }
+      // 조건이 달라졌으므로 직전 결과 스냅샷은 버린다 — 옛 결과를 되살리면 안 된다
+      clearSnapshot();
       // 자유입력은 서버에 보내지 않고 결과 화면에서 /api/match 로만 쓴다
       if (withQuery.trim()) {
         window.sessionStorage.setItem(QUERY_STORAGE_KEY, withQuery.trim());

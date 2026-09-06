@@ -34,6 +34,14 @@ import { FORMS, FORM_LABEL, isFinancialProduct } from "@/lib/forms";
 import { QUERY_STORAGE_KEY } from "@/lib/client-keys";
 import { parseResultsLocation, resultsHref } from "@/lib/results-location";
 import {
+  isUsableSnapshot,
+  readScroll,
+  readSnapshot,
+  updateSnapshotAnswer,
+  writeScroll,
+  writeSnapshot,
+} from "@/lib/results-snapshot";
+import {
   DEFAULT_RESULT_SORT,
   RESULT_SORTS,
   RESULT_SORT_HINT,
@@ -114,6 +122,10 @@ export default function ResultsPage() {
    * 눌렀다는 뜻이므로 버린다 — 느린 응답이 늦게 와서 새 탭 위에 옛 카드를 그리지 않게 한다.
    */
   const reqSeq = useRef(0);
+  /** 되살릴 스크롤 위치. 카드가 그려진 뒤에 적용해야 해서 렌더 사이를 건너오는 값이다. */
+  const pendingScroll = useRef<number | null>(null);
+  /** 위치를 되돌리는 중인가 — 그동안 일어나는 스크롤은 사용자가 만든 것이 아니라 기록하지 않는다 */
+  const restoringScroll = useRef(false);
 
   type Outcome =
     | { kind: "ok"; view: View }
@@ -165,6 +177,22 @@ export default function ResultsPage() {
             // 요청한 탭만 요청한 페이지다. 곁들여 온 다른 탭은 언제나 1페이지다.
             const key = cacheKey(all, t as MatchTab, t === nextTab ? page : 1, s);
             cache.current.set(key, { payload, page: p as MatchPage });
+          }
+          /*
+            커서 없는 첫 페이지 응답만 탭 메모리에 남긴다 — 이 하나가 모든 탭의 1페이지다.
+            상세를 봤다 뒤로 왔을 때 이것을 되살려 재검색을 없앤다 (`results-snapshot.ts`).
+          */
+          if (nextCursor === null && skipPages === 0) {
+            writeSnapshot({
+              v: 1,
+              savedAt: Date.now(),
+              q,
+              ignoreIntent: all,
+              sort: s,
+              payload,
+              aiAnswer: null,
+              aiAnswerStatus: "not_requested",
+            });
           }
           const requested = payload.pages[nextTab];
           if (!requested) {
@@ -248,10 +276,13 @@ export default function ResultsPage() {
         if (!res.ok || !body.ok || !body.aiAnswerStatus) throw new Error("answer failed");
         setAiAnswer(body.aiAnswer ?? null);
         setAiAnswerStatus(body.aiAnswerStatus);
+        // 카드보다 늦게 오므로 스냅샷에 따로 얹는다 — 뒤로 왔을 때 다시 부르지 않게
+        updateSnapshotAnswer(body.aiAnswer ?? null, body.aiAnswerStatus);
       })
       .catch(() => {
         setAiAnswer(null);
         setAiAnswerStatus("unavailable");
+        updateSnapshotAnswer(null, "unavailable");
       });
   }, []);
 
@@ -264,6 +295,48 @@ export default function ResultsPage() {
     const location = parseResultsLocation(new URLSearchParams(window.location.search));
     const restoredPage = Math.min(location.page, MAX_SKIP_PAGES + 1);
     const seq = ++reqSeq.current;
+
+    /*
+      상세를 봤다 뒤로 온 경우 — 탭 메모리에 남겨 둔 응답을 **캐시에 먼저 넣어** 둔다.
+      아래 `fetchMatch` 가 그대로 캐시에 적중해 요청이 나가지 않고, 화면 상태는 평소와
+      똑같은 경로로 갱신된다.
+
+      이 화면의 캐시는 컴포넌트 메모리에만 있어서 뒤로 올 때마다 `/api/match` 를 다시 불렀다.
+      세션 한도가 분당 10회라 카드 아홉 장을 열어보고 온 열 번째에 429 가 났고, 그때는 화면에
+      지킬 결과가 없어 카드가 통째로 사라졌다 (§8). 되살리는 것은 커서 없는 1페이지 응답 하나뿐이며
+      2페이지 이후·다른 정렬 축·다른 자유입력이면 평소대로 검색한다 (`results-snapshot.ts`).
+    */
+    const snapshot = readSnapshot();
+    const restored = isUsableSnapshot(
+      snapshot,
+      { q, ignoreIntent: location.ignoreIntent, sort: location.sort, page: restoredPage },
+      Date.now(),
+    )
+      ? snapshot
+      : null;
+    if (restored) {
+      const payload = restored.payload;
+      // 건수 0인 탭은 서버가 응답에 담지 않는다 — 캐시에서도 빈 페이지로 채워야 적중한다
+      for (const t of ["all", ...FORMS] as MatchTab[]) {
+        const page = (payload.pages[t] as MatchPage | undefined) ?? {
+          cards: [],
+          nextCursor: null,
+        };
+        cache.current.set(cacheKey(location.ignoreIntent, t, 1, location.sort), { payload, page });
+      }
+      // AI 안내도 되살린다 — 같은 결과에 두 번 물어보지 않는다 (요청당 과금이다)
+      answerRequested.current = true;
+      // 되살린 시각을 새로 찍는다 — TTL 은 "검색한 지 30분" 이 아니라 "안 쓴 지 30분" 이어야
+      // 카드를 여럿 열어보는 사람이 도중에 만료되지 않는다
+      writeSnapshot({ ...restored, savedAt: Date.now() });
+      // 보던 자리로 돌려놓는 것은 카드가 그려진 뒤여야 한다 — 전용 effect 가 받아 간다
+      const scroll = readScroll();
+      pendingScroll.current =
+        scroll && scroll.href === resultsHref({ ...location, page: restoredPage })
+          ? scroll.y
+          : null;
+    }
+
     void fetchMatch(
       location.ignoreIntent,
       location.tab,
@@ -288,7 +361,10 @@ export default function ResultsPage() {
           "",
           resultsHref({ ...location, page: restoredPage }),
         );
-        if (!location.ignoreIntent && location.tab === "all" && restoredPage === 1) {
+        if (restored) {
+          setAiAnswer(restored.aiAnswer);
+          setAiAnswerStatus(restored.aiAnswerStatus);
+        } else if (!location.ignoreIntent && location.tab === "all" && restoredPage === 1) {
           requestAnswer(q, o.view);
         }
       }
@@ -303,6 +379,79 @@ export default function ResultsPage() {
       cancelled = true;
     };
   }, [fetchMatch, apply, rememberPage, cursorsFor, requestAnswer]);
+
+  /*
+    보던 자리로 돌려놓기.
+
+    뒤로가기 시점에는 카드가 아직 없어 문서 높이가 0 이라 브라우저의 스크롤 복원이 걸리지
+    않는다. 그래서 결과를 그린 다음 우리가 옮긴다 — 12번째 카드를 보던 사람이 뒤로가기 한 번에
+    맨 위로 돌아가지 않게 (페르소나 80명 전원에서 재현됐다).
+  */
+  useEffect(() => {
+    if (!view || pendingScroll.current === null) return;
+    const y = pendingScroll.current;
+    pendingScroll.current = null;
+    /*
+      한 번 옮기고 마는 것으로는 안 된다. 카드를 그린 직후에는 문서가 아직 목표 높이에 못 미쳐
+      스크롤이 잘리고(폰트·근접탈락·푸터가 뒤늦게 자리를 잡는다), 그 뒤에 **브라우저 자신의
+      스크롤 복원**이 뒤늦게 끼어들어 제 값으로 덮어쓴다 (실측: 1200 으로 옮겼는데 271 로 밀렸다).
+      그래서 잠깐 동안 매 프레임 다시 붙든다. 사람이 직접 움직이면 그 순간 손을 뗀다.
+    */
+    let id = 0;
+    const release = () => {
+      restoringScroll.current = false;
+    };
+    const deadline = performance.now() + 400;
+    const step = () => {
+      if (!restoringScroll.current) return;
+      window.scrollTo(0, y);
+      if (performance.now() < deadline) id = requestAnimationFrame(step);
+      else restoringScroll.current = false;
+    };
+    restoringScroll.current = true;
+    // 되살릴 위치를 곧바로 다시 적어 둔다 — 뒤로가기 도중 끼어든 값이 남아 있어도 여기서 바로잡히고,
+    // 되돌아온 사람이 스크롤하지 않고 다른 카드를 눌러도 같은 자리로 돌아온다.
+    writeScroll({ href: resultsHref({ tab, page, ignoreIntent, sort }), y });
+    window.addEventListener("wheel", release, { passive: true, once: true });
+    window.addEventListener("touchstart", release, { passive: true, once: true });
+    window.addEventListener("keydown", release, { once: true });
+    id = requestAnimationFrame(step);
+    return () => {
+      cancelAnimationFrame(id);
+      restoringScroll.current = false;
+      window.removeEventListener("wheel", release);
+      window.removeEventListener("touchstart", release);
+      window.removeEventListener("keydown", release);
+    };
+    // 되살릴 위치가 있을 때만 도는 effect 다 — 탭·정렬을 눌러 다시 불려도 곧바로 빠져나온다
+  }, [view, tab, page, ignoreIntent, sort]);
+
+  /*
+    떠날 때 자리를 남긴다 — **떠나는 클릭이 일어난 순간에** 적는다.
+
+    처음에는 scroll 이벤트를 묶어서 적었는데, 이 앱은 한 문서 안에서 화면을 갈아 끼우기 때문에
+    라우터·브라우저가 만드는 스크롤(상세로 갈 때의 맨 위 되돌림, 뒤로가기의 자체 복원)이 전부
+    같은 리스너로 들어오고, 떠나는 인스턴스와 돌아오는 인스턴스가 겹치는 짧은 구간에서 그 값이
+    사람이 보던 위치를 덮어썼다 (실측: 1200 으로 남겨 둔 값이 271 이 됐다).
+
+    클릭 시점은 그런 애매함이 없다. 카드를 누르는 그 순간 화면은 분명히 이 결과 화면이고
+    스크롤도 사람이 만든 값 그대로다. 캡처 단계에서 한 번 적고 끝이다.
+  */
+  useEffect(() => {
+    const href = resultsHref({ tab, page, ignoreIntent, sort });
+    const onClick = () => {
+      if (restoringScroll.current) return;
+      writeScroll({ href, y: Math.round(window.scrollY) });
+    };
+    // 전체 페이지 이동(새로고침·주소 입력)까지 덮는다
+    const onHide = () => onClick();
+    document.addEventListener("click", onClick, true);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("click", onClick, true);
+      window.removeEventListener("pagehide", onHide);
+    };
+  }, [tab, page, ignoreIntent, sort]);
 
   /**
    * (전체 보기 여부, t 탭)의 n 페이지로 이동한다.

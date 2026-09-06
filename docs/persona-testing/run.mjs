@@ -118,16 +118,36 @@ for (const p of targets) {
     // 첫 카드 상세 → 뒤로 (탭·스크롤 유지 확인)
     if (rec.cards.length > 0) {
       await page.evaluate(() => window.scrollTo(0, 1200));
+      /*
+        화면 안에 이미 보이는 카드를 고른다. Playwright 는 클릭 전에 대상을 화면으로 끌어오므로
+        맨 위 카드를 누르면 스크롤이 먼저 달라져 "떠날 때 위치" 자체가 바뀐다 — 그러면 복원이
+        맞아도 틀린 것처럼 보인다.
+      */
+      const links = page.locator("section[aria-label='매칭 결과'] > ul > li h3 a");
+      let picked = 0;
+      for (let i = 0; i < (await links.count()); i++) {
+        const box = await links.nth(i).boundingBox();
+        if (box && box.y > 60 && box.y < 700) { picked = i; break; }
+      }
       const beforeY = await page.evaluate(() => Math.round(window.scrollY));
-      await tap(() => page.locator("section[aria-label='매칭 결과'] > ul > li h3 a").first().click());
+      await tap(() => links.nth(picked).click());
       await page.waitForURL("**/programs/**");
+      // 화면이 실제로 기억한 위치. Playwright 가 클릭 직전에 대상을 끌어와 스크롤이 조금
+      // 달라질 수 있으므로, 복원 여부는 "떠날 때 기억한 값" 과 대조해야 정확하다.
+      rec.storedY = await page.evaluate(() => {
+        try {
+          return JSON.parse(sessionStorage.getItem("amuguna.results.scroll") ?? "null")?.y ?? null;
+        } catch {
+          return null;
+        }
+      });
       rec.detailH1 = await page.locator("h1").first().innerText().catch(() => "");
       rec.detailHasApply = await page.getByRole("link", { name: /신청/ }).count().then((n) => n > 0);
       await tap(() => page.goBack());
       await page.waitForURL("**/results*");
       await page.waitForTimeout(500);
       const afterY = await page.evaluate(() => Math.round(window.scrollY));
-      rec.scrollKept = { beforeY, afterY };
+      rec.scrollKept = { beforeY, storedY: rec.storedY, afterY, restored: rec.storedY === afterY };
       rec.backReFetched = rec.api.filter((a) => a.includes("/api/match")).length;
     }
   } catch (e) {

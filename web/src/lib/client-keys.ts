@@ -9,3 +9,12 @@
  * 기억한다 (`results-location.ts`).
  */
 export const QUERY_STORAGE_KEY = "amuguna.query";
+
+/**
+ * 결과 화면 스냅샷 — 상세를 봤다 뒤로 왔을 때 재검색 없이 그대로 되살리기 위한 것
+ * (`results-snapshot.ts`). 공개된 공고 메타데이터와 화면에 이미 떠 있던 요약뿐이고,
+ * 자유입력과 같은 저장소(sessionStorage)라 탭을 닫으면 함께 사라진다.
+ */
+export const RESULTS_SNAPSHOT_KEY = "amuguna.results";
+/** 결과 화면에서 보고 있던 스크롤 위치. 스냅샷과 따로 두어 자주 써도 부담이 없다. */
+export const RESULTS_SCROLL_KEY = "amuguna.results.scroll";
