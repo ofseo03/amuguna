@@ -77,14 +77,14 @@ BEGIN
   SELECT array_agg(program_id ORDER BY sort_score DESC, program_id) INTO ids
   FROM match_program_page(28, 'F', ARRAY['11','11620'], 'employee_office', 3, NULL,
     q, 200, true, NULL, NULL, NULL, 20, 0, 0, 'newest');
-  IF ids IS DISTINCT FROM ARRAY[b,a,c] THEN
-    RAISE EXCEPTION 'Newest must prioritize date, then the existing composite: %', ids;
+  IF ids IS DISTINCT FROM ARRAY[a,b,c] THEN
+    RAISE EXCEPTION 'Newest must prioritize date, then query relevance: %', ids;
   END IF;
   SELECT array_agg(program_id ORDER BY sort_score DESC, program_id) INTO ids
   FROM match_program_page(28, 'F', ARRAY['11','11620'], 'employee_office', 3, NULL,
-    q, 200, true, NULL, NULL, NULL, 20, 0, 0, 'oldest');
-  IF ids IS DISTINCT FROM ARRAY[c,b,a] THEN
-    RAISE EXCEPTION 'Oldest must prioritize date, then the existing composite: %', ids;
+    q, 200, true, NULL, NULL, NULL, 20, 0, 0, 'deadline');
+  IF ids IS DISTINCT FROM ARRAY[b,a,c] THEN
+    RAISE EXCEPTION 'Deadline must prioritize finite dates, then query relevance: %', ids;
   END IF;
 END;
 $$;

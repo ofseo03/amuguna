@@ -159,7 +159,7 @@ export type MatchTab = ProgramForm | "all";
  *
  * 후보 집합은 건드리지 않고 순서만 바꾼다 — 점수 공식과 라벨은 `src/lib/result-sort.ts`.
  */
-export type ResultSort = "relevance" | "newest" | "oldest";
+export type ResultSort = "relevance" | "newest" | "deadline";
 
 /** 한 탭의 한 페이지 (15건 단위) */
 export interface MatchPage {

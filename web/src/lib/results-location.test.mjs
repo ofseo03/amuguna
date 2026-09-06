@@ -15,6 +15,7 @@ test("기본 정렬은 URL 에 적지 않고, 모르는 값은 기본값으로 �
   assert.equal(resultsHref({ tab: "all", page: 1, ignoreIntent: false, sort: "relevance" }), "/results");
   const params = (search) => new URL(search, "http://localhost").searchParams;
   assert.equal(parseResultsLocation(params("/results")).sort, "relevance");
-  assert.equal(parseResultsLocation(params("/results?sort=oldest")).sort, "oldest");
+  assert.equal(parseResultsLocation(params("/results?sort=deadline")).sort, "deadline");
+  assert.equal(parseResultsLocation(params("/results?sort=oldest")).sort, "relevance");
   assert.equal(parseResultsLocation(params("/results?sort=아무거나")).sort, "relevance");
 });

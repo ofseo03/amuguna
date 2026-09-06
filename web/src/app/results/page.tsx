@@ -37,7 +37,7 @@ import {
   DEFAULT_RESULT_SORT,
   RESULT_SORTS,
   resultSortHint,
-  resultSortLabel,
+  RESULT_SORT_LABEL,
 } from "@/lib/result-sort";
 import { MAX_SKIP_PAGES } from "@/lib/validation";
 import type {
@@ -811,12 +811,12 @@ function SortControls({
                 : "border-line bg-bg text-ink-2 hover:border-ink-3"
             } disabled:cursor-not-allowed disabled:opacity-60`}
           >
-            {resultSortLabel(s, usesSimilarity)}
+            {RESULT_SORT_LABEL[s]}
           </button>
         ))}
       </div>
       <p role="status" aria-live="polite" className="mt-2 text-sm text-ink-2">
-        <strong className="text-ink">{resultSortLabel(applied, usesSimilarity)}</strong>으로 보고 있습니다 —{" "}
+        <strong className="text-ink">{RESULT_SORT_LABEL[applied]}</strong>으로 보고 있습니다 —{" "}
         {resultSortHint(applied, usesSimilarity)}
       </p>
       {/*
@@ -825,7 +825,7 @@ function SortControls({
       */}
       {unavailable && (
         <p role="status" className="mt-2 rounded-lg border border-warn bg-warn-soft px-4 py-2 text-sm text-ink-2">
-          날짜순 정렬은 지금 준비 중이라 <strong className="text-ink">{resultSortLabel("relevance", usesSimilarity)}</strong>으로
+          날짜순 정렬은 지금 준비 중이라 <strong className="text-ink">{RESULT_SORT_LABEL.relevance}</strong>으로
           보여드리고 있습니다. 결과 건수와 내용은 그대로입니다.
         </p>
       )}
